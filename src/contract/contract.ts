@@ -14,11 +14,31 @@ export interface FireDescriptor {
   readonly params?: ObjectSchema;
 }
 
+/** Fire descriptor that carries concrete typed params (preserves field types). */
+export interface FireWithParamsDescriptor<P extends ObjectSchema = ObjectSchema>
+  extends FireDescriptor {
+  readonly params: P;
+}
+
 export interface QueryDescriptor {
   readonly kind: 'query';
   readonly params?: ObjectSchema;
   readonly result: AnySchema;
   readonly timeoutMs?: number | null;
+}
+
+/** Query descriptor that carries a concrete typed result but no params. */
+export interface QueryTypedDescriptor<R extends AnySchema = AnySchema> extends QueryDescriptor {
+  readonly result: R;
+}
+
+/** Query descriptor that carries concrete typed params and result (preserves field types). */
+export interface QueryWithParamsDescriptor<
+  P extends ObjectSchema = ObjectSchema,
+  R extends AnySchema = AnySchema,
+> extends QueryDescriptor {
+  readonly params: P;
+  readonly result: R;
 }
 
 export interface QuerySyncDescriptor {
@@ -27,6 +47,24 @@ export interface QuerySyncDescriptor {
   readonly result: AnySchema;
 }
 
+/** QuerySync descriptor that carries a concrete typed result but no params. */
+export interface QuerySyncTypedDescriptor<R extends AnySchema = AnySchema>
+  extends QuerySyncDescriptor {
+  readonly result: R;
+}
+
+/** QuerySync descriptor that carries concrete typed params and result (preserves field types). */
+export interface QuerySyncWithParamsDescriptor<
+  P extends ObjectSchema = ObjectSchema,
+  R extends AnySchema = AnySchema,
+> extends QuerySyncDescriptor {
+  readonly params: P;
+  readonly result: R;
+}
+
+// FireWithParamsDescriptor, QueryWithParamsDescriptor, QuerySyncWithParamsDescriptor
+// are all structural subtypes of their base interfaces, so they are already included
+// in the union via structural subtyping — no need to add them explicitly.
 export type MethodDescriptor = FireDescriptor | QueryDescriptor | QuerySyncDescriptor;
 
 // ---- stream descriptor ----------------------------------------------------
@@ -39,12 +77,31 @@ export interface StreamDescriptor {
   readonly sticky?: boolean;
 }
 
+/** Stream descriptor with concrete typed value and no params (most common — preserves V through Infer). */
+export interface StreamTypedDescriptor<V extends AnySchema = AnySchema> extends StreamDescriptor {
+  readonly value: V;
+}
+
+/** Stream descriptor with concrete typed value AND params. */
+export interface StreamWithParamsDescriptor<
+  V extends AnySchema = AnySchema,
+  P extends ObjectSchema = ObjectSchema,
+> extends StreamDescriptor {
+  readonly value: V;
+  readonly params: P; // required
+}
+
 // ---- state descriptor -----------------------------------------------------
 
 export interface StateDescriptor {
   readonly kind: 'state';
   readonly value: AnySchema;
   readonly initial: unknown;
+}
+
+/** State descriptor with concrete typed value (preserves value type through Infer). */
+export interface StateTypedDescriptor<V extends AnySchema = AnySchema> extends StateDescriptor {
+  readonly value: V;
 }
 
 // ---- contract descriptor --------------------------------------------------
@@ -71,26 +128,47 @@ export interface BridgeStreamSource<T> {
 
 // ---- ContractShape (type-level) ------------------------------------------
 
-type MethodShape<D extends MethodDescriptor> = D extends FireDescriptor
-  ? D['params'] extends ObjectSchema
-    ? (params: Infer<D['params']>) => void
-    : () => void
-  : D extends QueryDescriptor
-    ? D['params'] extends ObjectSchema
-      ? (
-          params: Infer<D['params']>,
-          opts?: { timeoutMs?: number | null; signal?: AbortSignal },
-        ) => Promise<Infer<D['result']>>
-      : (opts?: { timeoutMs?: number | null; signal?: AbortSignal }) => Promise<Infer<D['result']>>
-    : D extends QuerySyncDescriptor
-      ? D['params'] extends ObjectSchema
-        ? (params: Infer<D['params']>) => Infer<D['result']>
-        : () => Infer<D['result']>
-      : never;
+// MethodShape: maps a MethodDescriptor to its TypeScript call signature.
+// Uses named typed sub-interfaces for narrowing to preserve concrete field types
+// and avoid TS2589 "Type instantiation is excessively deep" from Infer<AnySchema> evaluation.
+// Evaluation order: most specific sub-interface first (WithParams before Typed before base).
+type MethodShape<D extends MethodDescriptor> =
+  // Fire
+  D extends FireWithParamsDescriptor<infer P>
+    ? (params: Infer<P>) => void
+    : D extends FireDescriptor
+      ? () => void
+      : // Query (with params)
+        D extends QueryWithParamsDescriptor<infer P, infer R>
+        ? (
+            params: Infer<P>,
+            opts?: { timeoutMs?: number | null; signal?: AbortSignal },
+          ) => Promise<Infer<R>>
+        : // Query (no params, typed result)
+          D extends QueryTypedDescriptor<infer R>
+          ? (opts?: { timeoutMs?: number | null; signal?: AbortSignal }) => Promise<Infer<R>>
+          : // Query (base — fallback, result type unknown)
+            D extends QueryDescriptor
+            ? (opts?: { timeoutMs?: number | null; signal?: AbortSignal }) => Promise<unknown>
+            : // QuerySync (with params)
+              D extends QuerySyncWithParamsDescriptor<infer P, infer R>
+              ? (params: Infer<P>) => Infer<R>
+              : // QuerySync (no params, typed result)
+                D extends QuerySyncTypedDescriptor<infer R>
+                ? () => Infer<R>
+                : // QuerySync (base — fallback)
+                  D extends QuerySyncDescriptor
+                  ? () => unknown
+                  : never;
 
-type StreamShape<D extends StreamDescriptor> = D['params'] extends ObjectSchema
-  ? (params: Infer<D['params']>) => BridgeStreamSource<Infer<D['value']>>
-  : () => BridgeStreamSource<Infer<D['value']>>;
+// StreamShape uses named sub-interfaces to infer concrete V/P, avoiding Infer<AnySchema>
+// (which distributes across 12 union branches and causes TS2589 instantiation depth errors).
+type StreamShape<D extends StreamDescriptor> =
+  D extends StreamWithParamsDescriptor<infer V, infer P>
+    ? (params: Infer<P>) => BridgeStreamSource<Infer<V>>
+    : D extends StreamTypedDescriptor<infer V>
+      ? () => BridgeStreamSource<Infer<V>>
+      : () => BridgeStreamSource<unknown>;
 
 // ---- ContractShape, type utilities ----------------------------------------
 
@@ -121,7 +199,9 @@ export type StateValue<C, K extends string> =
       : never
     : never;
 
-// Internal: derive TShape from contract shape definition
+// Internal: derive TShape from contract shape definition.
+// Uses concrete typed sub-interfaces (WithParams / Typed) to avoid Infer<AnySchema>
+// recursion that causes TS2589.
 type ContractTShape<
   TMethods extends Record<string, MethodDescriptor>,
   TStreams extends Record<string, StreamDescriptor>,
@@ -131,7 +211,9 @@ type ContractTShape<
 } & {
   [S in keyof TStreams]: StreamShape<TStreams[S]>;
 } & {
-  state: { [K in keyof TState]: Infer<TState[K]['value']> };
+  state: {
+    [K in keyof TState]: TState[K] extends StateTypedDescriptor<infer V> ? Infer<V> : unknown;
+  };
 };
 
 // ---- BridgeContract -------------------------------------------------------
@@ -180,9 +262,9 @@ function validateContractId(id: string): void {
  * @throws (via t.union) if any union variant declares its discriminant key.
  */
 export function defineContract<
-  TMethods extends Record<string, MethodDescriptor>,
-  TStreams extends Record<string, StreamDescriptor>,
-  TState extends Record<string, StateDescriptor>,
+  TMethods extends Record<string, MethodDescriptor> = Record<never, MethodDescriptor>,
+  TStreams extends Record<string, StreamDescriptor> = Record<never, StreamDescriptor>,
+  TState extends Record<string, StateDescriptor> = Record<never, StateDescriptor>,
 >(
   id: string,
   shape: {
@@ -235,18 +317,18 @@ export function defineContract<
 
 /** Fire-and-forget method: no return value. Failures are counted internally. */
 function fire(): FireDescriptor;
-function fire(params: ObjectSchema): FireDescriptor;
+function fire<P extends ObjectSchema>(params: P): FireWithParamsDescriptor<P>;
 function fire(params?: ObjectSchema): FireDescriptor {
   return params ? { kind: 'fire', params } : { kind: 'fire' };
 }
 
 /** Async query. Single-arg overload: result only. Two/three-arg: params + result + opts. */
-function query(result: AnySchema): QueryDescriptor;
-function query(
-  params: ObjectSchema,
-  result: AnySchema,
+function query<R extends AnySchema>(result: R): QueryTypedDescriptor<R>;
+function query<P extends ObjectSchema, R extends AnySchema>(
+  params: P,
+  result: R,
   opts?: { timeoutMs?: number | null },
-): QueryDescriptor;
+): QueryWithParamsDescriptor<P, R>;
 function query(
   paramsOrResult: AnySchema,
   resultArg?: AnySchema,
@@ -268,8 +350,11 @@ function query(
 }
 
 /** Synchronous query. Only valid for native-provided contracts. */
-function querySync(result: AnySchema): QuerySyncDescriptor;
-function querySync(params: ObjectSchema, result: AnySchema): QuerySyncDescriptor;
+function querySync<R extends AnySchema>(result: R): QuerySyncTypedDescriptor<R>;
+function querySync<P extends ObjectSchema, R extends AnySchema>(
+  params: P,
+  result: R,
+): QuerySyncWithParamsDescriptor<P, R>;
 function querySync(paramsOrResult: AnySchema, resultArg?: AnySchema): QuerySyncDescriptor {
   if (resultArg === undefined) {
     return { kind: 'querySync', result: paramsOrResult };
@@ -278,6 +363,14 @@ function querySync(paramsOrResult: AnySchema, resultArg?: AnySchema): QuerySyncD
 }
 
 /** Stream of typed values. Lossless by default (buffered). */
+function stream<V extends AnySchema>(
+  value: V,
+  opts?: { latestOnly?: boolean; sticky?: boolean },
+): StreamTypedDescriptor<V>;
+function stream<V extends AnySchema, P extends ObjectSchema>(
+  value: V,
+  opts: { params: P; latestOnly?: boolean; sticky?: boolean },
+): StreamWithParamsDescriptor<V, P>;
 function stream(
   value: AnySchema,
   opts?: { params?: ObjectSchema; latestOnly?: boolean; sticky?: boolean },
@@ -295,7 +388,7 @@ function stream(
  * Observable state. Initial value is REQUIRED and must validate against the schema.
  * Validation happens at defineContract time.
  */
-function state(value: AnySchema, initial: unknown): StateDescriptor {
+function state<V extends AnySchema>(value: V, initial: unknown): StateTypedDescriptor<V> {
   return { kind: 'state', value, initial };
 }
 

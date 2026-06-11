@@ -26,6 +26,9 @@ export class StateMirror<T> {
   private _subscribers = new Set<ChangeCallback<T>>();
   private _obsId: string | null = null;
   private _transport: BridgeTransport | null = null;
+  // Cached snapshot — same object reference until value or status changes.
+  // Required by React's useSyncExternalStore which compares by Object.is.
+  private _snapshot: MirrorValue<T>;
 
   constructor(
     private readonly _contractId: string,
@@ -34,10 +37,16 @@ export class StateMirror<T> {
     initial: T,
   ) {
     this._value = initial;
+    this._snapshot = { value: this._value, status: this._status };
   }
 
   get(): MirrorValue<T> {
-    return { value: this._value, status: this._status };
+    return this._snapshot;
+  }
+
+  /** Invalidate cached snapshot after any internal state change. */
+  private _updateSnapshot(): void {
+    this._snapshot = { value: this._value, status: this._status };
   }
 
   subscribe(cb: ChangeCallback<T>): () => void {
@@ -59,6 +68,7 @@ export class StateMirror<T> {
   hydrate(value: T): void {
     this._value = value;
     this._status = 'available';
+    this._updateSnapshot();
     this._notify();
   }
 
@@ -82,6 +92,7 @@ export class StateMirror<T> {
     }
     this._transport = null;
     this._status = 'unprovided';
+    this._updateSnapshot();
     this._notify();
   }
 
@@ -103,14 +114,14 @@ export class StateMirror<T> {
         this._value = raw as T;
         this._status = 'available';
       }
+      this._updateSnapshot();
       this._notify();
     });
   }
 
   private _notify(): void {
-    const snapshot = this.get();
     for (const cb of this._subscribers) {
-      cb(snapshot);
+      cb(this._snapshot);
     }
   }
 }
