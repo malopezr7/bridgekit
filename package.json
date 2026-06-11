@@ -82,6 +82,7 @@
     "pub:next": "pnpm publish --no-git-checks --access public --tag next",
     "pub:release": "pnpm publish --access public",
     "test": "pnpm test:web && pnpm test:native",
+    "nitrogen": "nitrogen && node scripts/patch-nitrogen-namespaces.js",
     "test:native": "jest --config ./jest.config.cjs --selectProjects native --passWithNoTests",
     "test:web": "jest --config ./jest.config.cjs --selectProjects web --passWithNoTests"
   },
