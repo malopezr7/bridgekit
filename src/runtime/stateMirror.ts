@@ -1,11 +1,16 @@
 // ---------------------------------------------------------------------------
 // StateMirror — per (contract, key, scope) local mirror of provider state.
 // Seeded from descriptor initial; kept fresh by a single transport.stateObserve.
+//
+// LocalStateMirror — mirrors state from the JS registry (local-first path).
+// Subscribes to Registry.subscribeState instead of transport.stateObserve.
+// Transport methods are no-ops (local state never crosses to native).
 // ---------------------------------------------------------------------------
 
 import type { BridgeContract } from '../contract/contract';
 import type { BridgeScope } from '../contract/protocol';
 import { nextCorrelationId } from './correlationId';
+import type { Registry } from './registry';
 import { serializeScope } from './registry';
 import type { BridgeTransport } from './transport';
 
@@ -118,6 +123,87 @@ export class StateMirror<T> {
       this._notify();
     });
   }
+
+  private _notify(): void {
+    for (const cb of this._subscribers) {
+      cb(this._snapshot);
+    }
+  }
+}
+
+// ---- LocalStateMirror -------------------------------------------------------
+
+/**
+ * State mirror backed by the JS Registry (local-first path).
+ * Used when a contract is locally provided — reads from Registry.getState /
+ * Registry.subscribeState instead of transport.stateObserve.
+ *
+ * Transport attach/detach methods are no-ops: local state never crosses to native.
+ */
+export class LocalStateMirror<T> {
+  private _value: T;
+  private _status: MirrorStatus = 'available';
+  private _subscribers = new Set<ChangeCallback<T>>();
+  private _snapshot: MirrorValue<T>;
+  private _unsub: (() => void) | null = null;
+
+  constructor(
+    private readonly _registry: Registry,
+    private readonly _contractId: string,
+    private readonly _key: string,
+    private readonly _scope: BridgeScope,
+    initial: T,
+  ) {
+    // Seed from live registry state (may differ from descriptor initial if already set)
+    const live = _registry.getState(_contractId, _scope, _key);
+    this._value = live !== undefined ? (live as T) : initial;
+    this._snapshot = { value: this._value, status: this._status };
+  }
+
+  get(): MirrorValue<T> {
+    return this._snapshot;
+  }
+
+  private _updateSnapshot(): void {
+    this._snapshot = { value: this._value, status: this._status };
+  }
+
+  subscribe(cb: ChangeCallback<T>): () => void {
+    this._subscribers.add(cb);
+    if (this._subscribers.size === 1 && this._unsub === null) {
+      this._unsub = this._registry.subscribeState(
+        this._contractId,
+        this._scope,
+        this._key,
+        (raw) => {
+          if (raw === undefined) {
+            this._status = 'unprovided';
+          } else {
+            this._value = raw as T;
+            this._status = 'available';
+          }
+          this._updateSnapshot();
+          this._notify();
+        },
+      );
+    }
+    return () => {
+      this._subscribers.delete(cb);
+      if (this._subscribers.size === 0 && this._unsub !== null) {
+        this._unsub();
+        this._unsub = null;
+      }
+    };
+  }
+
+  /** No-op: local mirrors don't use transport. */
+  attachTransport(_transport: BridgeTransport): void {}
+
+  /** No-op: local mirrors don't use transport. */
+  detachTransport(): void {}
+
+  /** Not called for local mirrors (snapshot hydration is native-only). */
+  hydrate(_value: T): void {}
 
   private _notify(): void {
     for (const cb of this._subscribers) {

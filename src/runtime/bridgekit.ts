@@ -11,10 +11,16 @@ import { createBridgeError } from '../contract/protocol';
 import { nextCorrelationId } from './correlationId';
 import { diagnostics } from './diagnostics';
 import { Dispatcher } from './dispatcher';
+import {
+  invokeLocalAsync,
+  invokeLocalFire,
+  invokeLocalSync,
+  openLocalStream,
+} from './localInvoker';
 import type { Binding } from './registry';
 import { GLOBAL_SCOPE, Registry } from './registry';
 import type { StateMirror } from './stateMirror';
-import { MirrorRegistry } from './stateMirror';
+import { LocalStateMirror, MirrorRegistry } from './stateMirror';
 import type { BridgeTransport } from './transport';
 
 // ---- helpers ---------------------------------------------------------------
@@ -174,6 +180,13 @@ export class BridgeKitJs {
         if (methodDesc) {
           if (methodDesc.kind === 'fire') {
             return (params?: unknown) => {
+              // --- LOCAL-FIRST: check registry before transport ---
+              const localEntry = this.registry.resolve(desc.id, scope);
+              if (localEntry) {
+                invokeLocalFire(localEntry.binding.impl, prop, desc.id, params);
+                return;
+              }
+              // --- FALL-THROUGH: transport path ---
               const env = {
                 op: 'invoke' as const,
                 contractId: desc.id,
@@ -201,6 +214,12 @@ export class BridgeKitJs {
 
           if (methodDesc.kind === 'querySync') {
             return (params?: unknown, _opts?: BridgeCallOpts) => {
+              // --- LOCAL-FIRST: check registry before transport ---
+              const localEntry = this.registry.resolve(desc.id, scope);
+              if (localEntry) {
+                return invokeLocalSync(localEntry.binding.impl, prop, desc.id, params);
+              }
+              // --- FALL-THROUGH: transport path ---
               const env = {
                 op: 'invokeSync' as const,
                 contractId: desc.id,
@@ -278,6 +297,22 @@ export class BridgeKitJs {
               callOpts = args[0] as BridgeCallOpts | undefined;
             }
 
+            // --- LOCAL-FIRST: check registry before transport ---
+            const localEntry = this.registry.resolve(desc.id, scope);
+            if (localEntry) {
+              const timeoutMsLocal =
+                callOpts?.timeoutMs !== undefined
+                  ? callOpts.timeoutMs
+                  : 'timeoutMs' in methodDesc
+                    ? methodDesc.timeoutMs
+                    : undefined;
+              return invokeLocalAsync(localEntry.binding.impl, prop, desc.id, params, {
+                timeoutMs: timeoutMsLocal,
+                signal: callOpts?.signal,
+              });
+            }
+
+            // --- FALL-THROUGH: transport path ---
             const env = {
               op: 'invoke' as const,
               contractId: desc.id,
@@ -387,6 +422,13 @@ export class BridgeKitJs {
         const streamDesc = desc.streams[prop];
         if (streamDesc) {
           return (params?: unknown): BridgeStreamSource<unknown> => {
+            // --- LOCAL-FIRST: check registry before transport ---
+            const localEntry = this.registry.resolve(desc.id, scope);
+            if (localEntry) {
+              return openLocalStream(localEntry.binding.impl, prop, desc.id, params);
+            }
+
+            // --- FALL-THROUGH: transport path ---
             const env = {
               op: 'streamOpen' as const,
               contractId: desc.id,
@@ -477,18 +519,32 @@ export class BridgeKitJs {
 
   /**
    * Get a state mirror for a contract key.
+   *
+   * Resolution order:
+   *   1. If a JS-local provider is registered for this (contractId, scope),
+   *      return a LocalStateMirror backed by the Registry state store.
+   *      Transport is NEVER consulted for local-provided state.
+   *   2. Otherwise, return a transport-backed StateMirror (native path, unchanged).
    */
   state(
     contract: BridgeContract<unknown>,
     key: string,
     scopeOverride?: BridgeScope,
-  ): StateMirror<unknown> {
+  ): StateMirror<unknown> | LocalStateMirror<unknown> {
     this._contracts.set(contract.descriptor.id, contract as BridgeContract<unknown>);
     const stateDesc = contract.descriptor.state[key as string];
     // Use 'initial' in check to distinguish null (valid initial) from missing descriptor
     const initial =
       stateDesc !== undefined && 'initial' in stateDesc ? stateDesc.initial : undefined;
     const scope = scopeOverride ?? _ambientScope;
+
+    // --- LOCAL-FIRST: check registry before transport ---
+    const localEntry = this.registry.resolve(contract.descriptor.id, scope);
+    if (localEntry) {
+      return new LocalStateMirror(this.registry, contract.descriptor.id, key, scope, initial);
+    }
+
+    // --- FALL-THROUGH: transport path ---
     const mirror = this._mirrors.getOrCreate(
       contract as BridgeContract<unknown>,
       key as string,

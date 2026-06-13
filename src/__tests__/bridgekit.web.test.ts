@@ -258,11 +258,20 @@ describe('BridgeKitJs proxy (bridge)', () => {
     await expect(promise).rejects.toMatchObject({ code: 'CANCELLED' });
   });
 
-  test('querySync returns BRIDGE_NOT_READY from loopback', () => {
+  test('querySync resolves locally when provider is JS-local (local-first)', () => {
+    // With local-first resolution, querySync on a locally-provided contract returns
+    // the impl value synchronously — BRIDGE_NOT_READY no longer applies here.
     const { bridgekit } = makeTestBridge();
     bridgekit.provide(TestContract, {
       syncRead: () => 42,
     });
+    const proxy = bridgekit.bridge(TestContract);
+    expect((proxy.syncRead as () => number)()).toBe(42);
+  });
+
+  test('querySync falls through to transport (returns BRIDGE_NOT_READY) when NOT locally provided', () => {
+    const { bridgekit } = makeTestBridge();
+    // No provide() — no local binding; transport path used
     const proxy = bridgekit.bridge(TestContract);
     expect(() => (proxy.syncRead as () => number)()).toThrow();
   });
@@ -475,9 +484,11 @@ describe('state mirrors', () => {
     expect(result.ok).toBe(true);
   });
 
-  test('mirror subscribe gets notified on change', async () => {
-    const { bridgekit, transport } = makeTestBridge();
-    bridgekit.provide(TestContract, {});
+  test('mirror subscribe gets notified on change (local-first: via binding.setState)', async () => {
+    // With local-first resolution, bk.state() returns a LocalStateMirror backed by
+    // the Registry. State updates must go through binding.setState, not transport.notifyStateChange.
+    const { bridgekit } = makeTestBridge();
+    const binding = bridgekit.provide(TestContract, {});
 
     const mirror = bridgekit.state(
       TestContract as import('../contract/contract').BridgeContract<unknown>,
@@ -488,7 +499,7 @@ describe('state mirrors', () => {
 
     await new Promise((r) => setTimeout(r, 10));
 
-    transport.notifyStateChange(TestContract.descriptor.id, GLOBAL_SCOPE, 'label', 'updated');
+    binding.setState('label', 'updated');
     await new Promise((r) => setTimeout(r, 10));
 
     unsub();

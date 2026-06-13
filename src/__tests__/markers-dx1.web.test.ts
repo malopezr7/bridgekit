@@ -9,7 +9,7 @@
 
 import { describe, expect, test } from '@jest/globals';
 import { defineContract, t } from '../contract/contract';
-import { Async, Void, State, Stream, Sync } from '../contract/markers';
+import { Async, State, Stream, Sync, Void } from '../contract/markers';
 import { GLOBAL_SCOPE, streamSource } from '../runtime/registry';
 import { createTestBridge } from '../testing/index';
 
@@ -481,9 +481,14 @@ describe('Marker contract: state (State)', () => {
     expect(mirror.get().value).toBe('start');
   });
 
-  test('state update propagates to mirror', async () => {
-    const { bridgekit, transport } = createTestBridge();
-    bridgekit.provide(MarkerContract as import('../contract/contract').BridgeContract<unknown>, {});
+  test('state update propagates to mirror (local-first: via binding.setState)', async () => {
+    // With local-first resolution, bk.state() returns a LocalStateMirror backed by
+    // the JS Registry. Use binding.setState (not transport.notifyStateChange) to update.
+    const { bridgekit } = createTestBridge();
+    const binding = bridgekit.provide(
+      MarkerContract as import('../contract/contract').BridgeContract<unknown>,
+      {},
+    );
     const mirror = bridgekit.state(
       MarkerContract as import('../contract/contract').BridgeContract<unknown>,
       'score',
@@ -492,7 +497,7 @@ describe('Marker contract: state (State)', () => {
     const unsub = mirror.subscribe((mv) => values.push(mv.value));
     await new Promise((r) => setTimeout(r, 10));
 
-    transport.notifyStateChange('marker.test', GLOBAL_SCOPE, 'score', 99);
+    binding.setState('score', 99);
     await new Promise((r) => setTimeout(r, 10));
     unsub();
 
@@ -538,13 +543,38 @@ describe('Universal sanitize: encode without schema', () => {
 });
 
 // ---- INCOMPATIBLE_CONTRACT guard (marker path) ----------------------------
+// This guard applies to the TRANSPORT path (native provider returns no encoded value,
+// indicating a codegen/codec mismatch). For LOCAL-FIRST, a JS impl returning undefined
+// is a deliberate choice by the implementor — no guard is applied.
+
+/** Stub transport that returns ok:true with no value (simulates native encoder mismatch). */
+function makeUndefinedResultTransport(): import('../runtime/transport').BridgeTransport {
+  return {
+    connect: () => ({ epoch: 1, snapshot: [] }),
+    invoke: () => Promise.resolve({ ok: true, value: undefined }),
+    invokeSync: () => ({ ok: true, value: undefined }),
+    openStream: () => 'sid',
+    closeStream: () => {},
+    emitFromJs: () => {},
+    endFromJs: () => {},
+    stateRead: () => ({ ok: true, value: undefined }),
+    stateObserve: () => 'obs',
+    stateUnobserve: () => {},
+    stateWrite: () => ({ ok: true }),
+  };
+}
 
 describe('INCOMPATIBLE_CONTRACT guard: marker query', () => {
-  test('Async query throws INCOMPATIBLE_CONTRACT when result is undefined', async () => {
-    const { bridgekit } = createTestBridge();
-    bridgekit.provide(MarkerContract as import('../contract/contract').BridgeContract<unknown>, {
-      fetchNum: async () => undefined as unknown as number,
-    });
+  test('Async query throws INCOMPATIBLE_CONTRACT when result is undefined (transport/native path)', async () => {
+    // Guard applies to transport path: native provider fails to encode value.
+    // We do NOT provide locally so the transport path is used.
+    const transport = makeUndefinedResultTransport();
+    const { BridgeKitJs } =
+      require('../runtime/bridgekit') as typeof import('../runtime/bridgekit');
+    const bridgekit = new BridgeKitJs(transport);
+    bridgekit.connect();
+
+    // No local provide → transport is used → undefined value triggers guard
     const proxy = bridgekit.bridge(
       MarkerContract as import('../contract/contract').BridgeContract<unknown>,
     );
@@ -556,6 +586,21 @@ describe('INCOMPATIBLE_CONTRACT guard: marker query', () => {
       caughtCode = (e as Record<string, string>).code;
     }
     expect(caughtCode).toBe('INCOMPATIBLE_CONTRACT');
+  });
+
+  test('Local-first: JS impl returning undefined is valid (no INCOMPATIBLE_CONTRACT guard)', async () => {
+    // For locally-provided contracts, undefined is a valid deliberate return value.
+    const { bridgekit } = createTestBridge();
+    bridgekit.provide(MarkerContract as import('../contract/contract').BridgeContract<unknown>, {
+      fetchNum: async () => undefined as unknown as number,
+    });
+    const proxy = bridgekit.bridge(
+      MarkerContract as import('../contract/contract').BridgeContract<unknown>,
+    );
+
+    // Should NOT throw — local impl is trusted
+    const result = await (proxy as Record<string, () => Promise<unknown>>).fetchNum();
+    expect(result).toBeUndefined();
   });
 
   test('Void (fire) does NOT throw INCOMPATIBLE_CONTRACT for undefined result', () => {
