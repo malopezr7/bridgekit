@@ -44,14 +44,14 @@ export type {
   DerivedConsumer,
   MarkerContractInput,
   NoParams,
-  NotifyMarker,
+  VoidMarker,
   ScopeArg,
   StateHandle,
   StateMarkerT,
   StreamMarkerT,
   SyncMarker,
 } from './markers';
-export { Async, Notify, State, Stream, Sync } from './markers';
+export { Async, Void, State, Stream, Sync } from './markers';
 export type {
   BridgeError,
   BridgeErrorCode,

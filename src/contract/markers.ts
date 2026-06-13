@@ -52,7 +52,7 @@ export interface AsyncMarker<P, R> {
   readonly __r?: Phantom<R>;
 }
 
-export interface NotifyMarker<P> {
+export interface VoidMarker<P> {
   readonly kind: 'fire';
   readonly __p?: Phantom<P>;
 }
@@ -74,7 +74,7 @@ export interface StateMarkerT<V> {
 export type AnyMarkerT =
   | SyncMarker<unknown, unknown>
   | AsyncMarker<unknown, unknown>
-  | NotifyMarker<unknown>
+  | VoidMarker<unknown>
   | StreamMarkerT<unknown, unknown>
   | StateMarkerT<unknown>;
 
@@ -106,13 +106,13 @@ export function Async(opts?: { timeoutMs?: number | null }): AsyncMarker<unknown
   return marker as unknown as AsyncMarker<unknown, unknown>;
 }
 
-// ---- Notify (fire) ---------------------------------------------------------
+// ---- Void (fire) ---------------------------------------------------------
 
 /** Fire-and-forget — no params. */
-export function Notify(): NotifyMarker<NoParams>;
+export function Void(): VoidMarker<NoParams>;
 /** Fire-and-forget — with params. */
-export function Notify<P>(): NotifyMarker<P>;
-export function Notify(): NotifyMarker<unknown> {
+export function Void<P>(): VoidMarker<P>;
+export function Void(): VoidMarker<unknown> {
   return { kind: 'fire' };
 }
 
@@ -177,7 +177,7 @@ type MethodSig<M> =
       ? IsNoParams<P> extends true
         ? (opts?: CallOpts) => Promise<R>
         : (params: P, opts?: CallOpts) => Promise<R>
-      : M extends NotifyMarker<infer P>
+      : M extends VoidMarker<infer P>
         ? IsNoParams<P> extends true
           ? () => void
           : (params: P) => void

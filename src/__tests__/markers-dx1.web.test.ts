@@ -9,7 +9,7 @@
 
 import { describe, expect, test } from '@jest/globals';
 import { defineContract, t } from '../contract/contract';
-import { Async, Notify, State, Stream, Sync } from '../contract/markers';
+import { Async, Void, State, Stream, Sync } from '../contract/markers';
 import { GLOBAL_SCOPE, streamSource } from '../runtime/registry';
 import { createTestBridge } from '../testing/index';
 
@@ -44,12 +44,12 @@ type _k4 = Expect<Equal<(typeof _a2)['kind'], 'query'>>;
 const _a3 = Async<string>({ timeoutMs: null });
 type _k5 = Expect<Equal<(typeof _a3)['kind'], 'query'>>;
 
-// Notify<>() — no params
-const _n1 = Notify();
+// Void<>() — no params
+const _n1 = Void();
 type _k6 = Expect<Equal<(typeof _n1)['kind'], 'fire'>>;
 
-// Notify<P>() — with params
-const _n2 = Notify<{ url: string }>();
+// Void<P>() — with params
+const _n2 = Void<{ url: string }>();
 type _k7 = Expect<Equal<(typeof _n2)['kind'], 'fire'>>;
 
 // Stream<V>() — no params
@@ -72,7 +72,7 @@ const useLiaHost = defineContract('lia.host', {
   methods: {
     getLiteral: Sync<{ key: string }, string>(),
     getAppVersion: Sync<string>(),
-    trackEvent: Notify<{ eventName: string; eventParams?: unknown }>(),
+    trackEvent: Void<{ eventName: string; eventParams?: unknown }>(),
     getCount: Async<number>(),
     checkPerm: Async<{ type: string }, string | null>(),
   },
@@ -220,7 +220,7 @@ type PickResult = PickedFile | { error: string };
 const useLiaMedia = defineContract('lia.media', {
   methods: {
     pickMedia: Async<{ source: string }, PickResult>(),
-    refresh: Notify(),
+    refresh: Void(),
   },
   state: {
     lastPick: State<string | null>(null),
@@ -315,8 +315,8 @@ const MarkerContract = defineContract('marker.test', {
     greet: Sync<{ name: string }, string>(),
     fetchNum: Async<number>(),
     fetchWithParam: Async<{ x: number }, string>(),
-    doFire: Notify<{ msg: string }>(),
-    noParamsFire: Notify(),
+    doFire: Void<{ msg: string }>(),
+    noParamsFire: Void(),
   },
   streams: {
     ticks: Stream<number>(),
@@ -391,7 +391,7 @@ describe('Marker contract: async query (Async)', () => {
 
 // ---- Marker contract: fire -------------------------------------------------
 
-describe('Marker contract: fire (Notify)', () => {
+describe('Marker contract: fire (Void)', () => {
   test('doFire does not throw', () => {
     const { bridgekit } = createTestBridge();
     const received: unknown[] = [];
@@ -558,7 +558,7 @@ describe('INCOMPATIBLE_CONTRACT guard: marker query', () => {
     expect(caughtCode).toBe('INCOMPATIBLE_CONTRACT');
   });
 
-  test('Notify (fire) does NOT throw INCOMPATIBLE_CONTRACT for undefined result', () => {
+  test('Void (fire) does NOT throw INCOMPATIBLE_CONTRACT for undefined result', () => {
     const { bridgekit } = createTestBridge();
     bridgekit.provide(MarkerContract as import('../contract/contract').BridgeContract<unknown>, {
       noParamsFire: () => undefined,

@@ -275,7 +275,7 @@ function validateContractId(id: string): void {
  *
  * Accepts EITHER:
  *   (a) Legacy t.* shape — returns a BridgeContract (also callable as ContractHook).
- *   (b) Marker shape (Sync/Async/Notify/Stream/State markers) — returns a ContractHook
+ *   (b) Marker shape (Sync/Async/Void/Stream/State markers) — returns a ContractHook
  *       that also satisfies BridgeContract for runtime/codegen compatibility.
  *
  * @param id - Reverse-DNS-ish contract identifier (e.g. "connect.host").
