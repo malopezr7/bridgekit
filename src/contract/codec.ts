@@ -31,18 +31,22 @@ function isObject(v: unknown): v is Record<string, unknown> {
  * - strips undefined fields from objects
  * - strips function values from objects
  * - recurses into nested objects/arrays
+ *
+ * Also used as the universal schema-less sanitizer for marker contracts
+ * (no schema → deep sanitize all outbound payloads to prevent AnyMap crashes).
+ * Exported as sanitizeAny for use by the runtime.
  */
-function sanitizeJson(value: unknown): unknown {
+export function sanitizeAny(value: unknown): unknown {
   if (value === null || value === undefined) return value;
   if (typeof value === 'function') return undefined;
   if (Array.isArray(value)) {
-    return value.map(sanitizeJson).filter((v) => v !== undefined);
+    return value.map(sanitizeAny).filter((v) => v !== undefined);
   }
   if (isObject(value)) {
     const result: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
       if (v === undefined || typeof v === 'function') continue;
-      const sanitized = sanitizeJson(v);
+      const sanitized = sanitizeAny(v);
       if (sanitized !== undefined) {
         result[k] = sanitized;
       }
@@ -50,6 +54,11 @@ function sanitizeJson(value: unknown): unknown {
     return result;
   }
   return value;
+}
+
+// sanitizeJson reuses sanitizeAny (same algorithm)
+function sanitizeJson(value: unknown): unknown {
+  return sanitizeAny(value);
 }
 
 // ---- encode ---------------------------------------------------------------

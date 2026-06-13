@@ -178,7 +178,7 @@ object ConnectHostContract : BridgeContractDefinition<ConnectHost, ConnectHostCl
                     impl.installEsim(decoded)
                 }
                 "getDeviceInfo" -> {
-                    impl.getDeviceInfo()
+                    ConnectHostCodecs.encodeGetDeviceInfoResult(impl.getDeviceInfo())
                 }
                 "pickMedia" -> {
                     val decoded = ConnectHostCodecs.decodePickMediaParams(payload ?: emptyMap<String, Any?>())
@@ -198,7 +198,7 @@ object ConnectHostContract : BridgeContractDefinition<ConnectHost, ConnectHostCl
             private fun invoke_sync(member: String, payload: Map<String, Any?>?): Any? =
                 when (member) {
                     "getDeviceInfo" -> {
-                        impl.getDeviceInfo()
+                        ConnectHostCodecs.encodeGetDeviceInfoResult(impl.getDeviceInfo())
                     }
                     else -> throw IllegalArgumentException("Unknown sync member: $member")
                 }
@@ -236,7 +236,7 @@ object ConnectHostContract : BridgeContractDefinition<ConnectHost, ConnectHostCl
                 override suspend fun pickMedia(params: PickMediaParams): PickMediaResult? {
                     val result = caller.invoke("pickMedia", ConnectHostCodecs.encodePickMediaParams(params))
                     @Suppress("UNCHECKED_CAST")
-                    return result as? PickMediaResult? ?: throw IllegalStateException("Unexpected null result for pickMedia")
+                    return result as? PickMediaResult
                 }
                 override fun trackEvent(params: TrackEventParams) {
                     caller.invokeSync("trackEvent", ConnectHostCodecs.encodeTrackEventParams(params))

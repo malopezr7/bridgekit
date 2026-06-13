@@ -548,6 +548,126 @@ describe('dual-copy singleton guard', () => {
   });
 });
 
+// ---- INCOMPATIBLE_CONTRACT guard (Bug 2 regression) -----------------------
+//
+// When the native provider encodes an object result but the inbound adapter is
+// missing the encode call, result.value arrives as undefined on the JS side.
+// The proxy must throw INCOMPATIBLE_CONTRACT instead of silently returning undefined.
+
+const ObjectResultContract = defineContract('obj.result.contract', {
+  methods: {
+    getInfo: t.querySync(t.object({ name: t.string() })),
+    getInfoAsync: t.query(t.object({ name: t.string() })),
+    optionalMethod: t.querySync(t.optional(t.string())),
+  },
+});
+
+/** Minimal stub transport that lets tests control invokeSync/invoke results. */
+function makeStubTransport(
+  syncResult: () => ReturnType<import('../runtime/transport').BridgeTransport['invokeSync']>,
+  asyncResult?: () => Promise<ReturnType<import('../runtime/transport').BridgeTransport['invoke']>>,
+): import('../runtime/transport').BridgeTransport {
+  return {
+    connect: () => ({ epoch: 1, snapshot: [] }),
+    invoke: asyncResult ?? (() => Promise.resolve({ ok: true, value: undefined })),
+    invokeSync: syncResult,
+    openStream: () => 'sid',
+    closeStream: () => {},
+    emitFromJs: () => {},
+    endFromJs: () => {},
+    stateRead: () => ({ ok: true, value: undefined }),
+    stateObserve: () => 'obs',
+    stateUnobserve: () => {},
+    stateWrite: () => ({ ok: true, value: undefined }),
+  };
+}
+
+describe('INCOMPATIBLE_CONTRACT guard — object result missing from provider', () => {
+  test('querySync: throws INCOMPATIBLE_CONTRACT when result.value is undefined for object result', () => {
+    const transport = makeStubTransport(() => ({ ok: true, value: undefined }));
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    const proxy = bk.bridge(ObjectResultContract);
+
+    let caughtError: unknown;
+    try {
+      (proxy.getInfo as () => unknown)();
+    } catch (e) {
+      caughtError = e;
+    }
+    expect(isBridgeError(caughtError)).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((caughtError as any).code).toBe('INCOMPATIBLE_CONTRACT');
+  });
+
+  test('querySync: INCOMPATIBLE_CONTRACT message includes member name', () => {
+    const transport = makeStubTransport(() => ({ ok: true, value: undefined }));
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    const proxy = bk.bridge(ObjectResultContract);
+
+    let caughtMsg = '';
+    try {
+      (proxy.getInfo as () => unknown)();
+    } catch (e) {
+      caughtMsg = (e as Error).message;
+    }
+    expect(caughtMsg).toContain('getInfo');
+  });
+
+  test('querySync: does NOT throw for t.optional result when value is undefined', () => {
+    const transport = makeStubTransport(() => ({ ok: true, value: undefined }));
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    const proxy = bk.bridge(ObjectResultContract);
+
+    expect(() => (proxy.optionalMethod as () => unknown)()).not.toThrow();
+  });
+
+  test('querySync: does NOT throw when object result is present (plain map)', () => {
+    const transport = makeStubTransport(() => ({ ok: true, value: { name: 'Alice' } }));
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    const proxy = bk.bridge(ObjectResultContract);
+
+    const result = (proxy.getInfo as () => unknown)();
+    expect(result).toEqual({ name: 'Alice' });
+  });
+
+  test('query (async): throws INCOMPATIBLE_CONTRACT when result.value is undefined for object result', async () => {
+    const transport = makeStubTransport(
+      () => ({ ok: true, value: undefined }),
+      () => Promise.resolve({ ok: true, value: undefined }),
+    );
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    const proxy = bk.bridge(ObjectResultContract);
+
+    let caughtError: unknown;
+    try {
+      await (proxy.getInfoAsync as () => Promise<unknown>)();
+    } catch (e) {
+      caughtError = e;
+    }
+    expect(isBridgeError(caughtError)).toBe(true);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((caughtError as any).code).toBe('INCOMPATIBLE_CONTRACT');
+  });
+
+  test('query (async): does NOT throw when object result is present', async () => {
+    const transport = makeStubTransport(
+      () => ({ ok: true, value: undefined }),
+      () => Promise.resolve({ ok: true, value: { name: 'Bob' } }),
+    );
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    const proxy = bk.bridge(ObjectResultContract);
+
+    const result = await (proxy.getInfoAsync as () => Promise<unknown>)();
+    expect(result).toEqual({ name: 'Bob' });
+  });
+});
+
 // ---- mockBridge ------------------------------------------------------------
 
 describe('mockBridge', () => {

@@ -3,8 +3,9 @@
 // Wires transport + dispatcher + registry + mirrors + typed proxy.
 // ---------------------------------------------------------------------------
 
-import { decode, encode } from '../contract/codec';
+import { decode, encode, sanitizeAny } from '../contract/codec';
 import type { BridgeContract, BridgeStreamSource } from '../contract/contract';
+import { isMarkerDescriptor } from '../contract/contract';
 import type { BridgeScope } from '../contract/protocol';
 import { createBridgeError } from '../contract/protocol';
 import { nextCorrelationId } from './correlationId';
@@ -25,6 +26,39 @@ function _isDev(): boolean {
     // ignore ReferenceError
   }
   return process.env.NODE_ENV !== 'production';
+}
+
+/**
+ * Encode method params for transport.
+ * - t.* path: schema-driven encode (field-stripping, coercion).
+ * - Marker path (no params schema): universal deep-sanitize to prevent AnyMap crashes.
+ */
+function _encodePayload(
+  methodDesc: import('../contract/contract').MethodDescriptor,
+  params: unknown,
+): unknown {
+  if (params === undefined) return undefined;
+  if ('params' in methodDesc && methodDesc.params) {
+    return encode(methodDesc.params, params);
+  }
+  // Marker path: no schema → universal sanitize (strips undefined/functions)
+  return sanitizeAny(params);
+}
+
+/**
+ * Encode stream params for transport.
+ * - t.* path: schema-driven encode.
+ * - Marker path: universal deep-sanitize.
+ */
+function _encodeStreamPayload(
+  streamDesc: import('../contract/contract').StreamDescriptor,
+  params: unknown,
+): unknown {
+  if (params === undefined) return undefined;
+  if ('params' in streamDesc && streamDesc.params) {
+    return encode(streamDesc.params, params);
+  }
+  return sanitizeAny(params);
 }
 
 // ---- Ambient scope ---------------------------------------------------------
@@ -145,7 +179,7 @@ export class BridgeKitJs {
                 contractId: desc.id,
                 member: prop,
                 scope,
-                payload: methodDesc.params ? encode(methodDesc.params, params) : undefined,
+                payload: _encodePayload(methodDesc, params),
                 correlationId: nextCorrelationId(),
                 epoch: this._epoch,
               };
@@ -172,7 +206,7 @@ export class BridgeKitJs {
                 contractId: desc.id,
                 member: prop,
                 scope,
-                payload: methodDesc.params ? encode(methodDesc.params, params) : undefined,
+                payload: _encodePayload(methodDesc, params),
                 correlationId: nextCorrelationId(),
                 epoch: this._epoch,
               };
@@ -185,7 +219,30 @@ export class BridgeKitJs {
                 });
               }
               if ('result' in methodDesc && methodDesc.result) {
-                return decode(methodDesc.result, result.value);
+                // Guard: a non-void, non-optional result must carry a value.
+                // undefined here means the provider encoded nothing — likely a
+                // codegen/contract mismatch (e.g. inbound adapter missing encode call).
+                const schema = methodDesc.result;
+                if (
+                  result.value === undefined &&
+                  schema.kind !== 'void' &&
+                  schema.kind !== 'optional'
+                ) {
+                  throw createBridgeError(
+                    'INCOMPATIBLE_CONTRACT',
+                    `[bridgekit] provider returned no value for member '${prop}' (contractId: ${desc.id}) — likely a codegen/contract mismatch`,
+                  );
+                }
+                return decode(schema, result.value);
+              }
+              // Marker path: no schema — guard by kind (querySync always expects a result)
+              if (isMarkerDescriptor(methodDesc as unknown as Record<string, unknown>)) {
+                if (result.value === undefined) {
+                  throw createBridgeError(
+                    'INCOMPATIBLE_CONTRACT',
+                    `[bridgekit] provider returned no value for member '${prop}' (contractId: ${desc.id}) — likely a codegen/contract mismatch`,
+                  );
+                }
               }
               return result.value;
             };
@@ -195,11 +252,28 @@ export class BridgeKitJs {
           return (...args: unknown[]) => {
             // For methods with params: (params, callOpts?) → first arg is params, second is opts
             // For methods without params: (callOpts?) → first arg is opts
+            // Marker path: no params schema — detect by checking if first arg looks like opts
             let params: unknown;
             let callOpts: BridgeCallOpts | undefined;
             if (methodDesc.params) {
               params = args[0];
               callOpts = args[1] as BridgeCallOpts | undefined;
+            } else if (isMarkerDescriptor(methodDesc as unknown as Record<string, unknown>)) {
+              // Marker: distinguish params from opts heuristically.
+              // Opts only has timeoutMs/signal; if first arg is present and not opts-shaped, it's params.
+              const firstArg = args[0];
+              if (
+                firstArg !== undefined &&
+                firstArg !== null &&
+                typeof firstArg === 'object' &&
+                !('timeoutMs' in (firstArg as Record<string, unknown>)) &&
+                !('signal' in (firstArg as Record<string, unknown>))
+              ) {
+                params = firstArg;
+                callOpts = args[1] as BridgeCallOpts | undefined;
+              } else {
+                callOpts = firstArg as BridgeCallOpts | undefined;
+              }
             } else {
               callOpts = args[0] as BridgeCallOpts | undefined;
             }
@@ -209,7 +283,7 @@ export class BridgeKitJs {
               contractId: desc.id,
               member: prop,
               scope,
-              payload: methodDesc.params ? encode(methodDesc.params, params) : undefined,
+              payload: _encodePayload(methodDesc, params),
               correlationId: nextCorrelationId(),
               epoch: this._epoch,
             };
@@ -279,7 +353,30 @@ export class BridgeKitJs {
                 });
               }
               if ('result' in methodDesc && methodDesc.result) {
-                return decode(methodDesc.result, res.value);
+                // Guard: a non-void, non-optional result must carry a value.
+                // undefined here means the provider encoded nothing — likely a
+                // codegen/contract mismatch (e.g. inbound adapter missing encode call).
+                const schema = methodDesc.result;
+                if (
+                  res.value === undefined &&
+                  schema.kind !== 'void' &&
+                  schema.kind !== 'optional'
+                ) {
+                  throw createBridgeError(
+                    'INCOMPATIBLE_CONTRACT',
+                    `[bridgekit] provider returned no value for member '${prop}' (contractId: ${desc.id}) — likely a codegen/contract mismatch`,
+                  );
+                }
+                return decode(schema, res.value);
+              }
+              // Marker path: no schema — guard by kind (query expects a result)
+              if (isMarkerDescriptor(methodDesc as unknown as Record<string, unknown>)) {
+                if (res.value === undefined) {
+                  throw createBridgeError(
+                    'INCOMPATIBLE_CONTRACT',
+                    `[bridgekit] provider returned no value for member '${prop}' (contractId: ${desc.id}) — likely a codegen/contract mismatch`,
+                  );
+                }
               }
               return res.value;
             });
@@ -295,7 +392,7 @@ export class BridgeKitJs {
               contractId: desc.id,
               member: prop,
               scope,
-              payload: streamDesc.params ? encode(streamDesc.params, params) : undefined,
+              payload: _encodeStreamPayload(streamDesc, params),
               correlationId: nextCorrelationId(),
               epoch: this._epoch,
             };
@@ -317,6 +414,7 @@ export class BridgeKitJs {
               streamId = capturedTransport.openStream(
                 env,
                 (value) => {
+                  // t.* path: decode via schema; marker path: pass-through
                   const decoded = streamDesc.value ? decode(streamDesc.value, value) : value;
                   for (const cb of subscribers) cb(decoded);
                 },
@@ -387,7 +485,9 @@ export class BridgeKitJs {
   ): StateMirror<unknown> {
     this._contracts.set(contract.descriptor.id, contract as BridgeContract<unknown>);
     const stateDesc = contract.descriptor.state[key as string];
-    const initial = stateDesc?.initial ?? undefined;
+    // Use 'initial' in check to distinguish null (valid initial) from missing descriptor
+    const initial =
+      stateDesc !== undefined && 'initial' in stateDesc ? stateDesc.initial : undefined;
     const scope = scopeOverride ?? _ambientScope;
     const mirror = this._mirrors.getOrCreate(
       contract as BridgeContract<unknown>,

@@ -69,6 +69,35 @@ class GeneratedFixtureTest {
     }
 
     @Test
+    fun `inbound adapter encodes object result — getDeviceInfo returns map not data class`() = runTest {
+        // Regression for Bug 1: inbound adapter was calling impl.getDeviceInfo() raw
+        // (returning GetDeviceInfoResult data class) instead of encoding it through the codec.
+        // The bridge can only carry plain maps across the AnyMap boundary; data classes are
+        // incompatible. After the fix the adapter must return Map<String, Any?>.
+        val impl = FakeConnectHostImpl()
+        val adapter = ConnectHostContract.inbound(impl)
+
+        val result = adapter.invoke("getDeviceInfo", null)
+        assertTrue("Expected Map<*, *> but got ${result?.javaClass}", result is Map<*, *>)
+        val map = result as Map<*, *>
+        assertEquals("TestPhone", map["model"])
+        assertEquals("15.0", map["osVersion"])
+    }
+
+    @Test
+    fun `inbound invokeSync encodes object result — getDeviceInfo returns map not data class`() {
+        // Regression for Bug 1: the invoke_sync secondary path had the same missing-encode bug.
+        val impl = FakeConnectHostImpl()
+        val adapter = ConnectHostContract.inbound(impl)
+
+        val result = adapter.invokeSync("getDeviceInfo", null)
+        assertTrue("Expected Map<*, *> but got ${result?.javaClass}", result is Map<*, *>)
+        val map = result as Map<*, *>
+        assertEquals("TestPhone", map["model"])
+        assertEquals("15.0", map["osVersion"])
+    }
+
+    @Test
     fun `inbound adapter returns stateInitials for connectivity`() {
         val impl = FakeConnectHostImpl()
         val adapter = ConnectHostContract.inbound(impl)

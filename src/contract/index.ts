@@ -7,7 +7,7 @@
 
 export type { ValidationResult } from './codec';
 // Codec (encode/decode/validate)
-export { decode, encode, validate } from './codec';
+export { decode, encode, sanitizeAny, validate } from './codec';
 
 // Descriptor types
 export type {
@@ -30,9 +30,28 @@ export type {
 // Re-export the enriched `t` (schema DSL + descriptor builders) from contract.ts.
 // contract.ts augments the base `t` with fire/query/querySync/stream/state.
 // Contract definition
-export { defineContract, t } from './contract';
+export { defineContract, isMarkerDescriptor, t } from './contract';
 // Hash utilities (used by CLI codegen and skew diffing)
 export { memberHashes, stableHash } from './hash';
+// Marker API (DX-1)
+export type {
+  AnyMarkerT,
+  AsyncMarker,
+  BridgeStreamSource as MarkerStreamSource,
+  CallOpts,
+  ConsumerOf,
+  ContractHook,
+  DerivedConsumer,
+  MarkerContractInput,
+  NoParams,
+  NotifyMarker,
+  ScopeArg,
+  StateHandle,
+  StateMarkerT,
+  StreamMarkerT,
+  SyncMarker,
+} from './markers';
+export { Async, Notify, State, Stream, Sync } from './markers';
 export type {
   BridgeError,
   BridgeErrorCode,

@@ -4,6 +4,14 @@
 
 import { validate } from './codec';
 import { stableHash } from './hash';
+import type {
+  AnyMarkerT,
+  ContractHook,
+  DerivedConsumer,
+  MarkerContractInput,
+  StateMarkerT,
+  StreamMarkerT,
+} from './markers';
 import type { AnySchema, Infer, ObjectSchema } from './schema';
 import { t } from './schema';
 
@@ -232,6 +240,17 @@ export interface ContractShape_Input {
   state?: Record<string, StateDescriptor>;
 }
 
+// ---- Marker descriptor detection ------------------------------------------
+
+/**
+ * Returns true when a member descriptor is a marker (has `kind` but no
+ * `result`/`value`/`params` schema fields that are AnySchema nodes).
+ * Used to branch between the t.* codec path and the schema-less marker path.
+ */
+export function isMarkerDescriptor(d: Record<string, unknown>): boolean {
+  return !('result' in d) && !('value' in d);
+}
+
 // ---- Contract ID validation -----------------------------------------------
 
 const CONTRACT_ID_REGEX = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/;
@@ -252,15 +271,27 @@ function validateContractId(id: string): void {
 // ---- defineContract -------------------------------------------------------
 
 /**
- * Define a typed contract. Returns a frozen BridgeContract token.
+ * Define a typed contract.
+ *
+ * Accepts EITHER:
+ *   (a) Legacy t.* shape — returns a BridgeContract (also callable as ContractHook).
+ *   (b) Marker shape (Sync/Async/Notify/Stream/State markers) — returns a ContractHook
+ *       that also satisfies BridgeContract for runtime/codegen compatibility.
  *
  * @param id - Reverse-DNS-ish contract identifier (e.g. "connect.host").
  *   Must match `/^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/`
- * @param shape - Methods, streams, and state descriptors.
+ * @param shape - Methods, streams, and state descriptors (t.* or markers).
  * @throws if id is invalid.
- * @throws if any state entry has an initial value that does not match its schema.
+ * @throws if any t.* state entry has an initial value that does not match its schema.
  * @throws (via t.union) if any union variant declares its discriminant key.
  */
+// Overload A: marker-style input → ContractHook (also BridgeContract-compatible)
+export function defineContract<const T extends MarkerContractInput>(
+  id: string,
+  shape: T,
+): ContractHook<T> & BridgeContract<DerivedConsumer<T>>;
+
+// Overload B: legacy t.* style input → BridgeContract (also callable as ContractHook)
 export function defineContract<
   TMethods extends Record<string, MethodDescriptor> = Record<never, MethodDescriptor>,
   TStreams extends Record<string, StreamDescriptor> = Record<never, StreamDescriptor>,
@@ -272,12 +303,35 @@ export function defineContract<
     streams?: TStreams;
     state?: TState;
   },
-): BridgeContract<ContractTShape<TMethods, TStreams, TState>> {
+): BridgeContract<ContractTShape<TMethods, TStreams, TState>>;
+
+// Implementation
+export function defineContract(
+  id: string,
+  shape: {
+    methods?: Record<string, MethodDescriptor | AnyMarkerT>;
+    streams?: Record<string, StreamDescriptor | StreamMarkerT<unknown, unknown>>;
+    state?: Record<string, StateDescriptor | StateMarkerT<unknown>>;
+  },
+): BridgeContract<unknown> {
   validateContractId(id);
 
-  const methods = (shape.methods ?? {}) as Record<string, MethodDescriptor>;
-  const streams = (shape.streams ?? {}) as Record<string, StreamDescriptor>;
-  const state = (shape.state ?? {}) as Record<string, StateDescriptor>;
+  const rawMethods = shape.methods ?? {};
+  const rawStreams = shape.streams ?? {};
+  const rawState = shape.state ?? {};
+
+  // Detect if this is a marker-style contract or t.* style.
+  // Marker descriptors have `kind` but no `result`/`value` schema fields.
+  const isMarkerStyle = _detectMarkerStyle(rawMethods, rawStreams, rawState);
+
+  if (isMarkerStyle) {
+    return _defineMarkerContract(id, rawMethods, rawStreams, rawState);
+  }
+
+  // ---- Legacy t.* path (unchanged) ----------------------------------------
+  const methods = rawMethods as Record<string, MethodDescriptor>;
+  const streams = rawStreams as Record<string, StreamDescriptor>;
+  const state = rawState as Record<string, StateDescriptor>;
 
   // Validate initial values against their schemas
   for (const [key, stateDescriptor] of Object.entries(state)) {
@@ -302,12 +356,182 @@ export function defineContract<
 
   const hash = stableHash(descriptor);
 
-  const contract: BridgeContract<ContractTShape<TMethods, TStreams, TState>> = Object.freeze({
-    descriptor,
-    hash,
+  // Legacy contracts also get the ContractHook wrapper for forward compat
+  const legacyContract: BridgeContract<unknown> = { descriptor, hash };
+  return _wrapWithHook(legacyContract);
+}
+
+// ---- _detectMarkerStyle ---------------------------------------------------
+
+function _detectMarkerStyle(
+  methods: Record<string, unknown>,
+  streams: Record<string, unknown>,
+  state: Record<string, unknown>,
+): boolean {
+  // If ANY member has a result/value/params that is an AnySchema node, it's t.* style.
+  // Marker descriptors are plain { kind } objects (+ optional opts).
+  for (const d of Object.values(methods)) {
+    const desc = d as Record<string, unknown>;
+    if ('result' in desc || 'value' in desc) return false;
+    // t.* fire has optional params that is an ObjectSchema node
+    if ('params' in desc && _isSchemaNode(desc.params)) return false;
+  }
+  for (const d of Object.values(streams)) {
+    const desc = d as Record<string, unknown>;
+    if ('value' in desc && _isSchemaNode(desc.value)) return false;
+  }
+  for (const d of Object.values(state)) {
+    const desc = d as Record<string, unknown>;
+    // t.* state has `value` (AnySchema) field; marker state has only `kind` + `initial`
+    if ('value' in desc && _isSchemaNode(desc.value)) return false;
+  }
+  // No schema nodes found → marker style
+  return true;
+}
+
+function _isSchemaNode(v: unknown): boolean {
+  if (v === null || v === undefined || typeof v !== 'object') return false;
+  const obj = v as Record<string, unknown>;
+  // AnySchema nodes always have a `kind` that is a known schema kind string
+  const kind = obj.kind;
+  return typeof kind === 'string' && SCHEMA_KINDS.has(kind);
+}
+
+const SCHEMA_KINDS = new Set([
+  'string',
+  'number',
+  'boolean',
+  'void',
+  'json',
+  'literals',
+  'object',
+  'array',
+  'record',
+  'optional',
+  'nullable',
+  'union',
+]);
+
+// ---- _defineMarkerContract ------------------------------------------------
+
+function _defineMarkerContract(
+  id: string,
+  rawMethods: Record<string, unknown>,
+  rawStreams: Record<string, unknown>,
+  rawState: Record<string, unknown>,
+): BridgeContract<unknown> {
+  // Build a ContractDescriptor from markers.
+  // Marker methods/streams/state have no params/result/value schema fields.
+  // The descriptor carries only `kind` + runtime opts (timeoutMs, latestOnly, etc.).
+  const methods: Record<string, MethodDescriptor> = {};
+  for (const [name, m] of Object.entries(rawMethods)) {
+    const marker = m as Record<string, unknown>;
+    const d: Record<string, unknown> = { kind: marker.kind };
+    // Carry timeoutMs for Async markers
+    if ('timeoutMs' in marker) d.timeoutMs = marker.timeoutMs;
+    methods[name] = d as unknown as MethodDescriptor;
+  }
+
+  const streams: Record<string, StreamDescriptor> = {};
+  for (const [name, s] of Object.entries(rawStreams)) {
+    const marker = s as Record<string, unknown>;
+    const d: Record<string, unknown> = { kind: 'stream' };
+    if (marker.latestOnly !== undefined) d.latestOnly = marker.latestOnly;
+    if (marker.sticky !== undefined) d.sticky = marker.sticky;
+    streams[name] = d as unknown as StreamDescriptor;
+  }
+
+  const state: Record<string, StateDescriptor> = {};
+  for (const [name, s] of Object.entries(rawState)) {
+    const marker = s as Record<string, unknown>;
+    // Marker state: { kind: 'state', initial: V } — no value schema.
+    // We inject a synthetic schema-less state descriptor. The runtime only needs
+    // `initial`; the `value` field is set to a sentinel so the runtime can branch.
+    state[name] = {
+      kind: 'state',
+      // No `value` AnySchema — this is the marker-style sentinel
+      initial: marker.initial,
+    } as StateDescriptor;
+  }
+
+  const descriptor: ContractDescriptor = {
+    $type: 'io.github.malopezr7.bridgekit.contract',
+    descriptorVersion: 1,
+    id,
+    methods,
+    streams,
+    state,
+  };
+
+  const hash = stableHash(descriptor);
+
+  const contract: BridgeContract<unknown> = { descriptor, hash };
+  return _wrapWithHook(contract);
+}
+
+// ---- _wrapWithHook --------------------------------------------------------
+// Wraps a BridgeContract with the ContractHook callable interface.
+// Lazy: does not import runtime at module eval time.
+
+function _wrapWithHook(contract: BridgeContract<unknown>): BridgeContract<unknown> {
+  // Dynamically import buildContractHook to avoid circular at module load time.
+  // This is safe because the import is deferred to first call.
+  let _cachedHook: ReturnType<typeof import('./contractHook')['buildContractHook']> | null = null;
+
+  const getHook = () => {
+    if (_cachedHook) return _cachedHook;
+    const { buildContractHook } = require('./contractHook') as typeof import('./contractHook');
+    _cachedHook = buildContractHook(contract);
+    return _cachedHook;
+  };
+
+  // Create a callable that also carries BridgeContract statics
+  const hook = ((selector?: (c: unknown) => unknown): unknown => {
+    const h = getHook();
+    return selector !== undefined ? (h as Function)(selector) : (h as Function)();
+  }) as unknown as BridgeContract<unknown>;
+
+  // Copy BridgeContract properties onto the callable
+  Object.defineProperty(hook, 'descriptor', {
+    get: () => contract.descriptor,
+    enumerable: true,
+    configurable: false,
+  });
+  Object.defineProperty(hook, 'hash', {
+    get: () => contract.hash,
+    enumerable: true,
+    configurable: false,
+  });
+  Object.defineProperty(hook, '_shape', {
+    value: undefined,
+    enumerable: false,
+    configurable: false,
   });
 
-  return contract;
+  // Delegate all ContractHook statics/methods to the lazy hook
+  for (const prop of [
+    'getState',
+    'scoped',
+    'useProvide',
+    'id',
+    '$descriptor',
+    '$contract',
+  ] as const) {
+    Object.defineProperty(hook, prop, {
+      get: () => {
+        const h = getHook();
+        const val = (h as unknown as Record<string, unknown>)[prop];
+        if (typeof val === 'function') return val.bind(h);
+        return val;
+      },
+      enumerable: prop === 'id' || prop === '$contract',
+      configurable: false,
+    });
+  }
+
+  // Freeze to satisfy the existing contract that defineContract returns a frozen token.
+  // Functions can be frozen; property access still works via getters on the frozen object.
+  return Object.freeze(hook);
 }
 
 // ---- Descriptor builders (attached to t namespace) ------------------------

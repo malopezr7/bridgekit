@@ -3,7 +3,7 @@
 // Routes native→JS ops through codec, NEVER rejects.
 // ---------------------------------------------------------------------------
 
-import { decode, encode } from '../contract/codec';
+import { decode, encode, sanitizeAny } from '../contract/codec';
 import type { BridgeContract, BridgeStreamSource } from '../contract/contract';
 import type { CallEnvelope, ResultEnvelope } from '../contract/protocol';
 import { diagnostics } from './diagnostics';
@@ -98,8 +98,10 @@ export class Dispatcher implements JsDispatcher {
       const streamDesc = contract?.descriptor.streams[env.member];
       let params: unknown = env.payload;
       if (streamDesc?.params) {
+        // t.* path: schema-driven decode
         params = decode(streamDesc.params, env.payload);
       }
+      // Marker path: no params schema → pass-through (value already JSON-shaped)
 
       const source: BridgeStreamSource<unknown> =
         params !== undefined
@@ -124,7 +126,11 @@ export class Dispatcher implements JsDispatcher {
             if (!active) break;
             let encoded: unknown = result.value;
             if (streamDesc?.value) {
+              // t.* path: schema-driven encode
               encoded = encode(streamDesc.value, result.value);
+            } else {
+              // Marker path: no schema → universal sanitize
+              encoded = sanitizeAny(result.value);
             }
             transport.emitFromJs(streamId, encoded);
           }
@@ -183,8 +189,10 @@ export class Dispatcher implements JsDispatcher {
     const stateDesc = contract?.descriptor.state[env.member];
     let value: unknown = env.payload;
     if (stateDesc?.value) {
+      // t.* path: schema-driven decode
       value = decode(stateDesc.value, env.payload);
     }
+    // Marker path: no schema → pass-through (value already JSON-shaped)
     entry.binding.setState(env.member, value);
   }
 
@@ -234,8 +242,10 @@ export class Dispatcher implements JsDispatcher {
     // Decode params
     let params: unknown = env.payload;
     if (methodDesc && 'params' in methodDesc && methodDesc.params) {
+      // t.* path: schema-driven decode
       params = decode(methodDesc.params, env.payload);
     }
+    // Marker path: no params schema → pass-through (value already JSON-shaped)
 
     try {
       diagnostics.incrementCalls();
@@ -247,7 +257,11 @@ export class Dispatcher implements JsDispatcher {
       // Encode result
       let encoded: unknown = raw;
       if (methodDesc && 'result' in methodDesc && methodDesc.result) {
+        // t.* path: schema-driven encode
         encoded = encode(methodDesc.result, raw);
+      } else if (raw !== undefined) {
+        // Marker path: no schema → universal sanitize (strips undefined/functions)
+        encoded = sanitizeAny(raw);
       }
 
       diagnostics.trace({

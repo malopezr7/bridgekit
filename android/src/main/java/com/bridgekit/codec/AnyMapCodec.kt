@@ -11,10 +11,14 @@ import com.margelo.nitro.core.AnyMap
 object AnyMapCodec {
     /**
      * Convert a plain [Map] to [AnyMap] for passing across the Nitro bridge.
-     * Incompatible values (e.g. custom objects) are silently ignored per Nitro semantics.
+     *
+     * The map is always framework-constructed (codec output), so every value must be
+     * AnyMap-compatible (primitives, plain maps, lists). Passing ignoreIncompatible=false
+     * makes any incompatible value throw immediately — an incompatible value here is always
+     * a framework/codegen bug, not a user error, and we want it to surface loudly.
      */
     fun toAnyMap(map: Map<String, Any?>): AnyMap =
-        AnyMap.fromMap(map, true)
+        AnyMap.fromMap(map, false)
 
     /**
      * Convert an [AnyMap] from the Nitro bridge to a plain [Map].
