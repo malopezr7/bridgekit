@@ -137,27 +137,34 @@ export class BridgeKitJs {
     const scope = opts?.scope ?? _ambientScope;
     const binding = this.registry.provide(contract, impl, { scope });
 
-    // Wire setState + close to notify loopback transport of state changes/unprovided
-    const transport = this._transport as import('./loopbackTransport').LoopbackTransport;
-    if (typeof transport.notifyStateChange === 'function') {
-      const wrappedBinding = binding as Binding & { _statePatched: boolean };
-      if (!wrappedBinding._statePatched) {
-        wrappedBinding._statePatched = true;
-        const originalSetState = binding.setState.bind(binding);
-        const originalClose = binding.close.bind(binding);
+    // Wire setState + close to push state changes to the transport (both loopback and Nitro).
+    // pushProviderState is part of the BridgeTransport interface:
+    //   - LoopbackTransport: delegates to notifyStateChange (stateStore + observers)
+    //   - NitroBridgeTransport: calls stateWrite({ v: value }) → Kotlin StateStore.writeFromJs
+    const transport = this._transport;
+    const wrappedBinding = binding as Binding & { _statePatched: boolean };
+    if (!wrappedBinding._statePatched) {
+      wrappedBinding._statePatched = true;
+      const originalSetState = binding.setState.bind(binding);
+      const originalClose = binding.close.bind(binding);
 
-        binding.setState = (key: string, value: unknown) => {
-          originalSetState(key, value);
-          transport.notifyStateChange(contract.descriptor.id, scope, key, value);
-        };
+      binding.setState = (key: string, value: unknown) => {
+        originalSetState(key, value);
+        transport.pushProviderState(contract.descriptor.id, scope, key, value);
+      };
 
-        binding.close = (reason?: 'replacing' | 'final') => {
-          originalClose(reason);
-          // Signal unprovided to observers for all state keys
-          for (const key of Object.keys(contract.descriptor.state)) {
-            transport.notifyStateChange(contract.descriptor.id, scope, key, undefined);
-          }
-        };
+      binding.close = (reason?: 'replacing' | 'final') => {
+        originalClose(reason);
+        // Signal unprovided to observers for all state keys
+        for (const key of Object.keys(contract.descriptor.state)) {
+          transport.pushProviderState(contract.descriptor.id, scope, key, undefined);
+        }
+      };
+
+      // Push initial state values at provide() time so native readers see the seed.
+      for (const [key, stateDesc] of Object.entries(contract.descriptor.state)) {
+        const initial = 'initial' in stateDesc ? stateDesc.initial : undefined;
+        transport.pushProviderState(contract.descriptor.id, scope, key, initial);
       }
     }
 

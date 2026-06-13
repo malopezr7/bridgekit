@@ -109,6 +109,7 @@ function makeSpyTransport(opts?: {
     stateWrite(): ReturnType<BridgeTransport['stateWrite']> {
       return { ok: true };
     },
+    pushProviderState(): void {},
   };
   return t;
 }

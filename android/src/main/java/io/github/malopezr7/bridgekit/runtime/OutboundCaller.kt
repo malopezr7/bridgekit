@@ -31,6 +31,13 @@ interface OutboundCaller {
     fun invokeSync(member: String, payload: Map<String, Any?>?): Any?
 
     /**
+     * Fire-and-forget call into a JS-provided contract method (Void marker).
+     * Dispatches asynchronously off the calling thread; never blocks, never returns a
+     * result. Errors are swallowed (fire-and-forget semantics).
+     */
+    fun fire(member: String, payload: Map<String, Any?>?)
+
+    /**
      * Open a Flow for a JS-provided stream member.
      * Cancellation of the collecting coroutine signals teardown to the JS producer.
      */

@@ -55,4 +55,15 @@ export interface BridgeTransport {
   stateObserve(env: CallEnvelope, onChange: (value: unknown) => void): string;
   stateUnobserve(obsId: string): void;
   stateWrite(env: CallEnvelope): ResultEnvelope;
+  /**
+   * Push a JS-provider state change to the other side.
+   * Called by BridgeKitJs.provide() whenever binding.setState is invoked or
+   * at provide()-time to seed the initial values.
+   *
+   * Loopback: routes through notifyStateChange (observers + stateStore).
+   * Nitro: calls stateWrite with value wrapped in { v } per the wire rule so
+   * the Kotlin Router.stateWrite → StateStore.writeFromJs path fires and any
+   * native stateObserve / OutboundCaller.state() StateFlow emits.
+   */
+  pushProviderState(contractId: string, scope: BridgeScope, key: string, value: unknown): void;
 }

@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.atomic.AtomicLong
@@ -39,6 +40,23 @@ internal class OutboundCallerImpl(
 
     companion object {
         private val streamIdCounter = AtomicLong(0)
+    }
+
+    // Fire-and-forget dispatch scope (off the calling thread, supervised so one
+    // failed fire never cancels the others).
+    private val fireScope =
+        kotlinx.coroutines.CoroutineScope(
+            kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default,
+        )
+
+    override fun fire(member: String, payload: Map<String, Any?>?) {
+        fireScope.launch {
+            try {
+                invoke(member, payload)
+            } catch (_: Throwable) {
+                // fire-and-forget: errors are swallowed
+            }
+        }
     }
 
     override suspend fun invoke(member: String, payload: Map<String, Any?>?): Any? {
@@ -92,11 +110,17 @@ internal class OutboundCallerImpl(
         router.jsStreamEnds[streamId] = endDeferred
 
         return callbackFlow {
-            val callbacks = router.getJsCallbacks()
-            if (callbacks == null) {
-                close(BridgeKitException("BRIDGE_NOT_READY", "No JS dispatcher connected", contractId, member, scope))
-                return@callbackFlow
-            }
+            // Readiness-bounded wait for the JS dispatcher — mirrors invoke()'s awaitDispatcher
+            // so a native stream consumer that starts before JS has provided parks instead of
+            // erroring instantly. On timeout the flow closes with BRIDGE_NOT_READY (the collector
+            // must handle it; it is never thrown uncaught here).
+            val callbacks =
+                try {
+                    awaitDispatcher()
+                } catch (e: Throwable) {
+                    close(e)
+                    return@callbackFlow
+                }
 
             val openEnv = buildEnvelope("streamOpen", member, payload).toMutableMap()
             openEnv["streamId"] = streamId

@@ -321,4 +321,32 @@ export class NitroBridgeTransport implements BridgeTransport {
       };
     }
   }
+
+  // ---- pushProviderState (JS provider → Kotlin StateStore) ----------------
+
+  /**
+   * Push a JS-provider state change to native via stateWrite.
+   * Value is wrapped { v: <value> } per the AnyMap wire rule before crossing.
+   * Kotlin Router.stateWrite → StateStore.writeFromJs(nativeOwns=false)
+   * updates the store and notifies any native stateObserve callbacks and
+   * the OutboundCaller.state() StateFlow so native consumers observe updates.
+   */
+  pushProviderState(
+    contractId: string,
+    scope: import('./transport').BridgeScope,
+    key: string,
+    value: unknown,
+  ): void {
+    const env: CallEnvelope = {
+      op: 'stateWrite',
+      contractId,
+      member: key,
+      scope,
+      // Wrap in { v } per wire rule: AnyMap is map-only, cannot carry bare primitives
+      payload: { v: value },
+      correlationId: '',
+      epoch: this._epoch,
+    };
+    this.stateWrite(env);
+  }
 }

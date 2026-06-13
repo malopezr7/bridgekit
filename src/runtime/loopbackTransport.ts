@@ -222,6 +222,18 @@ export class LoopbackTransport implements BridgeTransport {
     }
   }
 
+  // ---- BridgeTransport.pushProviderState (loopback path) -------------------
+
+  /** BridgeTransport interface: delegates to notifyStateChange for loopback. */
+  pushProviderState(
+    contractId: string,
+    scope: import('../contract/protocol').BridgeScope,
+    key: string,
+    value: unknown,
+  ): void {
+    this.notifyStateChange(contractId, scope, key, value);
+  }
+
   // ---- simulateReconnect ---------------------------------------------------
 
   /**
