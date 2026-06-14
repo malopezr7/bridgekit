@@ -465,6 +465,8 @@ describe('streams via loopback', () => {
       stateUnobserve: () => {},
       stateWrite: () => ({ ok: true, value: undefined }),
       pushProviderState: () => {},
+      announceProvided: () => {},
+      announceUnprovided: () => {},
     };
 
     const bk = new BridgeKitJs(stubTransport);
@@ -519,6 +521,8 @@ describe('streams via loopback', () => {
       stateUnobserve: () => {},
       stateWrite: () => ({ ok: true, value: undefined }),
       pushProviderState: () => {},
+      announceProvided: () => {},
+      announceUnprovided: () => {},
     };
 
     const bk = new BridgeKitJs(stubTransport);
@@ -698,6 +702,8 @@ function makeStubTransport(
     stateUnobserve: () => {},
     stateWrite: () => ({ ok: true, value: undefined }),
     pushProviderState: () => {},
+    announceProvided: () => {},
+    announceUnprovided: () => {},
   };
 }
 

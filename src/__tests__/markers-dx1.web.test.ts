@@ -511,6 +511,8 @@ function makeUndefinedResultTransport(): import('../runtime/transport').BridgeTr
     stateUnobserve: () => {},
     stateWrite: () => ({ ok: true }),
     pushProviderState: () => {},
+    announceProvided: () => {},
+    announceUnprovided: () => {},
   };
 }
 

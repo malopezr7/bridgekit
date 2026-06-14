@@ -356,4 +356,45 @@ export class NitroBridgeTransport implements BridgeTransport {
     };
     this.stateWrite(env);
   }
+
+  // ---- announceProvided / announceUnprovided --------------------------------
+
+  /**
+   * Announce that a JS contract is now provided, state-independently.
+   * Sends {op:'provide'} through the same BridgeState.write Nitro channel.
+   * Kotlin Router.stateWrite branches on op='provide' → markJsProvided + unpark,
+   * without touching the state store. No new Nitro spec method required.
+   */
+  announceProvided(contractId: string, scope: import('./transport').BridgeScope): void {
+    const env: CallEnvelope = {
+      op: 'provide',
+      contractId,
+      member: '',
+      scope,
+      correlationId: '',
+      epoch: this._epoch,
+    };
+    this._getState().write(
+      envelopeToMap(env) as unknown as import('react-native-nitro-modules').AnyMap,
+    );
+  }
+
+  /**
+   * Announce that a JS contract is no longer provided.
+   * Sends {op:'unprovide'} through BridgeState.write.
+   * Kotlin Router.stateWrite branches on op='unprovide' → markJsContractsUnprovided.
+   */
+  announceUnprovided(contractId: string, scope: import('./transport').BridgeScope): void {
+    const env: CallEnvelope = {
+      op: 'unprovide',
+      contractId,
+      member: '',
+      scope,
+      correlationId: '',
+      epoch: this._epoch,
+    };
+    this._getState().write(
+      envelopeToMap(env) as unknown as import('react-native-nitro-modules').AnyMap,
+    );
+  }
 }

@@ -21,6 +21,8 @@ jest.mock('../runtime/nitroTransport', () => ({
     stateUnobserve: () => {},
     stateWrite: () => ({ ok: true, value: undefined }),
     pushProviderState: () => {},
+    announceProvided: () => {},
+    announceUnprovided: () => {},
   })),
 }));
 

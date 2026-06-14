@@ -283,8 +283,34 @@ internal class Router(
 
     override fun stateWrite(env: Map<String, Any?>): Map<String, Any?> {
         val contractId = env["contractId"] as? String ?: return errEnv("CONTRACT_NOT_PROVIDED", "Missing contractId")
-        val stateKey = env["member"] as? String ?: return errEnv("VALIDATION_FAILED", "Missing member/stateKey")
         val scope = parseScopeEnv(env)
+        val op = env["op"] as? String
+
+        // ADR-5b: branch on op='provide' / op='unprovide' BEFORE touching the state store.
+        // These are explicit readiness announcements sent by JS runtime at provide()/close()
+        // time, reusing the existing BridgeState.write Nitro channel (no Nitro regen needed).
+        when (op) {
+            "provide" -> {
+                // A JS contract is now available. Mark it and unpark any native waiters.
+                // Do NOT write state — there is no state payload in a provide envelope.
+                val nativeOwns = resolveBinding(contractId, scope) != null
+                if (!nativeOwns) {
+                    markJsProvided(contractId)
+                    parkBuffer.unpark(contractId, scope)
+                }
+                return okEnv(null)
+            }
+            "unprovide" -> {
+                // A JS contract is gone. Remove from the provided set.
+                // Also let StateStore apply the Replacing→Unprovided grace window for state.
+                jsProvidedContracts.remove(contractId)
+                stateStore.markJsContractsUnprovided(setOf(contractId))
+                return okEnv(null)
+            }
+        }
+
+        // -- existing stateWrite path (op='stateWrite' or absent) -----------------
+        val stateKey = env["member"] as? String ?: return errEnv("VALIDATION_FAILED", "Missing member/stateKey")
         val valueWrapped = env["payload"] as? Map<*, *>
         @Suppress("UNCHECKED_CAST")
         val value = (valueWrapped as? Map<String, Any?>)?.get("v")
@@ -295,9 +321,8 @@ internal class Router(
             // A stateWrite for a contract native does NOT own ⇒ JS is the provider.
             // Record it so isProvided / awaitProvided / tryConsume are truthful for
             // JS-provided contracts. Also unpark any native-side awaitProvided waiters.
-            // ADR-5: markJsProvided is the real JS-provide path signal.
-            // Accepted limitation: stateless JS contracts emit no stateWrite, so they
-            // won't be marked here — noted follow-up (ADR-5 edge case).
+            // ADR-5: markJsProvided is the real JS-provide path signal (stateful path).
+            // ADR-5b: stateless contracts now use the explicit provide/unprovide ops above.
             markJsProvided(contractId)
             parkBuffer.unpark(contractId, scope)
         }

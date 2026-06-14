@@ -234,6 +234,27 @@ export class LoopbackTransport implements BridgeTransport {
     this.notifyStateChange(contractId, scope, key, value);
   }
 
+  // ---- BridgeTransport.announceProvided / announceUnprovided (loopback) ----
+
+  /**
+   * No-op in loopback: isProvided is resolved directly from the in-process
+   * Registry (BridgeKitJs.isProvided checks registry.isProvided). Announcing
+   * to a "native side" makes no sense when both sides share the same JS runtime.
+   */
+  announceProvided(_contractId: string, _scope: import('../contract/protocol').BridgeScope): void {
+    // intentional no-op — loopback resolves readiness via the registry
+  }
+
+  /**
+   * No-op in loopback: binding teardown is handled in-process by the Registry.
+   */
+  announceUnprovided(
+    _contractId: string,
+    _scope: import('../contract/protocol').BridgeScope,
+  ): void {
+    // intentional no-op — loopback resolves teardown via the registry
+  }
+
   // ---- simulateReconnect ---------------------------------------------------
 
   /**

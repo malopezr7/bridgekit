@@ -292,6 +292,114 @@ class RouterBasicTest {
         )
     }
 
+    // ---- ADR-5b: stateless JS-provided contracts — explicit provide announcement ----
+    //
+    // A contract with NO state (only methods/streams) never emits stateWrite, so the
+    // old code path (markJsProvided inside stateWrite's !nativeOwns branch) never fired.
+    // The fix: JS sends {op:'provide'} through the stateWrite channel at provide() time.
+    // Router.stateWrite must branch on op and call markJsProvided + parkBuffer.unpark
+    // WITHOUT writing state, then return immediately.
+    //
+    // These tests MUST be RED before the Router branch exists and GREEN after.
+    // They drive the REAL announce path — they do NOT call markJsProvided() directly.
+
+    @Test
+    fun `ADR-5b stateless JS contract provide envelope marks isProvided true`() {
+        val contractId = "test.stateless-js"
+
+        // No native binding, no state — purely a method-only JS-provided contract.
+        assertFalse(
+            "isProvided must be false before any announcement",
+            router.isProvided(contractId, Scope.Global)
+        )
+
+        // Simulate JS transport.announceProvided → sends {op:provide} through state.write.
+        // This is the REAL announcement path — does NOT call markJsProvided directly.
+        val env = mapOf(
+            "op" to "provide",
+            "contractId" to contractId,
+            "scope" to mapOf("kind" to "global"),
+            // member is empty string — no state key for a stateless contract
+            "member" to "",
+        )
+        router.stateWrite(env)
+
+        assertTrue(
+            "isProvided must be true after op=provide envelope arrives via stateWrite (ADR-5b)",
+            router.isProvided(contractId, Scope.Global)
+        )
+    }
+
+    @Test
+    fun `ADR-5b stateless JS contract awaitProvided resolves after provide envelope`() = runTest {
+        val contractId = "test.stateless-await"
+
+        // Fire the provide envelope first (simulates JS runtime sending it at provide()-time).
+        val env = mapOf(
+            "op" to "provide",
+            "contractId" to contractId,
+            "scope" to mapOf("kind" to "global"),
+            "member" to "",
+        )
+        router.stateWrite(env)
+
+        // awaitProvided must resolve immediately (unparked by the provide envelope).
+        val resolved = router.awaitProvided(contractId, Scope.Global, timeoutMs = 200)
+        assertTrue(
+            "awaitProvided must resolve after op=provide envelope (ADR-5b)",
+            resolved
+        )
+    }
+
+    @Test
+    fun `ADR-5b stateless JS contract provide envelope does NOT write state`() {
+        val contractId = "test.stateless-no-state"
+
+        val env = mapOf(
+            "op" to "provide",
+            "contractId" to contractId,
+            "scope" to mapOf("kind" to "global"),
+            "member" to "",
+        )
+        router.stateWrite(env)
+
+        // The state store must NOT have any entry for this contract (no state key was provided).
+        val value = stateStore.read(contractId, Scope.Global, "", null)
+        // If state was accidentally written, it would be BridgeValue.Available.
+        // A provide-only envelope must NOT touch the state store.
+        assertFalse(
+            "provide envelope must not write state — got Available when nothing should be stored",
+            value is io.github.malopezr7.bridgekit.runtime.BridgeValue.Available
+        )
+    }
+
+    @Test
+    fun `ADR-5b unprovide envelope marks isProvided false for stateless JS contract`() {
+        val contractId = "test.stateless-unprovide"
+
+        // First provide
+        router.stateWrite(mapOf(
+            "op" to "provide",
+            "contractId" to contractId,
+            "scope" to mapOf("kind" to "global"),
+            "member" to "",
+        ))
+        assertTrue("must be provided after provide envelope", router.isProvided(contractId, Scope.Global))
+
+        // Now unprovide
+        router.stateWrite(mapOf(
+            "op" to "unprovide",
+            "contractId" to contractId,
+            "scope" to mapOf("kind" to "global"),
+            "member" to "",
+        ))
+
+        assertFalse(
+            "isProvided must be false after op=unprovide envelope (ADR-5b)",
+            router.isProvided(contractId, Scope.Global)
+        )
+    }
+
     // ---- helpers ---------------------------------------------------------------
 
     private fun stubDefinition(id: String) = object : io.github.malopezr7.bridgekit.runtime.BridgeContractDefinition<Any, Any>(

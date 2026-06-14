@@ -102,6 +102,31 @@ function makeMockNitroTransport(): BridgeTransport & {
       };
       transport.stateWrite(env);
     },
+
+    announceProvided(contractId: string, scope: import('../transport').BridgeScope): void {
+      // Mirror NitroBridgeTransport: send {op:'provide'} through stateWrite
+      const env: CallEnvelope = {
+        op: 'provide',
+        contractId,
+        member: '',
+        scope,
+        correlationId: '',
+        epoch: 1,
+      };
+      transport.stateWrite(env);
+    },
+
+    announceUnprovided(contractId: string, scope: import('../transport').BridgeScope): void {
+      const env: CallEnvelope = {
+        op: 'unprovide',
+        contractId,
+        member: '',
+        scope,
+        correlationId: '',
+        epoch: 1,
+      };
+      transport.stateWrite(env);
+    },
   };
 
   return transport;

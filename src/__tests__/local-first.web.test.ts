@@ -110,6 +110,8 @@ function makeSpyTransport(opts?: {
       return { ok: true };
     },
     pushProviderState(): void {},
+    announceProvided(): void {},
+    announceUnprovided(): void {},
   };
   return t;
 }

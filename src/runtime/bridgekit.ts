@@ -243,17 +243,31 @@ export class BridgeKitJs {
 
       binding.close = (reason?: 'replacing' | 'final') => {
         originalClose(reason);
-        // Signal unprovided to observers for all state keys
+        // Signal unprovided to observers for all state keys (stateful contracts)
         for (const key of Object.keys(contract.descriptor.state)) {
           transport.pushProviderState(contract.descriptor.id, scope, key, undefined);
         }
+        // ADR-5b: always send explicit unprovide announcement so native marks the
+        // contract as gone even if the contract has no state keys.
+        transport.announceUnprovided(contract.descriptor.id, scope);
       };
 
       // Push initial state values at provide() time so native readers see the seed.
+      // These stateWrite calls also implicitly mark the contract as JS-provided on
+      // the native side (stateful path, unchanged). The announceProvided call below
+      // handles the stateless path.
       for (const [key, stateDesc] of Object.entries(contract.descriptor.state)) {
         const initial = 'initial' in stateDesc ? stateDesc.initial : undefined;
         transport.pushProviderState(contract.descriptor.id, scope, key, initial);
       }
+
+      // ADR-5b: Send an explicit provide announcement through the same BridgeState.write
+      // channel. Stateful contracts already send stateWrite which implicitly marks
+      // them provided; stateless contracts have no state to push so this is the only
+      // signal. Sending for all contracts is safe (idempotent on the native side) and
+      // avoids a branch here. Must be called AFTER the initial state pushes so the
+      // native side has already processed any stateWrite entries.
+      transport.announceProvided(contract.descriptor.id, scope);
     }
 
     return binding;

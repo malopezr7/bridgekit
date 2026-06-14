@@ -66,4 +66,23 @@ export interface BridgeTransport {
    * native stateObserve / OutboundCaller.state() StateFlow emits.
    */
   pushProviderState(contractId: string, scope: BridgeScope, key: string, value: unknown): void;
+
+  /**
+   * Announce that a JS contract is now provided, independent of state.
+   * Sent at BridgeKitJs.provide() time for ALL contracts (stateful or stateless)
+   * through the same BridgeState.write channel, using op='provide'.
+   *
+   * Native side: Router.stateWrite branches on op='provide' → markJsProvided + unpark.
+   * Loopback: no-op (isProvided is already true via the in-process registry).
+   */
+  announceProvided(contractId: string, scope: BridgeScope): void;
+
+  /**
+   * Announce that a JS contract is no longer provided.
+   * Sent on binding teardown through BridgeState.write with op='unprovide'.
+   *
+   * Native side: Router.stateWrite branches on op='unprovide' → markJsContractsUnprovided.
+   * Loopback: no-op (registry handles teardown in-process).
+   */
+  announceUnprovided(contractId: string, scope: BridgeScope): void;
 }

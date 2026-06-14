@@ -42,6 +42,8 @@ function makeStubTransport(
     stateUnobserve: () => {},
     stateWrite: () => ({ ok: true, value: undefined }),
     pushProviderState: () => {},
+    announceProvided: () => {},
+    announceUnprovided: () => {},
   };
 }
 

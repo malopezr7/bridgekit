@@ -34,7 +34,11 @@ export interface CallEnvelope {
     | 'streamClose'
     | 'stateRead'
     | 'stateObserve'
-    | 'stateWrite';
+    | 'stateWrite'
+    /** Explicit readiness announcement: JS provider is available (no state write). */
+    | 'provide'
+    /** Explicit readiness retraction: JS provider is gone. */
+    | 'unprovide';
   contractId: string;
   member: string;
   scope: BridgeScope;
