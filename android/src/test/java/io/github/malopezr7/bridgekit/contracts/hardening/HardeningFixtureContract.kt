@@ -33,6 +33,18 @@ data class TickStreamValue(
     val tick: Double,
 )
 
+// W0-T02 → W1: nested object types for the round-trip gate. The codec below
+// recurses through the nested type exactly as the unified CodecWalker emits it,
+// so CodecRoundTripTest's nested-object round-trip is GREEN.
+
+data class GetNestedAddressResultAddress(
+    val city: String,
+)
+
+data class GetNestedAddressResult(
+    val address: GetNestedAddressResultAddress,
+)
+
 // ---- Provider interface -------------------------------------------------------
 
 /** Native-side implementation interface for contract 'hardening.fixture'. */
@@ -100,6 +112,34 @@ internal object HardeningFixtureCodecs {
 
     fun decodeTickStreamValue(raw: Map<*, *>): TickStreamValue = TickStreamValue(
         tick = when (val v = raw["tick"]) { is Number -> v.toDouble(); else -> throw BridgeKitDecodeException("tick", "Double") },
+    )
+
+    // W0-T02 → W1 GREEN: nested object codec as the unified CodecWalker now emits it.
+    // encode recurses into encodeGetNestedAddressResultAddress (Map on the wire);
+    // decode recurses into decodeGetNestedAddressResultAddress (Map → data class).
+    // This is byte-equivalent to the emitter output for this shape (D2).
+
+    fun encodeGetNestedAddressResultAddress(value: GetNestedAddressResultAddress): Map<String, Any?> {
+        val map = mutableMapOf<String, Any?>()
+        map["city"] = value.city
+        return map
+    }
+
+    fun decodeGetNestedAddressResultAddress(raw: Map<*, *>): GetNestedAddressResultAddress = GetNestedAddressResultAddress(
+        city = (raw["city"] as? String) ?: throw BridgeKitDecodeException("city", "String"),
+    )
+
+    fun encodeGetNestedAddressResult(value: GetNestedAddressResult): Map<String, Any?> {
+        val map = mutableMapOf<String, Any?>()
+        map["address"] = encodeGetNestedAddressResultAddress(value.address)
+        return map
+    }
+
+    fun decodeGetNestedAddressResult(raw: Map<*, *>): GetNestedAddressResult = GetNestedAddressResult(
+        address = decodeGetNestedAddressResultAddress(
+            raw["address"] as? Map<*, *>
+                ?: throw BridgeKitDecodeException("address", "GetNestedAddressResultAddress"),
+        ),
     )
 }
 
