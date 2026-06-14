@@ -18,31 +18,13 @@ import type { BridgeKitJs } from '../runtime/bridgekit';
 import { getDefaultBridgeKit } from '../runtime/defaultInstance';
 import type { BridgeContract } from './contract';
 import type {
-  AnyMarkerT,
-  BridgeStreamSource,
-  CallOpts,
   ContractHook,
   DerivedConsumer,
   MarkerContractInput,
   ScopeArg,
   StateHandle,
-  StateMarkerT,
-  StreamMarkerT,
 } from './markers';
 import type { BridgeScope } from './protocol';
-
-// ---- isMarkerDescriptor ----------------------------------------------------
-// A member is marker-style when it has `kind` but NO schema fields
-// (params/result/value are all AnySchema nodes — they have their own `kind`).
-// Markers are plain { kind } objects or { kind, initial } for state.
-// Legacy t.* descriptors carry a `result` or `value` field (also objects with `kind`).
-// We detect by the ABSENCE of `result`/`value`/`params` that are AnySchema nodes.
-
-function isMarkerMethodDesc(d: Record<string, unknown>): boolean {
-  // Marker: only has `kind` (+ phantom + timeoutMs for Async). No `result`/`params` schema.
-  // t.* descriptor: has `result` or `params` that are AnySchema objects.
-  return !('result' in d) && !('value' in d);
-}
 
 // ---- buildSnapshot ---------------------------------------------------------
 // Builds the consumer snapshot for a given bk instance + contract + scope.
@@ -97,48 +79,32 @@ export function buildContractHook<T extends MarkerContractInput>(
 
   // The hook function — overloaded: no-arg → snapshot, selector → slice.
   //
-  // When called INSIDE a React render (the primary path), uses useSyncExternalStore
-  // to subscribe to all state mirrors so the component re-renders on changes (W4-2),
-  // and reads scope from ScopeContext instead of global state (W4-1).
+  // hook() IS a React hook (ADR-1): it calls useContext / useMemo / useCallback /
+  // useSyncExternalStore UNCONDITIONALLY at the top level. By the hook contract it is
+  // only ever called during a React render, so there is no render-detection and no
+  // early return — that conditional path was dead on React 19 (the private dispatcher
+  // internal it probed does not exist) and broke the Rules-of-Hooks. Subscription is
+  // now live: the component re-renders whenever a bound state mirror changes.
   //
-  // When called OUTSIDE a React render (imperative callers, legacy tests), falls back
-  // to the non-subscribing buildSnapshot path — same behavior as before W4.
+  // Imperative (non-React) callers MUST use the separate hook.getState() below, which
+  // never calls a React hook.
   //
-  // Lazy require for React hooks to keep the contract layer import-pure
-  // (the purity test forbids static 'react' imports in src/contract/).
+  // Lazy require for React keeps the contract layer import-pure
+  // (purity.web.test.ts bans only static `import … from 'react'`; require is allowed,
+  // mirroring the sanctioned lazy require in testing/index.ts).
   const hook = ((selector?: (c: DerivedConsumer<T>) => unknown): unknown => {
-    // Lazy-require React internals to preserve module-level purity.
-    // Accessing __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentDispatcher
-    // lets us detect whether we are inside a React render without throwing.
     const React = require('react') as typeof import('react');
-    const dispatcher = (React as Record<string, unknown>)[
-      '__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED'
-    ] as Record<string, unknown> | undefined;
-    const isInReactRender =
-      dispatcher !== undefined &&
-      (dispatcher.ReactCurrentDispatcher as Record<string, unknown> | undefined)?.current !== null;
-
-    const bk = getDefaultBridgeKit();
-
-    if (!isInReactRender) {
-      // Imperative / non-React path — simple snapshot, no subscription.
-      const scope = _getScopeImperative();
-      const snap = buildSnapshot<T>(bk, contract, scope);
-      if (selector === undefined) return snap;
-      return selector(snap);
-    }
-
-    // --- React render path (W4-1 + W4-2) ---
-    const { useCallback, useContext, useMemo, useSyncExternalStore } = React;
+    const { useCallback, useContext, useMemo, useRef, useSyncExternalStore } = React;
     const { ScopeContext } =
       require('../react/ScopeContext') as typeof import('../react/ScopeContext');
 
-    // Read from context when called as a React hook (scopeOverride may still override)
+    const bk = getDefaultBridgeKit();
+
+    // Read scope from context; an explicit .scoped() override (scopeOverride) wins.
     const contextScope = useContext(ScopeContext);
     const scope = scopeOverride ?? contextScope;
 
     // Stable mirrors — recreated only when bk/contract/scope identity changes.
-    // biome-ignore lint/correctness/useExhaustiveDependencies: scope fields are the stable deps
     const mirrors = useMemo(() => {
       const desc = contract.descriptor;
       const result: Record<string, ReturnType<BridgeKitJs['state']>> = {};
@@ -149,17 +115,31 @@ export function buildContractHook<T extends MarkerContractInput>(
     }, [bk, contract, scope.kind, scope.feature, scope.instance]);
 
     // Stable proxy — recreated only when bk/contract/scope identity changes.
-    // biome-ignore lint/correctness/useExhaustiveDependencies: scope fields are the stable deps
     const proxy = useMemo(
       () => bk.bridge(contract, { scope }) as Record<string, unknown>,
       [bk, contract, scope.kind, scope.feature, scope.instance],
     );
 
-    // Stable subscribe — fan-out over all state mirrors.
+    // Cached snapshot — useSyncExternalStore requires getSnapshot to return a
+    // referentially STABLE value until the underlying store actually changes
+    // (otherwise it loops: new object every call → re-render → new object …).
+    // The cache is invalidated by the subscribe fan-out (a mirror emitted) and by a
+    // change in proxy/mirrors identity (scope/contract/bk changed → new closure deps).
+    const cacheRef = useRef<{ deps: unknown; dirty: boolean; snap: DerivedConsumer<T> | null }>({
+      deps: null,
+      dirty: true,
+      snap: null,
+    });
+
+    // Stable subscribe — fan-out over all state mirrors. Mark the snapshot dirty
+    // before notifying so the next getSnapshot rebuilds from fresh mirror values.
     const subscribe = useCallback(
       (onStoreChange: () => void): (() => void) => {
         const unsubs = Object.values(mirrors).map((mirror) =>
-          mirror.subscribe(() => onStoreChange()),
+          mirror.subscribe(() => {
+            cacheRef.current.dirty = true;
+            onStoreChange();
+          }),
         );
         return () => {
           for (const unsub of unsubs) unsub();
@@ -168,8 +148,20 @@ export function buildContractHook<T extends MarkerContractInput>(
       [mirrors],
     );
 
-    // Build snapshot from the current mirror values (called by useSyncExternalStore).
+    // Build (and cache) the snapshot from the current mirror values.
     const getSnapshot = useCallback((): DerivedConsumer<T> => {
+      const cache = cacheRef.current;
+      // Rebuild on first call, when a mirror emitted (dirty), or when the closure
+      // deps (proxy/mirrors) changed identity — otherwise return the cached object.
+      const depsKey = { proxy, mirrors };
+      const depsChanged =
+        cache.deps === null ||
+        (cache.deps as { proxy: unknown; mirrors: unknown }).proxy !== proxy ||
+        (cache.deps as { proxy: unknown; mirrors: unknown }).mirrors !== mirrors;
+      if (cache.snap !== null && !cache.dirty && !depsChanged) {
+        return cache.snap;
+      }
+
       const desc = contract.descriptor;
       const stateHandles: Record<string, StateHandle<unknown>> = {};
       for (const key of Object.keys(desc.state)) {
@@ -190,7 +182,11 @@ export function buildContractHook<T extends MarkerContractInput>(
       }
       snap.state = stateHandles;
 
-      return snap as unknown as DerivedConsumer<T>;
+      const built = snap as unknown as DerivedConsumer<T>;
+      cache.snap = built;
+      cache.deps = depsKey;
+      cache.dirty = false;
+      return built;
     }, [proxy, mirrors]);
 
     const snap = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
@@ -234,11 +230,12 @@ export function buildContractHook<T extends MarkerContractInput>(
   Object.defineProperty(hook, 'useProvide', {
     value: (impl: Partial<DerivedConsumer<T>>): void => {
       // Dynamic import React to keep contract layer pure in non-React environments.
-      // useProvideBridge reads scope from ScopeContext internally (W4-1), so we
-      // pass the scopeOverride only when explicitly set via .scoped().
+      // useProvideBridge reads scope from ScopeContext internally (ADR-2). Pass the
+      // override ONLY when .scoped() set it; otherwise pass none so useProvideBridge
+      // honours the ScopeContext scope instead of being force-fed the global fallback.
       const { useProvideBridge } = require('../react/hooks') as typeof import('../react/hooks');
-      const scope = _getScopeImperative();
-      useProvideBridge(contract as BridgeContract<unknown>, impl as Partial<unknown>, { scope });
+      const opts = scopeOverride ? { scope: scopeOverride } : undefined;
+      useProvideBridge(contract as BridgeContract<unknown>, impl as Partial<unknown>, opts);
     },
     enumerable: false,
     writable: false,

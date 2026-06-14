@@ -669,30 +669,35 @@ describe('ContractHook: statics and getState', () => {
   });
 });
 
-// ---- ContractHook called as hook: snapshot + state reactive ---------------
+// ---- ContractHook imperative snapshot: shape + state handles --------------
+// ADR-1: hook() is now a real React hook (calls useContext/useSyncExternalStore
+// unconditionally). Imperative (non-render) callers MUST use hook.getState(),
+// which returns the same DerivedConsumer shape without subscribing. These tests
+// exercise that imperative read; the in-render hook() path is covered by
+// contractHook.web.test.ts.
 
-describe('ContractHook called as hook: no-arg form', () => {
-  test('no-arg call returns snapshot with methods', () => {
-    const snap = useLiaHost();
+describe('ContractHook imperative snapshot (getState)', () => {
+  test('getState() returns snapshot with methods', () => {
+    const snap = useLiaHost.getState();
     expect(typeof snap.getLiteral).toBe('function');
     expect(typeof snap.getAppVersion).toBe('function');
     expect(typeof snap.trackEvent).toBe('function');
     expect(snap.state).toBeDefined();
   });
 
-  test('selector form returns the selected slice', () => {
-    const fn = useLiaHost((c) => c.getLiteral);
+  test('selector applied to getState() returns the selected slice', () => {
+    const fn = useLiaHost.getState().getLiteral;
     expect(typeof fn).toBe('function');
   });
 
   test('state handles on snapshot: get() returns initial value', () => {
-    const snap = useLiaHost();
+    const snap = useLiaHost.getState();
     expect(snap.state.counter.get()).toBe(0);
     expect(snap.state.lastUri.get()).toBeNull();
   });
 
   test('state handles: subscribe returns unsubscribe function', () => {
-    const snap = useLiaHost();
+    const snap = useLiaHost.getState();
     const unsub = snap.state.counter.subscribe((_v) => {});
     expect(typeof unsub).toBe('function');
     expect(() => unsub()).not.toThrow();
@@ -769,29 +774,8 @@ describe('Coexistence: legacy t.* contract unchanged', () => {
   });
 });
 
-// ---- Dev-validator seam -------------------------------------------------------
-
-describe('Dev-validator seam', () => {
-  test('registerContractValidator and clearContractValidator are functions', () => {
-    const {
-      registerContractValidator,
-      clearContractValidator,
-    } = require('../runtime/devValidator');
-    expect(typeof registerContractValidator).toBe('function');
-    expect(typeof clearContractValidator).toBe('function');
-  });
-
-  test('no-op when no validator registered (does not crash)', async () => {
-    const { clearContractValidator } = require('../runtime/devValidator');
-    clearContractValidator('lia.host');
-    // If the runtime calls the validator and it's absent, nothing crashes
-    const { bridgekit } = createTestBridge();
-    bridgekit.provide(MarkerContract as import('../contract/contract').BridgeContract<unknown>, {
-      fetchNum: async () => 42,
-    });
-    const proxy = bridgekit.bridge(
-      MarkerContract as import('../contract/contract').BridgeContract<unknown>,
-    );
-    await expect((proxy as Record<string, () => Promise<number>>).fetchNum()).resolves.toBe(42);
-  });
-});
+// ---- Dev-validator seam (ADR-3: deleted) --------------------------------------
+// devValidator.ts was dead code — runInboundValidator had zero runtime callers
+// and the emitted import (@malopezr7/bridgekit/runtime) pointed to a non-existent
+// subpath. Inbound validation is covered by codec validate() in runtime/bridgekit.ts.
+// These tests are removed because the module no longer exists.
