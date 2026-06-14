@@ -118,11 +118,12 @@ class BridgeKit internal constructor(
             readinessTimeoutMs = router.readinessTimeoutMs,
             callTimeoutMs = router.callTimeoutMs,
         )
-        // Await readiness before returning proxy (but proxy calls still re-await if needed)
-        if (!router.awaitProvided(definition.id, scope, router.readinessTimeoutMs)) {
-            // JS-provided: no native binding — that's OK, proxy handles dispatcher readiness
-            // For native → JS contracts we don't have native bindings, just dispatcher wait.
-        }
+        // Return the proxy immediately. Readiness is handled per-call by the proxy
+        // (OutboundCallerImpl.awaitDispatcher): it resolves instantly once the JS
+        // dispatcher is connected. A JS-provided contract has NO native binding, so a
+        // blocking awaitProvided() here would needlessly wait the full readiness timeout
+        // (the native registry never sees JS providers) — that was the source of multi-second
+        // loaders on every native→JS call.
         return definition.outbound(caller)
     }
 

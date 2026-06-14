@@ -251,6 +251,12 @@ private class FakeOutboundCaller(
     var lastStreamMember: String? = null
     var lastStateKey: String? = null
 
+    var lastFiredMember: String? = null
+
+    override fun fire(member: String, payload: Map<String, Any?>?) {
+        lastFiredMember = member
+    }
+
     override suspend fun invoke(member: String, payload: Map<String, Any?>?): Any? {
         lastInvokedMember = member
         return invokeResult

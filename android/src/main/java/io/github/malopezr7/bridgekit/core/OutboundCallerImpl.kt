@@ -7,15 +7,14 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -102,13 +101,6 @@ internal class OutboundCallerImpl(
     }
 
     override fun stream(member: String, payload: Map<String, Any?>?): Flow<Any?> {
-        val streamId = "js_${contractId}_${member}_${streamIdCounter.incrementAndGet()}"
-        val channel = Channel<Map<String, Any?>>(capacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
-        val endDeferred = CompletableDeferred<Map<String, Any?>>()
-
-        router.jsStreamChannels[streamId] = channel
-        router.jsStreamEnds[streamId] = endDeferred
-
         return callbackFlow {
             // Readiness-bounded wait for the JS dispatcher — mirrors invoke()'s awaitDispatcher
             // so a native stream consumer that starts before JS has provided parks instead of
@@ -122,26 +114,46 @@ internal class OutboundCallerImpl(
                     return@callbackFlow
                 }
 
+            val streamId = "js_${contractId}_${member}_${streamIdCounter.incrementAndGet()}"
+            val channel = Channel<Map<String, Any?>>(capacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+            val endDeferred = CompletableDeferred<Map<String, Any?>>()
+            val endedByJs = AtomicBoolean(false)
+
+            router.jsStreamChannels[streamId] = channel
+            router.jsStreamEnds[streamId] = endDeferred
+
+            val valuePump = launch {
+                for (valueMap in channel) {
+                    trySend(valueMap["v"])
+                }
+            }
+
+            val endPump = launch {
+                val end = endDeferred.await()
+                endedByJs.set(true)
+                if (end["ok"] == true) {
+                    close()
+                } else {
+                    close(BridgeKitException.fromEnvelope(end, contractId))
+                }
+            }
+
             val openEnv = buildEnvelope("streamOpen", member, payload).toMutableMap()
             openEnv["streamId"] = streamId
             callbacks.onStreamOpen(openEnv)
 
-            // Pump values from the channel into the flow
-            for (valueMap in channel) {
-                val v = valueMap["v"]
-                send(v)
-            }
             awaitClose {
-                // When collector cancels, signal JS producer to stop
-                val closeEnv = mapOf<String, Any?>("streamId" to streamId, "reason" to "native-close")
-                callbacks.onStreamClose(closeEnv)
+                valuePump.cancel()
+                endPump.cancel()
+                channel.close()
                 router.jsStreamChannels.remove(streamId)
                 router.jsStreamEnds.remove(streamId)
+                if (!endedByJs.get()) {
+                    // When collector cancels, signal JS producer to stop
+                    val closeEnv = mapOf<String, Any?>("streamId" to streamId, "reason" to "native-close")
+                    callbacks.onStreamClose(closeEnv)
+                }
             }
-        }.onCompletion {
-            router.jsStreamChannels.remove(streamId)
-            router.jsStreamEnds.remove(streamId)
-            channel.close()
         }
     }
 

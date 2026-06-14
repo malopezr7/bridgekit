@@ -18,6 +18,22 @@ import kotlinx.coroutines.withTimeout
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
+// W3-3 helper: deterministic params hash for StreamHub keying.
+// Uses sorted key order so params with the same entries in different order hash the same.
+private fun paramsHash(payload: Map<String, Any?>?): Long {
+    if (payload == null || payload.isEmpty()) return 0L
+    var h = 0x811c9dc5L
+    for (key in payload.keys.sorted()) {
+        val v = payload[key]
+        val entry = "$key=${v}"
+        for (c in entry) {
+            h = h xor c.code.toLong()
+            h = (h * 0x01000193L) and 0xFFFFFFFFL
+        }
+    }
+    return h
+}
+
 /**
  * BridgeKit routing engine. Implements [BridgeKitNativeDelegate] and installs itself
  * into [io.github.malopezr7.bridgekit.runtime.BridgeKitNative.delegate].
@@ -32,6 +48,14 @@ internal class Router(
     private val diagnostics: BridgeKitDiagnostics = BridgeKitDiagnostics,
     internal val readinessTimeoutMs: Long = 5_000,
     internal val callTimeoutMs: Long = 30_000,
+    /**
+     * Wire hash skew enforcement (design Decision 2, three-stage rollout).
+     *   false (default) = OBSERVE: log mismatches via diagnostics, NEVER reject — the
+     *     live demo keeps working before on-device hash-parity verification.
+     *   true = ENFORCE: return INCOMPATIBLE_CONTRACT on mismatch without dispatching.
+     * The final flip to true is gated on real-device verification (out of scope here).
+     */
+    internal val strictHashCheck: Boolean = false,
 ) : io.github.malopezr7.bridgekit.runtime.BridgeKitNativeDelegate {
 
     private val lock = Any()
@@ -64,6 +88,9 @@ internal class Router(
     // coroutine scope for all stream pumps + state observations
     private var engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
+    // W3-3: StreamHub — multiplexes provider Flows across N consumers with same params.
+    private var streamHub = StreamHub(engineScope)
+
     // ---- JS-provided contract set (for epoch-swap markings) --------------------
 
     private val jsProvidedContracts = ConcurrentHashMap.newKeySet<String>()
@@ -84,7 +111,7 @@ internal class Router(
         val currentEpoch = epoch
 
         engineScope.launch {
-            val result = invokeWithReadiness(contractId, scope, member, payload, epochEnv, currentEpoch, correlationId)
+            val result = invokeWithReadiness(contractId, scope, member, payload, epochEnv, currentEpoch, correlationId, env)
             val dur = System.currentTimeMillis() - t0
             diagnostics.trace("invoke", contractId, member, scope.serialize(), if (result["ok"] == true) "OK" else (result["code"] as? String ?: "ERR"), dur, currentEpoch)
             complete(result)
@@ -100,9 +127,14 @@ internal class Router(
         val binding = resolveBinding(contractId, scope)
             ?: return errEnv("CONTRACT_NOT_PROVIDED", "Contract '$contractId' not provided in scope ${scope.serialize()}", contractId, member, scope)
 
+        // Wire hash skew check before dispatch (enforced only in strict mode).
+        checkContractHash(contractId, member, scope, binding, env)?.let { return it }
+
         return try {
             val result = binding.adapter.invokeSync(member, payload)
             okEnv(result)
+        } catch (e: io.github.malopezr7.bridgekit.runtime.BridgeKitDecodeException) {
+            errEnv("VALIDATION_FAILED", "Decode failed for '$member' on '$contractId': ${e.message}", contractId, member, scope)
         } catch (e: IllegalArgumentException) {
             errEnv("METHOD_NOT_FOUND", "No sync method '$member' in contract '$contractId': ${e.message}", contractId, member, scope)
         } catch (e: Exception) {
@@ -117,10 +149,13 @@ internal class Router(
         val newEpoch = epochCounter.incrementAndGet()
 
         synchronized(lock) {
-            // 1. Cancel prior-epoch stream pump jobs
+            // 1. Cancel prior-epoch stream pump jobs + StreamHub (W3-3)
             val priorEpochJobs = streamPumpJobs.values.filter { it.first < newEpoch }
             for ((_, job) in priorEpochJobs) job.cancel("Epoch swap: prior epoch $newEpoch")
             streamPumpJobs.entries.removeIf { it.value.first < newEpoch }
+            streamHub.cancelAll()
+            // Recreate streamHub with the current engineScope for the new epoch
+            streamHub = StreamHub(engineScope)
 
             // 2. Cancel prior-epoch JS-consume stream jobs
             for (job in jsStreamJobs.values) job.cancel("Epoch swap $newEpoch")
@@ -171,28 +206,32 @@ internal class Router(
             return ""
         }
 
-        val streamId = "${contractId}_${member}_${System.nanoTime()}"
-
-        val job = engineScope.launch {
-            try {
-                val flow = binding.adapter.openStream(member, payload)
-                flow
-                    .buffer(STREAM_BUFFER_CAPACITY, kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST)
-                    .catch { err ->
-                        onEnd(errEnv("PROVIDER_ERROR", err.message ?: "Stream error", contractId, member, scope))
-                    }
-                    .collect { value ->
-                        // Check epoch still valid
-                        if (streamPumpJobs[streamId]?.first != streamEpoch) return@collect
-                        onNext(mapOf("v" to value))
-                    }
-                onEnd(okEnv(null))
-            } catch (e: Exception) {
-                onEnd(errEnv("PROVIDER_ERROR", e.message ?: "Stream launch error", contractId, member, scope))
-            } finally {
-                streamPumpJobs.remove(streamId)
-            }
+        // Wire hash skew check before opening the stream (enforced only in strict mode).
+        checkContractHash(contractId, member, scope, binding, env)?.let {
+            onEnd(it)
+            return ""
         }
+
+        // W3-3: Multiplex consumers of the same provider+params through StreamHub.
+        // This replaces the per-call Flow creation with a shared Flow fan-out.
+        val pHash = paramsHash(payload)
+        val streamId = "${contractId}_${member}_${pHash}_${System.nanoTime()}"
+
+        val job = streamHub.attach(
+            contractId = contractId,
+            member = member,
+            scope = scope,
+            paramsHash = pHash,
+            adapter = binding.adapter,
+            payload = payload,
+            streamEpoch = streamEpoch,
+            streamId = streamId,
+            onNext = onNext,
+            onEnd = { endEnv ->
+                streamPumpJobs.remove(streamId)
+                onEnd(endEnv)
+            },
+        )
 
         streamPumpJobs[streamId] = Pair(streamEpoch, job)
         binding.registerStreamJob(streamId, job)
@@ -328,9 +367,11 @@ internal class Router(
 
     /**
      * Is the contract currently provided?
+     * Returns true for both native-registered bindings and JS-provided contracts
+     * (tracked via markJsProvided when JS calls provide() on the JS registry).
      */
     internal fun isProvided(contractId: String, scope: Scope): Boolean =
-        resolveBinding(contractId, scope) != null
+        resolveBinding(contractId, scope) != null || jsProvidedContracts.contains(contractId)
 
     /**
      * Return the current epoch.
@@ -364,6 +405,7 @@ internal class Router(
         epochEnv: Long,
         currentEpoch: Long,
         correlationId: String,
+        env: Map<String, Any?>,
     ): Map<String, Any?> {
         var binding = resolveBinding(contractId, scope)
 
@@ -380,6 +422,9 @@ internal class Router(
                 ?: return errEnv("CONTRACT_NOT_PROVIDED", "Contract '$contractId' vanished after park", contractId, member, scope)
         }
 
+        // Wire hash skew check before dispatch (enforced only in strict mode).
+        checkContractHash(contractId, member, scope, binding, env)?.let { return it }
+
         return try {
             val result = withTimeout(callTimeoutMs) {
                 binding.adapter.invoke(member, payload)
@@ -387,6 +432,8 @@ internal class Router(
             okEnv(result)
         } catch (e: TimeoutCancellationException) {
             errEnv("TIMEOUT", "Call to '$member' on '$contractId' timed out after ${callTimeoutMs}ms", contractId, member, scope)
+        } catch (e: io.github.malopezr7.bridgekit.runtime.BridgeKitDecodeException) {
+            errEnv("VALIDATION_FAILED", "Decode failed for '$member' on '$contractId': ${e.message}", contractId, member, scope)
         } catch (e: IllegalArgumentException) {
             errEnv("METHOD_NOT_FOUND", "Unknown member '$member' on '$contractId': ${e.message}", contractId, member, scope)
         } catch (e: Exception) {
@@ -436,6 +483,47 @@ internal class Router(
         val p = env["payload"] ?: return null
         @Suppress("UNCHECKED_CAST")
         return p as? Map<String, Any?>
+    }
+
+    /**
+     * Wire hash skew check (design Decision 2). Compares the caller's envelope
+     * contractHash against the native binding's generated contractHash.
+     *
+     * Returns an INCOMPATIBLE_CONTRACT error envelope ONLY when [strictHashCheck]
+     * is enabled AND the hashes both exist and differ. In observe mode (default) or
+     * when either hash is absent (legacy schema-less contract / loopback), it records
+     * the skew for diagnostics and returns null so the call dispatches normally.
+     */
+    private fun checkContractHash(
+        contractId: String,
+        member: String,
+        scope: Scope,
+        binding: BindingEntry,
+        env: Map<String, Any?>,
+    ): Map<String, Any?>? {
+        val callerHash = env["contractHash"] as? String ?: return null
+        val receiverHash = binding.definition.contractHash
+        if (callerHash == receiverHash) return null
+
+        // Skew detected. Always record it for observability.
+        diagnostics.trace(
+            "hashSkew", contractId, member, scope.serialize(),
+            code = "INCOMPATIBLE_CONTRACT", epoch = epoch,
+        )
+        if (!strictHashCheck) return null
+
+        return buildMap {
+            put("ok", false)
+            put("code", "INCOMPATIBLE_CONTRACT")
+            put(
+                "message",
+                "Contract '$contractId' hash mismatch: caller=$callerHash receiver=$receiverHash",
+            )
+            put("contractId", contractId)
+            put("member", member)
+            put("scope", scopeToEnvMap(scope))
+            put("details", mapOf("callerHash" to callerHash, "receiverHash" to receiverHash))
+        }
     }
 
     internal companion object {

@@ -183,6 +183,35 @@ class RouterBasicTest {
         assertFalse(router.isProvided("no.contract", Scope.Global))
     }
 
+    // QW-5: isProvided must return true for JS-provided contracts after markJsProvided is called.
+    // Before the fix, markJsProvided() only tracked the ID for epoch cleanup but isProvided()
+    // only checked native bindings — so it always returned false for JS-provided contracts.
+    @Test
+    fun `QW-5 isProvided returns true after markJsProvided for global scope`() {
+        // No native binding registered — JS is the provider.
+        assertFalse(
+            "isProvided should return false before markJsProvided",
+            router.isProvided("js.provided.contract", Scope.Global)
+        )
+
+        router.markJsProvided("js.provided.contract")
+
+        assertTrue(
+            "isProvided should return true after markJsProvided",
+            router.isProvided("js.provided.contract", Scope.Global)
+        )
+    }
+
+    @Test
+    fun `QW-5 isProvided returns false for different contract after markJsProvided`() {
+        router.markJsProvided("js.contract.a")
+
+        assertFalse(
+            "isProvided should be false for contract B when only A was marked",
+            router.isProvided("js.contract.b", Scope.Global)
+        )
+    }
+
     // ---- helpers ---------------------------------------------------------------
 
     private fun stubDefinition(id: String) = object : io.github.malopezr7.bridgekit.runtime.BridgeContractDefinition<Any, Any>(

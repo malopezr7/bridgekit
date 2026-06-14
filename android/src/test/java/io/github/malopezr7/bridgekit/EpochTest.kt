@@ -61,7 +61,7 @@ class EpochTest {
     }
 
     @Test
-    fun `epoch swap marks JS-provided state as Unprovided`() {
+    fun `epoch swap transitions JS-provided state to Replacing grace window (W2-3)`() {
         val stateStore = StateStore()
         val router = Router(stateStore, ParkBuffer(), readinessTimeoutMs = 100, callTimeoutMs = 500)
 
@@ -72,14 +72,20 @@ class EpochTest {
         val before = stateStore.read("js.contract", Scope.Global, "counter", null)
         assertTrue(before is io.github.malopezr7.bridgekit.runtime.BridgeValue.Available)
 
-        // Simulate epoch swap by connecting a new dispatcher
-        // (marks jsProvidedContracts unprovided, but only if we tracked it)
-        // In production, the router tracks JS-provided contracts when stateWrite arrives
+        // Simulate epoch swap by connecting a new dispatcher.
+        // W2-3: state now transitions to Replacing (stale, grace window) rather than
+        // jumping directly to Unprovided. This prevents flapping consumers during fast
+        // reconnects. The timer will fire after replacingGraceMs to complete the transition.
         router.markJsProvided("js.contract")
         router.connectDispatcher(emptyMap(), fakeCallbacks())
 
         val after = stateStore.read("js.contract", Scope.Global, "counter", null)
-        assertTrue(after is io.github.malopezr7.bridgekit.runtime.BridgeValue.Unprovided)
+        // Immediately after epoch swap: Replacing (stale-but-accessible), NOT Unprovided.
+        assertTrue(
+            "Expected Replacing (grace window) immediately after epoch swap, got $after",
+            after is io.github.malopezr7.bridgekit.runtime.BridgeValue.Replacing,
+        )
+        assertEquals("last known value preserved during grace", 5, (after as io.github.malopezr7.bridgekit.runtime.BridgeValue.Replacing).lastKnown)
     }
 
     @Test

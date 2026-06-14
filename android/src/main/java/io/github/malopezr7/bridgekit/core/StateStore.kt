@@ -1,8 +1,14 @@
 package io.github.malopezr7.bridgekit.core
 
 import io.github.malopezr7.bridgekit.runtime.BridgeValue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
@@ -19,7 +25,20 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * Observers (obsId → callback) are epoch-tagged; stale-epoch callbacks are dropped on invoke.
  */
-internal class StateStore {
+internal class StateStore(
+    /**
+     * Duration in milliseconds that state entries for a JS-provided contract remain in the
+     * [BridgeValue.Replacing] (stale-but-accessible) state during a reconnect grace window
+     * before transitioning to [BridgeValue.Unprovided]. 250ms is a placeholder; tune against
+     * real reconnect latency on device (design Decision 6).
+     */
+    internal val replacingGraceMs: Long = 250L,
+    /**
+     * Coroutine scope used for grace window timers. Defaults to a background scope;
+     * injectable for testing (pass a TestScope-backed scope to control time).
+     */
+    private val graceScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+) {
 
     private data class StoreKey(val contractId: String, val stateKey: String, val scopeKey: String)
 
@@ -30,9 +49,21 @@ internal class StateStore {
     private fun getOrCreate(key: StoreKey, initial: BridgeValue<Any?>): MutableStateFlow<BridgeValue<Any?>> =
         states.getOrPut(key) { MutableStateFlow(initial) }
 
+    // ---- grace-window job tracking -----------------------------------------------
+
+    // Tracks active replacing→unprovided timer jobs keyed by StoreKey.toString().
+    // Cancelled when the provider re-provisions before the timer fires.
+    private val graceJobs = ConcurrentHashMap<String, Job>()
+
     // ---- observer registry -------------------------------------------------------
 
-    private data class Observer(val callback: (Map<String, Any?>) -> Unit, val epoch: Long)
+    private data class Observer(
+        val contractId: String,
+        val stateKey: String,
+        val scopeKey: String,
+        val callback: (Map<String, Any?>) -> Unit,
+        val epoch: Long,
+    )
     private val observers = ConcurrentHashMap<String, Observer>()
     private val obsCounter = AtomicLong(0)
 
@@ -41,6 +72,9 @@ internal class StateStore {
     /**
      * Seed the store with initial values for a native-provided contract.
      * Called at provide() time with adapter.stateInitials.
+     *
+     * Also cancels any active grace-window job for this key so a fast re-provision
+     * after a reconnect does not incorrectly expire to Unprovided.
      */
     fun seedNativeState(
         contractId: String,
@@ -49,6 +83,8 @@ internal class StateStore {
         initial: Any?,
     ) {
         val key = StoreKey(contractId, stateKey, scope.serialize())
+        // Cancel any active replacing→unprovided timer before overwriting with Available.
+        graceJobs.remove(key.toString())?.cancel()
         val flow = getOrCreate(key, BridgeValue.Initial(initial))
         flow.value = BridgeValue.Available(initial)
     }
@@ -85,6 +121,8 @@ internal class StateStore {
             )
         }
         val key = StoreKey(contractId, stateKey, scope.serialize())
+        // Cancel any active replacing→unprovided timer — JS provider re-provided.
+        graceJobs.remove(key.toString())?.cancel()
         val flow = getOrCreate(key, BridgeValue.Available(value))
         flow.value = BridgeValue.Available(value)
         notifyObservers(contractId, stateKey, scope, value)
@@ -113,7 +151,7 @@ internal class StateStore {
         onChange: (Map<String, Any?>) -> Unit,
     ): String {
         val obsId = "obs_${obsCounter.incrementAndGet()}"
-        observers[obsId] = Observer(onChange, epoch)
+        observers[obsId] = Observer(contractId, stateKey, scope.serialize(), onChange, epoch)
         return obsId
     }
 
@@ -129,7 +167,15 @@ internal class StateStore {
     }
 
     private fun notifyObservers(contractId: String, stateKey: String, scope: Scope, value: Any?) {
+        val scopeKey = scope.serialize()
         for ((_, obs) in observers) {
+            if (
+                obs.contractId != contractId ||
+                obs.stateKey != stateKey ||
+                obs.scopeKey != scopeKey
+            ) {
+                continue
+            }
             try {
                 obs.callback(mapOf("v" to value))
             } catch (_: Exception) {
@@ -155,15 +201,36 @@ internal class StateStore {
     }
 
     /**
-     * Mark ALL JS-provided contract states as Unprovided (called on epoch swap).
+     * Mark ALL JS-provided contract states as Replacing (stale, grace window), then
+     * transition to Unprovided after [replacingGraceMs] if no re-provision arrives.
+     *
+     * Called on epoch swap (connectDispatcher). The grace window prevents a fast OTA
+     * swap or StrictMode double-mount from flapping consumers to "not ready" (W2-3).
+     *
      * [jsContractIds] is the set of contractIds currently known to be JS-provided.
      */
     fun markJsContractsUnprovided(jsContractIds: Set<String>) {
         for ((key, flow) in states) {
-            if (key.contractId in jsContractIds) {
-                val lastKnown = flow.value.valueOrNull()
-                flow.value = BridgeValue.Unprovided(lastKnown)
+            if (key.contractId !in jsContractIds) continue
+
+            val lastKnown = flow.value.valueOrNull()
+            flow.value = BridgeValue.Replacing(lastKnown)
+
+            // Cancel any prior grace job for this key before starting a new one.
+            val keyStr = key.toString()
+            graceJobs.remove(keyStr)?.cancel()
+
+            val job = graceScope.launch {
+                delay(replacingGraceMs)
+                // Only transition to Unprovided if still in Replacing state.
+                // If a re-provision arrived during the window, the flow is now Available
+                // and we should NOT overwrite it.
+                if (flow.value is BridgeValue.Replacing) {
+                    flow.value = BridgeValue.Unprovided(lastKnown)
+                }
+                graceJobs.remove(keyStr)
             }
+            graceJobs[keyStr] = job
         }
     }
 

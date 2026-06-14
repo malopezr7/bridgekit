@@ -2,7 +2,12 @@ package io.github.malopezr7.bridgekit
 
 import io.github.malopezr7.bridgekit.core.*
 import io.github.malopezr7.bridgekit.runtime.BridgeValue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
@@ -59,6 +64,30 @@ class StateTest {
         }
         stateStore.setNativeValue("c1", Scope.Global, "key", "b")
         assertEquals("b", received)
+    }
+
+    @Test
+    fun `observe only fires for matching contract state key and scope`() {
+        val received = mutableListOf<Any?>()
+        stateStore.observe("counter.contract", Scope.Global, "counter", epoch = 1) { map ->
+            received.add(map["v"])
+        }
+
+        stateStore.setNativeValue("reverse.contract", Scope.Global, "jsStatus", "js-ready")
+        stateStore.writeFromJs(
+            "local.contract",
+            Scope.Global,
+            "mood",
+            "focused",
+            nativeOwnsBinding = false,
+        )
+        stateStore.setNativeValue("counter.contract", Scope.Feature("other"), "counter", 99)
+
+        assertTrue(received.isEmpty())
+
+        stateStore.setNativeValue("counter.contract", Scope.Global, "counter", 1)
+
+        assertEquals(listOf(1), received)
     }
 
     @Test
@@ -124,6 +153,69 @@ class StateTest {
         @Suppress("UNCHECKED_CAST")
         val wrapped = result["value"] as? Map<String, Any?>
         assertEquals("hello", wrapped?.get("v"))
+    }
+
+    // ---- W2-3: Replacing grace window -----------------------------------------
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `W2-3 markJsContractsUnprovided transitions to Replacing first, not Unprovided immediately`() = runTest {
+        val testScope = TestScope(StandardTestDispatcher(testScheduler))
+        val store = StateStore(replacingGraceMs = 250L, graceScope = testScope)
+
+        store.writeFromJs("js.c", Scope.Global, "count", 10, nativeOwnsBinding = false)
+        val v0 = store.read("js.c", Scope.Global, "count", null)
+        assertTrue("should be Available before grace", v0 is BridgeValue.Available)
+
+        // Trigger epoch swap — should transition to Replacing immediately
+        store.markJsContractsUnprovided(setOf("js.c"))
+
+        val v1 = store.read("js.c", Scope.Global, "count", null)
+        assertTrue("should be Replacing within grace window, got $v1", v1 is BridgeValue.Replacing)
+        assertEquals(10, (v1 as BridgeValue.Replacing).lastKnown)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `W2-3 grace window expires to Unprovided after replacingGraceMs`() = runTest {
+        val testScope = TestScope(StandardTestDispatcher(testScheduler))
+        val store = StateStore(replacingGraceMs = 250L, graceScope = testScope)
+
+        store.writeFromJs("js.c", Scope.Global, "count", 42, nativeOwnsBinding = false)
+        store.markJsContractsUnprovided(setOf("js.c"))
+
+        val vDuring = store.read("js.c", Scope.Global, "count", null)
+        assertTrue("should still be Replacing during grace window", vDuring is BridgeValue.Replacing)
+
+        // Advance virtual time past the grace window
+        testScope.advanceTimeBy(300L)
+
+        val vAfter = store.read("js.c", Scope.Global, "count", null)
+        assertTrue("should be Unprovided after grace window expires, got $vAfter", vAfter is BridgeValue.Unprovided)
+        assertEquals(42, (vAfter as BridgeValue.Unprovided).lastKnown)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `W2-3 re-provision during grace window cancels timer and stays Available`() = runTest {
+        val testScope = TestScope(StandardTestDispatcher(testScheduler))
+        val store = StateStore(replacingGraceMs = 250L, graceScope = testScope)
+
+        store.writeFromJs("js.c", Scope.Global, "count", 5, nativeOwnsBinding = false)
+        store.markJsContractsUnprovided(setOf("js.c"))
+
+        val vReplacing = store.read("js.c", Scope.Global, "count", null)
+        assertTrue("should be Replacing", vReplacing is BridgeValue.Replacing)
+
+        // Re-provide before timer fires — simulates fast OTA swap
+        store.writeFromJs("js.c", Scope.Global, "count", 99, nativeOwnsBinding = false)
+
+        // Advance past grace window — timer should have been cancelled, no flip to Unprovided
+        testScope.advanceTimeBy(300L)
+
+        val vAfter = store.read("js.c", Scope.Global, "count", null)
+        assertTrue("should remain Available after re-provision, got $vAfter", vAfter is BridgeValue.Available)
+        assertEquals(99, (vAfter as BridgeValue.Available).value)
     }
 
     // ---- helpers ---------------------------------------------------------------
