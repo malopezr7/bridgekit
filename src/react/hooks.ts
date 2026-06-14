@@ -18,9 +18,42 @@ import {
 import type { BridgeContract } from '../contract/contract';
 import type { BridgeScope } from '../contract/protocol';
 import type { BridgeCallOpts, BridgeKitJs } from '../runtime/bridgekit';
-import { getAmbientScope, setAmbientScope } from '../runtime/bridgekit';
 import { getDefaultBridgeKit } from '../runtime/defaultInstance';
+import { diagnostics } from '../runtime/diagnostics';
 import type { MirrorValue } from '../runtime/stateMirror';
+import { DEFAULT_SCOPE, ScopeContext } from './ScopeContext';
+
+// ---- No-provider warning helper -----------------------------------------------
+
+/**
+ * Emits a ONE-TIME dev-only warning when a scoped hook runs without a
+ * BridgeScopeProvider ancestor in the tree.
+ *
+ * Detection: the context value is identity-equal to DEFAULT_SCOPE (the createContext
+ * default) AND the caller did not pass an explicit scope override via opts?.scope.
+ *
+ * @param contextScope  Value returned by useContext(ScopeContext)
+ * @param hasExplicitScope  true when opts?.scope was provided by the caller
+ * @param hookName  Hook name for the warning message
+ */
+function useWarnIfNoProvider(
+  contextScope: BridgeScope,
+  hasExplicitScope: boolean,
+  hookName: string,
+): void {
+  const isDefault = contextScope === DEFAULT_SCOPE;
+  // Stable key per hook+call-site: use the hook name; a ref ensures one warn per mount.
+  const warnedRef = useRef(false);
+  if (!warnedRef.current && isDefault && !hasExplicitScope) {
+    warnedRef.current = true;
+    diagnostics.warnOnce(
+      `no-provider:${hookName}`,
+      `${hookName} was called without a BridgeScopeProvider ancestor. ` +
+        'Falling back to global scope. ' +
+        'Wrap your component tree with <BridgeScopeProvider> to use isolated scopes.',
+    );
+  }
+}
 
 // ---- BridgeKit context -----------------------------------------------------
 
@@ -39,28 +72,36 @@ interface BridgeScopeProviderProps {
 }
 
 /**
- * Sets the ambient scope for the subtree.
- * Any useBridge / useProvideBridge calls below inherit this scope.
+ * Provides BridgeKit scope for the subtree via React Context.
+ * Any useBridge / useProvideBridge / useBridgeState calls below inherit this scope.
+ *
+ * Nested providers are fully isolated — no cross-talk between sibling subtrees.
+ * react-no-use-effect: scope flows through context (derived during render, no effect).
  */
 export function BridgeScopeProvider({
   feature,
   instance,
   children,
 }: BridgeScopeProviderProps): ReactNode {
-  const scope: BridgeScope = instance
-    ? { kind: 'instance', feature, instance }
-    : feature
-      ? { kind: 'feature', feature }
-      : { kind: 'global' };
-
-  // Set ambient scope synchronously during render (no effect needed)
-  // NOTE: ambient scope is global module state; for nested scopes use bridgekit context
+  // Memoize the scope object so Provider value reference is stable across renders
+  // when feature/instance strings haven't changed.
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — scope fields are the stable deps
-  useMemo(() => {
-    setAmbientScope(scope);
-  }, [scope.kind, scope.feature, scope.instance]);
+  const scope: BridgeScope = useMemo(
+    () =>
+      instance
+        ? { kind: 'instance', feature, instance }
+        : feature
+          ? { kind: 'feature', feature }
+          : { kind: 'global' },
+    [feature, instance],
+  );
 
-  return createElement(BridgeKitContext.Provider, { value: getDefaultBridgeKit() }, children);
+  // Wrap children in both contexts: ScopeContext (scope) + BridgeKitContext (bk instance).
+  return createElement(
+    ScopeContext.Provider,
+    { value: scope },
+    createElement(BridgeKitContext.Provider, { value: getDefaultBridgeKit() }, children),
+  );
 }
 
 // ---- useBridge -------------------------------------------------------------
@@ -74,7 +115,9 @@ export function useBridge<TShape>(
   opts?: { scope?: BridgeScope },
 ): TShape {
   const bk = useBridgeKit();
-  const scope = opts?.scope ?? getAmbientScope();
+  const contextScope = useContext(ScopeContext);
+  const scope = opts?.scope ?? contextScope;
+  useWarnIfNoProvider(contextScope, opts?.scope !== undefined, 'useBridge');
 
   // Stable proxy — recreated only if bk/contract/scope identity changes
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — scope fields are the stable deps
@@ -97,17 +140,21 @@ export function useProvideBridge<TShape>(
   opts?: { scope?: BridgeScope },
 ): void {
   const bk = useBridgeKit();
-  const scope = opts?.scope ?? getAmbientScope();
+  const contextScope = useContext(ScopeContext);
+  const scope = opts?.scope ?? contextScope;
+  useWarnIfNoProvider(contextScope, opts?.scope !== undefined, 'useProvideBridge');
+
   const implRef = useRef<Partial<TShape>>(impl);
 
-  // Keep latest impl without re-registering
-  useEffect(() => {
-    implRef.current = impl;
-  });
+  // S-2 fix (react-no-use-effect): update ref during render, not in a bare useEffect.
+  // The ref always holds the latest impl; the Proxy in useMountEffect delegates to it.
+  // Updating a ref during render is safe — it is synchronous, has no observable side
+  // effects on other components, and avoids the extra render cycle of a no-deps effect.
+  implRef.current = impl;
 
   // Mount effect: register on mount, close on unmount.
-  // This is external-system sync — useEffect is correct here per react-no-use-effect:
-  // registration IS a side effect of mounting.
+  // This is external-system sync — useMountEffect is correct here per react-no-use-effect:
+  // provider registration IS a side effect of mounting into the bridge runtime.
   useMountEffect(() => {
     // Use an indirection impl that always delegates to the latest ref
     const proxyImpl = new Proxy({} as Partial<TShape>, {
@@ -135,7 +182,9 @@ export function useBridgeState<TShape, K extends string>(
   opts?: { scope?: BridgeScope },
 ): MirrorValue<unknown> {
   const bk = useBridgeKit();
-  const scope = opts?.scope ?? getAmbientScope();
+  const contextScope = useContext(ScopeContext);
+  const scope = opts?.scope ?? contextScope;
+  useWarnIfNoProvider(contextScope, opts?.scope !== undefined, 'useBridgeState');
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — scope fields are the stable deps
   const mirror = useMemo(
@@ -160,7 +209,8 @@ export function useBridgeReady<TShape>(
   opts?: { scope?: BridgeScope },
 ): boolean {
   const bk = useBridgeKit();
-  const scope = opts?.scope ?? getAmbientScope();
+  const contextScope = useContext(ScopeContext);
+  const scope = opts?.scope ?? contextScope;
 
   const [ready, setReady] = useState(() => bk.registry.isProvided(contract.descriptor.id, scope));
 

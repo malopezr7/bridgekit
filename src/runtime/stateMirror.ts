@@ -14,7 +14,16 @@ import type { Registry } from './registry';
 import { serializeScope } from './registry';
 import type { BridgeTransport } from './transport';
 
-export type MirrorStatus = 'initial' | 'available' | 'unprovided';
+/**
+ * Status of a state mirror value.
+ *
+ * - `initial`:     No observation has started yet (mirror just created, no subscriber).
+ * - `provided`:    A provider is active and a value has been mirrored for the current epoch.
+ * - `stale`:       A value was last received from a provider that has since disconnected
+ *                  (reconnect in-flight within the grace window). Value is still accessible.
+ * - `unprovided`:  No provider is registered and no stale value exists.
+ */
+export type MirrorStatus = 'initial' | 'provided' | 'stale' | 'unprovided';
 
 export interface MirrorValue<T> {
   value: T;
@@ -72,7 +81,7 @@ export class StateMirror<T> {
   /** Hydrate from connect snapshot */
   hydrate(value: T): void {
     this._value = value;
-    this._status = 'available';
+    this._status = 'provided';
     this._updateSnapshot();
     this._notify();
   }
@@ -85,7 +94,7 @@ export class StateMirror<T> {
     }
   }
 
-  /** Called on epoch change — detach and clear obsId */
+  /** Called on epoch change — detach and mark stale (value kept accessible). */
   detachTransport(): void {
     if (this._obsId !== null && this._transport) {
       try {
@@ -96,7 +105,13 @@ export class StateMirror<T> {
       this._obsId = null;
     }
     this._transport = null;
-    this._status = 'unprovided';
+    // Keep the last known value but mark stale so consumers can distinguish from
+    // `unprovided`. The grace window (W2-3) resolves stale→unprovided via native timer.
+    if (this._status === 'provided') {
+      this._status = 'stale';
+    } else {
+      this._status = 'unprovided';
+    }
     this._updateSnapshot();
     this._notify();
   }
@@ -113,11 +128,11 @@ export class StateMirror<T> {
     };
     this._obsId = this._transport.stateObserve(env, (raw) => {
       if (raw === undefined) {
-        // Provider gone
-        this._status = 'unprovided';
+        // Provider gone — if we had a value keep it as stale, else unprovided.
+        this._status = this._status === 'provided' ? 'stale' : 'unprovided';
       } else {
         this._value = raw as T;
-        this._status = 'available';
+        this._status = 'provided';
       }
       this._updateSnapshot();
       this._notify();
@@ -142,7 +157,7 @@ export class StateMirror<T> {
  */
 export class LocalStateMirror<T> {
   private _value: T;
-  private _status: MirrorStatus = 'available';
+  private _status: MirrorStatus = 'provided';
   private _subscribers = new Set<ChangeCallback<T>>();
   private _snapshot: MirrorValue<T>;
   private _unsub: (() => void) | null = null;
@@ -177,10 +192,11 @@ export class LocalStateMirror<T> {
         this._key,
         (raw) => {
           if (raw === undefined) {
+            // Local state has no epoch/reconnect concept — gone means unprovided.
             this._status = 'unprovided';
           } else {
             this._value = raw as T;
-            this._status = 'available';
+            this._status = 'provided';
           }
           this._updateSnapshot();
           this._notify();

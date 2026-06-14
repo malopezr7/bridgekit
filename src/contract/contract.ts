@@ -123,6 +123,24 @@ export interface ContractDescriptor {
   readonly state: Record<string, StateDescriptor>;
 }
 
+// ---- generated runtime schema artifact (keystone, design Decision 1) -------
+
+/**
+ * Resolved schema nodes emitted by the CLI per contract into a `*.bridge.ts`
+ * artifact. The app imports it and passes it to
+ * `defineContract(id, shape, generatedSchemas)` so the marker descriptor carries
+ * the SAME `AnySchema` nodes the CLI hashes — giving hash parity and codec
+ * symmetry on the marker path.
+ *
+ * Shape mirrors the descriptor: per-member `params`/`result`/`value` schemas
+ * keyed by member name within `methods` / `streams` / `state`.
+ */
+export interface GeneratedSchemas {
+  readonly methods: Record<string, { readonly params?: AnySchema; readonly result?: AnySchema }>;
+  readonly streams: Record<string, { readonly value: AnySchema; readonly params?: AnySchema }>;
+  readonly state: Record<string, { readonly value: AnySchema }>;
+}
+
 // ---- BridgeStreamSource ---------------------------------------------------
 
 /**
@@ -285,10 +303,13 @@ function validateContractId(id: string): void {
  * @throws if any t.* state entry has an initial value that does not match its schema.
  * @throws (via t.union) if any union variant declares its discriminant key.
  */
-// Overload A: marker-style input → ContractHook (also BridgeContract-compatible)
+// Overload A: marker-style input → ContractHook (also BridgeContract-compatible).
+// Optional `generatedSchemas` (imported from the CLI `*.bridge.ts` artifact) bakes
+// resolved schemas into the descriptor for hash parity + codec symmetry (keystone).
 export function defineContract<const T extends MarkerContractInput>(
   id: string,
   shape: T,
+  generatedSchemas?: GeneratedSchemas,
 ): ContractHook<T> & BridgeContract<DerivedConsumer<T>>;
 
 // Overload B: legacy t.* style input → BridgeContract (also callable as ContractHook)
@@ -313,6 +334,7 @@ export function defineContract(
     streams?: Record<string, StreamDescriptor | StreamMarkerT<unknown, unknown>>;
     state?: Record<string, StateDescriptor | StateMarkerT<unknown>>;
   },
+  generatedSchemas?: GeneratedSchemas,
 ): BridgeContract<unknown> {
   validateContractId(id);
 
@@ -325,7 +347,7 @@ export function defineContract(
   const isMarkerStyle = _detectMarkerStyle(rawMethods, rawStreams, rawState);
 
   if (isMarkerStyle) {
-    return _defineMarkerContract(id, rawMethods, rawStreams, rawState);
+    return _defineMarkerContract(id, rawMethods, rawStreams, rawState, generatedSchemas);
   }
 
   // ---- Legacy t.* path (unchanged) ----------------------------------------
@@ -419,14 +441,31 @@ function _defineMarkerContract(
   rawMethods: Record<string, unknown>,
   rawStreams: Record<string, unknown>,
   rawState: Record<string, unknown>,
+  generatedSchemas?: GeneratedSchemas,
 ): BridgeContract<unknown> {
   // Build a ContractDescriptor from markers.
-  // Marker methods/streams/state have no params/result/value schema fields.
-  // The descriptor carries only `kind` + runtime opts (timeoutMs, latestOnly, etc.).
+  //
+  // KEYSTONE (design Decision 1): when `generatedSchemas` is provided (imported from
+  // the CLI-emitted `*.bridge.ts` artifact), the resolved `AnySchema` nodes are baked
+  // into each descriptor member. This gives the marker path the SAME descriptor shape
+  // the CLI hashes, so `stableHash` produces an identical contractHash (hash parity)
+  // and `codec.ts` encode/decode/validate run on the marker path.
+  //
+  // Field ORDER and PRESENCE must exactly mirror what the CLI emits (markerParser →
+  // load.ts) so the structural hash matches. The CLI omits absent schemas entirely,
+  // so we only set params/result/value when present (never set them to undefined).
+  const schemaMethods = generatedSchemas?.methods ?? {};
+  const schemaStreams = generatedSchemas?.streams ?? {};
+  const schemaState = generatedSchemas?.state ?? {};
+
   const methods: Record<string, MethodDescriptor> = {};
   for (const [name, m] of Object.entries(rawMethods)) {
     const marker = m as Record<string, unknown>;
     const d: Record<string, unknown> = { kind: marker.kind };
+    const memberSchema = schemaMethods[name];
+    // Bake params/result FIRST so the hash matches the CLI descriptor field set.
+    if (memberSchema?.params !== undefined) d.params = memberSchema.params;
+    if (memberSchema?.result !== undefined) d.result = memberSchema.result;
     // Carry timeoutMs for Async markers
     if ('timeoutMs' in marker) d.timeoutMs = marker.timeoutMs;
     methods[name] = d as unknown as MethodDescriptor;
@@ -436,6 +475,9 @@ function _defineMarkerContract(
   for (const [name, s] of Object.entries(rawStreams)) {
     const marker = s as Record<string, unknown>;
     const d: Record<string, unknown> = { kind: 'stream' };
+    const memberSchema = schemaStreams[name];
+    if (memberSchema?.value !== undefined) d.value = memberSchema.value;
+    if (memberSchema?.params !== undefined) d.params = memberSchema.params;
     if (marker.latestOnly !== undefined) d.latestOnly = marker.latestOnly;
     if (marker.sticky !== undefined) d.sticky = marker.sticky;
     streams[name] = d as unknown as StreamDescriptor;
@@ -444,14 +486,15 @@ function _defineMarkerContract(
   const state: Record<string, StateDescriptor> = {};
   for (const [name, s] of Object.entries(rawState)) {
     const marker = s as Record<string, unknown>;
-    // Marker state: { kind: 'state', initial: V } — no value schema.
-    // We inject a synthetic schema-less state descriptor. The runtime only needs
-    // `initial`; the `value` field is set to a sentinel so the runtime can branch.
-    state[name] = {
-      kind: 'state',
-      // No `value` AnySchema — this is the marker-style sentinel
-      initial: marker.initial,
-    } as StateDescriptor;
+    // Marker state: { kind: 'state', initial: V }.
+    // When a schema is baked, attach `value` so the descriptor mirrors the CLI's
+    // { kind, value, initial }. Without a schema, the descriptor stays schema-less
+    // (legacy marker path — value omitted, runtime branches on its absence).
+    const memberSchema = schemaState[name];
+    const d: Record<string, unknown> = { kind: 'state' };
+    if (memberSchema?.value !== undefined) d.value = memberSchema.value;
+    d.initial = marker.initial;
+    state[name] = d as unknown as StateDescriptor;
   }
 
   const descriptor: ContractDescriptor = {

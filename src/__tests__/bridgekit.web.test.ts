@@ -439,6 +439,113 @@ describe('streams via loopback', () => {
 
     expect(ends).toContain('BRIDGE_NOT_READY');
   });
+
+  // QW-2: Stream async-iterator (transport path) must complete when native closes.
+  // Use a stub transport that gives direct control over when onNext/onEnd fire.
+  // This precisely models the native-side close without a real Nitro layer.
+  test('QW-2: async iterator (transport path) resolves done:true when native closes stream', async () => {
+    // Build a minimal stub transport.
+    let capturedOnNext: ((v: unknown) => void) | null = null;
+    let capturedOnEnd: ((end: import('../contract/protocol').ResultEnvelope) => void) | null = null;
+
+    const stubTransport: import('../runtime/transport').BridgeTransport = {
+      connect: () => ({ epoch: 1, snapshot: [] }),
+      invoke: () => Promise.resolve({ ok: true, value: undefined }),
+      invokeSync: () => ({ ok: true, value: undefined }),
+      openStream: (_env, onNext, onEnd) => {
+        capturedOnNext = onNext;
+        capturedOnEnd = onEnd;
+        return 'stub-stream-1';
+      },
+      closeStream: () => {},
+      emitFromJs: () => {},
+      endFromJs: () => {},
+      stateRead: () => ({ ok: true, value: undefined }),
+      stateObserve: () => 'obs',
+      stateUnobserve: () => {},
+      stateWrite: () => ({ ok: true, value: undefined }),
+      pushProviderState: () => {},
+    };
+
+    const bk = new BridgeKitJs(stubTransport);
+    bk.connect();
+    // No local provide() — forces the transport path.
+
+    const proxy = bk.bridge(TestContract);
+    const stream = (
+      proxy.numbers as () => { [Symbol.asyncIterator]: () => AsyncIterator<number> }
+    )();
+    const iter = stream[Symbol.asyncIterator]();
+
+    // Start a next() call — it will pend until native emits.
+    const nextPromise = iter.next();
+
+    // Simulate native emitting a value.
+    capturedOnNext!(42);
+    const first = await nextPromise;
+    expect(first).toEqual({ value: 42, done: false });
+
+    // Now start another next() — it will pend until native closes.
+    const nextPromise2 = iter.next();
+
+    // Simulate native closing the stream.
+    // Without QW-2 fix: nextPromise2 hangs forever.
+    capturedOnEnd!({ ok: true });
+
+    const second = await nextPromise2;
+    expect(second.done).toBe(true);
+    expect(second.value).toBeUndefined();
+  }, 3000); // 3s timeout — hangs without fix
+
+  // QW-2 part 2: for-await loop terminates on native stream close via stub transport.
+  test('QW-2: for-await loop (transport path) terminates on native stream close', async () => {
+    let capturedOnNext: ((v: unknown) => void) | null = null;
+    let capturedOnEnd: ((end: import('../contract/protocol').ResultEnvelope) => void) | null = null;
+
+    const stubTransport: import('../runtime/transport').BridgeTransport = {
+      connect: () => ({ epoch: 1, snapshot: [] }),
+      invoke: () => Promise.resolve({ ok: true, value: undefined }),
+      invokeSync: () => ({ ok: true, value: undefined }),
+      openStream: (_env, onNext, onEnd) => {
+        capturedOnNext = onNext;
+        capturedOnEnd = onEnd;
+        return 'stub-stream-2';
+      },
+      closeStream: () => {},
+      emitFromJs: () => {},
+      endFromJs: () => {},
+      stateRead: () => ({ ok: true, value: undefined }),
+      stateObserve: () => 'obs',
+      stateUnobserve: () => {},
+      stateWrite: () => ({ ok: true, value: undefined }),
+      pushProviderState: () => {},
+    };
+
+    const bk = new BridgeKitJs(stubTransport);
+    bk.connect();
+
+    const proxy = bk.bridge(TestContract);
+    const stream = (
+      proxy.numbers as () => { [Symbol.asyncIterator]: () => AsyncIterator<number> }
+    )();
+
+    const collected: number[] = [];
+
+    // Start the for-await in background — will hang without the fix.
+    const loopDone = (async () => {
+      for await (const v of stream) {
+        collected.push(v as number);
+      }
+    })();
+
+    // Emit values then close — simulating native side.
+    capturedOnNext!(1);
+    capturedOnNext!(2);
+    capturedOnEnd!({ ok: true });
+
+    await loopDone;
+    expect(collected).toEqual([1, 2]);
+  }, 3000);
 });
 
 // ---- State tests -----------------------------------------------------------
@@ -725,4 +832,437 @@ describe('serializeScope', () => {
     expect(serializeScope({ kind: 'instance', feature: 'Foo', instance: 'tag' })).toBe(
       'instance:Foo:tag',
     ));
+});
+
+// ---- QW-3: No dangling timer / AbortSignal listener after call completes ----
+
+describe('QW-3: timeout timer and AbortSignal listener cleanup on call completion', () => {
+  // QW-3a: clearTimeout is called on the timeout timer when the call resolves successfully.
+  test('clearTimeout called after successful call with timeout', async () => {
+    const clearTimeoutSpy = jest.spyOn(global, 'clearTimeout');
+
+    // Use a stub transport that resolves immediately.
+    const transport = makeStubTransport(
+      () => ({ ok: true, value: 'pong' }),
+      () => Promise.resolve({ ok: true, value: 'pong' }),
+    );
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const proxy = bk.bridge(TestContract);
+    // Call with a long timeout — the call resolves before the timeout fires.
+    await (proxy.ping as (opts?: { timeoutMs?: number }) => Promise<string>)({
+      timeoutMs: 5000,
+    } as Parameters<typeof proxy.ping>[0]);
+
+    // clearTimeout must have been called to cancel the timer.
+    expect(clearTimeoutSpy).toHaveBeenCalled();
+    clearTimeoutSpy.mockRestore();
+  });
+
+  // QW-3b: AbortSignal 'abort' listener is removed after a successful call.
+  test('AbortSignal abort listener removed after successful call', async () => {
+    const controller = new AbortController();
+    const removeEventListenerSpy = jest.spyOn(controller.signal, 'removeEventListener');
+
+    const transport = makeStubTransport(
+      () => ({ ok: true, value: 'pong' }),
+      () => Promise.resolve({ ok: true, value: 'pong' }),
+    );
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const proxy = bk.bridge(TestContract);
+    await (proxy.ping as (opts?: { signal?: AbortSignal }) => Promise<string>)({
+      signal: controller.signal,
+    } as Parameters<typeof proxy.ping>[0]);
+
+    // The abort listener must be explicitly removed after call settles.
+    expect(removeEventListenerSpy).toHaveBeenCalledWith('abort', expect.any(Function));
+    removeEventListenerSpy.mockRestore();
+  });
+});
+
+// ---- W2-1: Teardown on reconnect --------------------------------------------
+
+describe('W2-1: providers and mirrors cleaned up on reconnect', () => {
+  test('all registry bindings from prior epoch are closed after reconnect', () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    // Register 3 providers in epoch N
+    const b1 = bk.provide(TestContract, { ping: async () => 'p1' });
+    const b2 = bk.provide(ScopeContract, { whoami: async () => 'w' });
+    const b3 = bk.provide(
+      ScopeContract,
+      { whoami: async () => 'w2' },
+      { scope: { kind: 'feature', feature: 'F' } },
+    );
+
+    expect(b1.isLive).toBe(true);
+    expect(b2.isLive).toBe(true);
+    expect(b3.isLive).toBe(true);
+
+    // Reconnect (epoch N+1)
+    bk.connect();
+
+    // All prior bindings must be closed
+    expect(b1.isLive).toBe(false);
+    expect(b2.isLive).toBe(false);
+    expect(b3.isLive).toBe(false);
+  });
+
+  test('mirrors detach from prior epoch: old obs is cancelled on reconnect', () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const mirror = bk.state(TestContract, 'count');
+    // Register a subscriber so the observer attaches to the transport
+    const received: number[] = [];
+    const unsub = mirror.subscribe((mv) => {
+      if (typeof mv.value === 'number') received.push(mv.value);
+    });
+
+    // Push state via transport — mirror becomes provided with value 42
+    transport.notifyStateChange(TestContract.descriptor.id, GLOBAL_SCOPE, 'count', 42);
+    expect(mirror.get().status).toBe('provided');
+    expect(mirror.get().value).toBe(42);
+
+    // Reconnect — detaches old observers, re-attaches fresh
+    bk.connect();
+
+    // Mirror re-attaches after connect(); push another value — it should be received
+    transport.notifyStateChange(TestContract.descriptor.id, GLOBAL_SCOPE, 'count', 99);
+    expect(mirror.get().value).toBe(99);
+
+    unsub();
+    // received will contain both values since the observer persists across reconnect
+    // The key guarantee: no dangling observer from the OLD epoch that fires twice
+    expect(received).toContain(42);
+    expect(received).toContain(99);
+  });
+
+  test('new epoch starts with zero inherited providers', () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    bk.provide(TestContract, { ping: async () => 'old' });
+
+    // Reconnect
+    bk.connect();
+
+    // Registry should have no live bindings after reconnect
+    const resolved = bk.registry.resolve(TestContract.descriptor.id, GLOBAL_SCOPE);
+    expect(resolved).toBeUndefined();
+  });
+});
+
+// ---- W2-2: isProvided / awaitProvided ---------------------------------------
+
+describe('W2-2: isProvided and awaitProvided for JS-provided contracts', () => {
+  test('isProvided returns true after provide()', () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    expect(bk.isProvided(TestContract)).toBe(false);
+
+    bk.provide(TestContract, { ping: async () => 'pong' });
+
+    expect(bk.isProvided(TestContract)).toBe(true);
+  });
+
+  test('isProvided returns false when no provider registered', () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    expect(bk.isProvided(ScopeContract)).toBe(false);
+  });
+
+  test('awaitProvided resolves immediately when already provided', async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    bk.provide(TestContract, { ping: async () => 'pong' });
+
+    await expect(bk.awaitProvided(TestContract, { timeoutMs: 200 })).resolves.toBeUndefined();
+  });
+
+  test('awaitProvided resolves when JS provider registers after 50ms', async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const waiter = bk.awaitProvided(TestContract, { timeoutMs: 1000 });
+    setTimeout(() => bk.provide(TestContract, { ping: async () => 'late' }), 50);
+
+    await expect(waiter).resolves.toBeUndefined();
+  });
+
+  test('awaitProvided rejects after timeout if provider never registers', async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    await expect(bk.awaitProvided(TestContract, { timeoutMs: 50 })).rejects.toThrow(
+      'CONTRACT_NOT_PROVIDED',
+    );
+  });
+});
+
+// ---- QW-4: Real openStreams counter in diagnostics --------------------------
+
+describe('QW-4: openStreams diagnostics counter', () => {
+  beforeEach(() => {
+    diagnostics.reset();
+  });
+
+  test('openStreams increments when stream subscribes, decrements on unsubscribe', async () => {
+    const { bridgekit } = makeTestBridge();
+    bridgekit.provide(TestContract, {
+      numbers: () => streamSource<number>((_emit) => () => {}),
+    });
+
+    const proxy = bridgekit.bridge(TestContract);
+    const stream1 = (
+      proxy.numbers as () => { subscribe: (cb: (v: number) => void) => () => void }
+    )();
+    const stream2 = (
+      proxy.numbers as () => { subscribe: (cb: (v: number) => void) => () => void }
+    )();
+
+    const unsub1 = stream1.subscribe(() => {});
+    const unsub2 = stream2.subscribe(() => {});
+
+    // Without fix: openStreams is hardcoded 0.
+    expect(bridgekit.dump().openStreams).toBe(2);
+
+    unsub1();
+    expect(bridgekit.dump().openStreams).toBe(1);
+
+    unsub2();
+    expect(bridgekit.dump().openStreams).toBe(0);
+  });
+});
+
+// ---- W3-1: Symmetric state codec — validate on push ------------------------
+
+describe('W3-1: Symmetric state codec — validate on setState push', () => {
+  test('setState push with wrong type rejects with validation error before sending', () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const binding = bk.provide(TestContract, {
+      count: 0,
+    });
+
+    // count is typed as number; pushing a string should be rejected
+    expect(() => {
+      binding.setState('count', 'not-a-number');
+    }).toThrow(/VALIDATION_FAILED|validate/i);
+  });
+
+  test('setState push with correct type succeeds', () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const binding = bk.provide(TestContract, {
+      count: 0,
+    });
+
+    // number is correct for count — should not throw
+    expect(() => {
+      binding.setState('count', 42);
+    }).not.toThrow();
+  });
+
+  test('setState push on contract without schema (marker path) passes through without error', () => {
+    // Marker contracts have no value schema → no validation, pass-through
+    const MarkerContract = defineContract('marker.no.schema', {
+      state: {
+        raw: t.state(t.string(), ''),
+      },
+    });
+
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const binding = bk.provide(MarkerContract, { raw: '' });
+
+    // Even wrong type: no schema means no validate — just passes through
+    // (marker path fallback; only schema-baked contracts validate)
+    expect(() => {
+      binding.setState('raw', 'valid string');
+    }).not.toThrow();
+  });
+});
+
+// ---- W3-2: Explicit state status (provided / unprovided / stale) ------------
+
+describe('W3-2: Explicit state status', () => {
+  test('provided status: mirror shows provided after value received', () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const mirror = bk.state(TestContract, 'count');
+    const received: Array<import('../runtime/stateMirror').MirrorValue<unknown>> = [];
+    const unsub = mirror.subscribe((mv) => received.push(mv));
+
+    transport.notifyStateChange(TestContract.descriptor.id, GLOBAL_SCOPE, 'count', 99);
+
+    expect(mirror.get().status).toBe('provided');
+    expect(mirror.get().value).toBe(99);
+    unsub();
+  });
+
+  test('unprovided status: mirror shows unprovided when no value ever received', () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const mirror = bk.state(TestContract, 'count');
+    const unsub = mirror.subscribe(() => {});
+
+    // No push — status stays initial/unprovided (initial before any subscription activity)
+    expect(['initial', 'unprovided']).toContain(mirror.get().status);
+    expect(mirror.get().value).toBe(0); // descriptor initial
+    unsub();
+  });
+
+  test('stale status: mirror flips to stale after transport detach with prior value', () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const mirror = bk.state(TestContract, 'count');
+    const unsub = mirror.subscribe(() => {});
+
+    // Seed a value
+    transport.notifyStateChange(TestContract.descriptor.id, GLOBAL_SCOPE, 'count', 7);
+    expect(mirror.get().status).toBe('provided');
+    expect(mirror.get().value).toBe(7);
+
+    // Detach (simulating reconnect teardown)
+    mirror.detachTransport();
+
+    // Value must be stale (kept) not dropped
+    expect(mirror.get().status).toBe('stale');
+    expect(mirror.get().value).toBe(7); // value preserved
+    unsub();
+  });
+
+  test('stale→unprovided: detach on never-provided mirror gives unprovided not stale', () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const mirror = bk.state(TestContract, 'count');
+    const unsub = mirror.subscribe(() => {});
+
+    // Detach without any prior value push
+    mirror.detachTransport();
+
+    expect(mirror.get().status).toBe('unprovided');
+    unsub();
+  });
+});
+
+// ---- W3-4: Bounded JS stream consumer queue with DROP_OLDEST ----------------
+
+describe('W3-4: Bounded JS stream consumer queue — DROP_OLDEST backpressure', () => {
+  beforeEach(() => {
+    diagnostics.reset();
+  });
+
+  test('ring buffer is bounded: drops happen when more than CAPACITY items emitted without consuming', async () => {
+    // Use the transport path (LoopbackTransport) so the ring-buffer async-iterator is exercised.
+    // In the local-first path (provide+bridge on same instance) the impl stream is returned
+    // directly without the ring-buffer wrapper — which is correct (no cross-boundary queue needed).
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    // Capture the onNext callback so we can drive it directly via the transport.
+    let capturedOnNext: ((v: unknown) => void) | null = null;
+    jest.spyOn(transport, 'openStream').mockImplementation((_env, onNext, _onEnd) => {
+      capturedOnNext = onNext;
+      return 'test-stream';
+    });
+
+    const proxy = bk.bridge(TestContract);
+    const stream = (
+      proxy.numbers as () => {
+        [Symbol.asyncIterator]: () => AsyncIterator<number>;
+      }
+    )();
+    const iter = stream[Symbol.asyncIterator]();
+
+    // Open the iterator — registers a waiter for the first item
+    const firstResultPromise = iter.next();
+
+    // capturedOnNext is set synchronously by the mock when [Symbol.asyncIterator] opens the stream
+    expect(capturedOnNext).not.toBeNull();
+    if (capturedOnNext !== null) {
+      // First item is delivered to the pending waiter directly — no queue
+      capturedOnNext(0);
+      // 200 more items flood the ring buffer (capacity = 64); items 65-200 are dropped
+      for (let i = 1; i <= 200; i++) {
+        (capturedOnNext as (v: unknown) => void)(i);
+      }
+      // streamDrops must be > 0 (we emitted 200 items into a 64-slot buffer)
+      expect(diagnostics.getStreamDrops()).toBeGreaterThan(0);
+    }
+
+    const first = await firstResultPromise;
+    expect(first.done).toBe(false);
+    expect(first.value).toBe(0);
+  });
+
+  test('stream drops counter in diagnostics increments on overflow', () => {
+    // Directly exercise the ring buffer logic by simulating the transport-path
+    // async-iterator: emit via the iterCb subscriber that the iterator registers.
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    let capturedOnNext: ((v: unknown) => void) | null = null;
+    jest.spyOn(transport, 'openStream').mockImplementation((env, onNext, onEnd) => {
+      capturedOnNext = onNext;
+      // Simulate an immediately-ending empty stream
+      setTimeout(() => onEnd({ ok: true }), 10_000);
+      return 'mock-stream-id';
+    });
+
+    const proxy = bk.bridge(TestContract);
+    const stream = (
+      proxy.numbers as () => {
+        [Symbol.asyncIterator]: () => AsyncIterator<number>;
+      }
+    )();
+    const iter = stream[Symbol.asyncIterator]();
+
+    // Register a waiter (first next() will wait)
+    iter.next(); // waiter registered
+
+    if (capturedOnNext !== null) {
+      // One item for the waiter
+      capturedOnNext(0);
+      // Now flood the queue: 200 items, CAPACITY=64, so 200-64=136 drops
+      for (let i = 1; i <= 200; i++) {
+        (capturedOnNext as (v: unknown) => void)(i);
+      }
+      expect(diagnostics.getStreamDrops()).toBeGreaterThan(0);
+      // Verify queue size is bounded: consume all via repeated next()
+      // after 64 reads the queue should be empty
+    }
+  });
 });

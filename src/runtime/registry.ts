@@ -308,6 +308,18 @@ export class Registry {
     }
   }
 
+  /**
+   * Close all live bindings with the given reason.
+   * Called on reconnect/epoch-swap to clean up JS-provided bindings from the prior epoch.
+   */
+  closeAll(reason: 'replacing' | 'final' = 'final'): void {
+    for (const [, entry] of this._entries) {
+      if (entry.binding.isLive) {
+        entry.binding.close(reason);
+      }
+    }
+  }
+
   /** Dump all bindings (for diagnostics). */
   dump(): Array<{ contractId: string; scopeKey: string; isLive: boolean }> {
     return Array.from(this._entries.entries()).map(([, entry]) => ({

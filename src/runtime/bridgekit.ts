@@ -3,11 +3,12 @@
 // Wires transport + dispatcher + registry + mirrors + typed proxy.
 // ---------------------------------------------------------------------------
 
-import { decode, encode, sanitizeAny } from '../contract/codec';
+import { decode, encode, sanitizeAny, validate } from '../contract/codec';
 import type { BridgeContract, BridgeStreamSource } from '../contract/contract';
 import { isMarkerDescriptor } from '../contract/contract';
 import type { BridgeScope } from '../contract/protocol';
 import { createBridgeError } from '../contract/protocol';
+import type { AnySchema } from '../contract/schema';
 import { nextCorrelationId } from './correlationId';
 import { diagnostics } from './diagnostics';
 import { Dispatcher } from './dispatcher';
@@ -52,6 +53,32 @@ function _encodePayload(
 }
 
 /**
+ * Decode an inbound native payload against its schema, then VALIDATE it (W1-5).
+ *
+ * Validation runs on the inbound seam because wire skew (native returns a payload
+ * with a missing required field or a wrong-typed field) is a production concern,
+ * not a dev-only concern. A mismatch throws VALIDATION_FAILED with the field path
+ * instead of silently coercing or returning a structurally-wrong object.
+ */
+function _decodeAndValidateInbound(
+  schema: AnySchema,
+  value: unknown,
+  contractId: string,
+  member: string,
+): unknown {
+  const decoded = decode(schema, value);
+  const result = validate(schema, decoded);
+  if (!result.ok) {
+    throw createBridgeError(
+      'VALIDATION_FAILED',
+      `[bridgekit] VALIDATION_FAILED: ${contractId}.${member} result ${result.message} at path "${result.path}"`,
+      { contractId, member, details: { path: result.path } },
+    );
+  }
+  return decoded;
+}
+
+/**
  * Encode stream params for transport.
  * - t.* path: schema-driven encode.
  * - Marker path: universal deep-sanitize.
@@ -65,6 +92,43 @@ function _encodeStreamPayload(
     return encode(streamDesc.params, params);
   }
   return sanitizeAny(params);
+}
+
+// ---- Stream diagnostics wrapper --------------------------------------------
+
+/**
+ * Wraps a BridgeStreamSource to track the number of active subscriptions
+ * in the diagnostics counter (increments on subscribe, decrements on unsub).
+ */
+function wrapStreamSourceWithDiagnostics(
+  source: BridgeStreamSource<unknown>,
+): BridgeStreamSource<unknown> {
+  return {
+    subscribe(cb: (v: unknown) => void): () => void {
+      diagnostics.incrementOpenStreams();
+      const unsub = source.subscribe(cb);
+      return () => {
+        diagnostics.decrementOpenStreams();
+        unsub();
+      };
+    },
+    [Symbol.asyncIterator](): AsyncIterator<unknown> {
+      // Async iterators are counted separately — each for-await consumer is one subscription.
+      diagnostics.incrementOpenStreams();
+      const iter = source[Symbol.asyncIterator]();
+      return {
+        next(): Promise<IteratorResult<unknown>> {
+          return iter.next();
+        },
+        return(value?: unknown): Promise<IteratorResult<unknown>> {
+          diagnostics.decrementOpenStreams();
+          return iter.return
+            ? iter.return(value)
+            : Promise.resolve({ value: undefined, done: true });
+        },
+      };
+    },
+  };
 }
 
 // ---- Ambient scope ---------------------------------------------------------
@@ -104,9 +168,20 @@ export class BridgeKitJs {
 
   /**
    * Wire the dispatcher to the transport.
-   * Call once on startup (or on reconnect).
+   * Call once on startup (or on reconnect / epoch-swap).
+   *
+   * On reconnect: tears down all prior-epoch state before re-wiring so no
+   * producers, mirrors, or observers leak across epoch boundaries (W2-1).
    */
   connect(): void {
+    if (this._connected) {
+      // Reconnect path: clean up prior-epoch resources first.
+      // Order mirrors the native connectDispatcher teardown (Router.kt:133-153).
+      this._dispatcher.closeAllProducers();
+      this._mirrors.detachAll();
+      this.registry.closeAll('final');
+    }
+
     this._dispatcher.setTransport(this._transport);
     const result = this._transport.connect(this._dispatcher);
     this._epoch = result.epoch;
@@ -149,6 +224,19 @@ export class BridgeKitJs {
       const originalClose = binding.close.bind(binding);
 
       binding.setState = (key: string, value: unknown) => {
+        // W3-1: Validate state value against baked schema (if available) before pushing.
+        // This kills the raw Any? silent coercion on the push path.
+        const stateDesc = contract.descriptor.state[key];
+        if (stateDesc !== undefined && 'value' in stateDesc && stateDesc.value) {
+          const result = validate(stateDesc.value, value);
+          if (!result.ok) {
+            throw createBridgeError(
+              'VALIDATION_FAILED',
+              `[bridgekit] setState VALIDATION_FAILED: ${contract.descriptor.id}.${key} ${result.message} at path "${result.path}"`,
+              { contractId: contract.descriptor.id, member: key, details: { path: result.path } },
+            );
+          }
+        }
         originalSetState(key, value);
         transport.pushProviderState(contract.descriptor.id, scope, key, value);
       };
@@ -202,6 +290,7 @@ export class BridgeKitJs {
                 payload: _encodePayload(methodDesc, params),
                 correlationId: nextCorrelationId(),
                 epoch: this._epoch,
+                contractHash: contract.hash,
               };
               this._transport
                 .invoke(env)
@@ -235,6 +324,7 @@ export class BridgeKitJs {
                 payload: _encodePayload(methodDesc, params),
                 correlationId: nextCorrelationId(),
                 epoch: this._epoch,
+                contractHash: contract.hash,
               };
               const result = this._transport.invokeSync(env);
               if (!result.ok) {
@@ -242,6 +332,7 @@ export class BridgeKitJs {
                   contractId: result.contractId,
                   member: result.member,
                   scope: result.scope,
+                  details: result.details,
                 });
               }
               if ('result' in methodDesc && methodDesc.result) {
@@ -259,7 +350,7 @@ export class BridgeKitJs {
                     `[bridgekit] provider returned no value for member '${prop}' (contractId: ${desc.id}) — likely a codegen/contract mismatch`,
                   );
                 }
-                return decode(schema, result.value);
+                return _decodeAndValidateInbound(schema, result.value, desc.id, prop);
               }
               // Marker path: no schema — guard by kind (querySync always expects a result)
               if (isMarkerDescriptor(methodDesc as unknown as Record<string, unknown>)) {
@@ -328,6 +419,7 @@ export class BridgeKitJs {
               payload: _encodePayload(methodDesc, params),
               correlationId: nextCorrelationId(),
               epoch: this._epoch,
+              contractHash: contract.hash,
             };
 
             const timeoutMs =
@@ -339,11 +431,16 @@ export class BridgeKitJs {
 
             let invocation = this._transport.invoke(env);
 
+            // Track resources that must be cleaned up when the call settles.
+            let timerId: ReturnType<typeof setTimeout> | undefined;
+            let abortHandler: (() => void) | undefined;
+            let abortSignal: AbortSignal | undefined;
+
             if (timeoutMs !== undefined && timeoutMs !== null) {
               invocation = Promise.race([
                 invocation,
-                new Promise<typeof invocation extends Promise<infer R> ? R : never>((_, reject) =>
-                  setTimeout(
+                new Promise<typeof invocation extends Promise<infer R> ? R : never>((_, reject) => {
+                  timerId = setTimeout(
                     () =>
                       reject(
                         createBridgeError(
@@ -352,14 +449,15 @@ export class BridgeKitJs {
                         ),
                       ),
                     timeoutMs,
-                  ),
-                ),
+                  );
+                }),
               ]);
             }
 
             if (callOpts?.signal) {
               const signal = callOpts.signal;
               if (signal.aborted) {
+                if (timerId !== undefined) clearTimeout(timerId);
                 return Promise.reject(
                   createBridgeError(
                     'CANCELLED',
@@ -367,61 +465,66 @@ export class BridgeKitJs {
                   ),
                 );
               }
+              abortSignal = signal;
               invocation = Promise.race([
                 invocation,
                 new Promise<typeof invocation extends Promise<infer R> ? R : never>((_, reject) => {
-                  signal.addEventListener(
-                    'abort',
-                    () =>
-                      reject(
-                        createBridgeError(
-                          'CANCELLED',
-                          '[bridgekit] CANCELLED: AbortSignal aborted',
-                        ),
-                      ),
-                    { once: true },
-                  );
+                  abortHandler = () =>
+                    reject(
+                      createBridgeError('CANCELLED', '[bridgekit] CANCELLED: AbortSignal aborted'),
+                    );
+                  signal.addEventListener('abort', abortHandler, { once: true });
                 }),
               ]);
             }
 
-            return invocation.then((res) => {
-              if (!res.ok) {
-                diagnostics.incrementErrors();
-                throw createBridgeError(res.code, res.message, {
-                  contractId: res.contractId,
-                  member: res.member,
-                  scope: res.scope,
-                });
-              }
-              if ('result' in methodDesc && methodDesc.result) {
-                // Guard: a non-void, non-optional result must carry a value.
-                // undefined here means the provider encoded nothing — likely a
-                // codegen/contract mismatch (e.g. inbound adapter missing encode call).
-                const schema = methodDesc.result;
-                if (
-                  res.value === undefined &&
-                  schema.kind !== 'void' &&
-                  schema.kind !== 'optional'
-                ) {
-                  throw createBridgeError(
-                    'INCOMPATIBLE_CONTRACT',
-                    `[bridgekit] provider returned no value for member '${prop}' (contractId: ${desc.id}) — likely a codegen/contract mismatch`,
-                  );
+            return invocation
+              .finally(() => {
+                // Cancel timeout timer and remove abort listener on any settlement
+                // (success, error, or abort) to prevent resource leaks.
+                if (timerId !== undefined) clearTimeout(timerId);
+                if (abortSignal !== undefined && abortHandler !== undefined) {
+                  abortSignal.removeEventListener('abort', abortHandler);
                 }
-                return decode(schema, res.value);
-              }
-              // Marker path: no schema — guard by kind (query expects a result)
-              if (isMarkerDescriptor(methodDesc as unknown as Record<string, unknown>)) {
-                if (res.value === undefined) {
-                  throw createBridgeError(
-                    'INCOMPATIBLE_CONTRACT',
-                    `[bridgekit] provider returned no value for member '${prop}' (contractId: ${desc.id}) — likely a codegen/contract mismatch`,
-                  );
+              })
+              .then((res) => {
+                if (!res.ok) {
+                  diagnostics.incrementErrors();
+                  throw createBridgeError(res.code, res.message, {
+                    contractId: res.contractId,
+                    member: res.member,
+                    scope: res.scope,
+                    details: res.details,
+                  });
                 }
-              }
-              return res.value;
-            });
+                if ('result' in methodDesc && methodDesc.result) {
+                  // Guard: a non-void, non-optional result must carry a value.
+                  // undefined here means the provider encoded nothing — likely a
+                  // codegen/contract mismatch (e.g. inbound adapter missing encode call).
+                  const schema = methodDesc.result;
+                  if (
+                    res.value === undefined &&
+                    schema.kind !== 'void' &&
+                    schema.kind !== 'optional'
+                  ) {
+                    throw createBridgeError(
+                      'INCOMPATIBLE_CONTRACT',
+                      `[bridgekit] provider returned no value for member '${prop}' (contractId: ${desc.id}) — likely a codegen/contract mismatch`,
+                    );
+                  }
+                  return _decodeAndValidateInbound(schema, res.value, desc.id, prop);
+                }
+                // Marker path: no schema — guard by kind (query expects a result)
+                if (isMarkerDescriptor(methodDesc as unknown as Record<string, unknown>)) {
+                  if (res.value === undefined) {
+                    throw createBridgeError(
+                      'INCOMPATIBLE_CONTRACT',
+                      `[bridgekit] provider returned no value for member '${prop}' (contractId: ${desc.id}) — likely a codegen/contract mismatch`,
+                    );
+                  }
+                }
+                return res.value;
+              });
           };
         }
 
@@ -432,7 +535,8 @@ export class BridgeKitJs {
             // --- LOCAL-FIRST: check registry before transport ---
             const localEntry = this.registry.resolve(desc.id, scope);
             if (localEntry) {
-              return openLocalStream(localEntry.binding.impl, prop, desc.id, params);
+              const localSource = openLocalStream(localEntry.binding.impl, prop, desc.id, params);
+              return wrapStreamSourceWithDiagnostics(localSource);
             }
 
             // --- FALL-THROUGH: transport path ---
@@ -444,10 +548,15 @@ export class BridgeKitJs {
               payload: _encodeStreamPayload(streamDesc, params),
               correlationId: nextCorrelationId(),
               epoch: this._epoch,
+              contractHash: contract.hash,
             };
 
             let streamId: string | null = null;
             const subscribers = new Set<(v: unknown) => void>();
+            // End subscribers are notified when native closes the stream.
+            // Each async iterator registers its own close callback here so pending
+            // next() promises are resolved with { done: true } on native close.
+            const endSubscribers = new Set<() => void>();
             const capturedTransport = this._transport;
 
             const closeIfNeeded = () => {
@@ -470,11 +579,14 @@ export class BridgeKitJs {
                 (_end) => {
                   streamId = null;
                   subscribers.clear();
+                  // Notify async iterators so pending next() calls resolve done.
+                  for (const cb of endSubscribers) cb();
+                  endSubscribers.clear();
                 },
               );
             };
 
-            return {
+            const transportSource: BridgeStreamSource<unknown> = {
               subscribe(cb: (v: unknown) => void): () => void {
                 subscribers.add(cb);
                 openIfNeeded();
@@ -486,7 +598,13 @@ export class BridgeKitJs {
                 };
               },
               [Symbol.asyncIterator](): AsyncIterator<unknown> {
-                const queue: unknown[] = [];
+                // W3-4: Bounded ring buffer with DROP_OLDEST backpressure.
+                // A slow consumer cannot grow this queue unboundedly.
+                const QUEUE_CAPACITY = 64;
+                const ringBuf = new Array<unknown>(QUEUE_CAPACITY);
+                let head = 0; // index of next read
+                let tail = 0; // index of next write
+                let size = 0; // current item count
                 const waiters: Array<(v: IteratorResult<unknown>) => void> = [];
                 let closed = false;
                 const iterCb = (v: unknown) => {
@@ -494,21 +612,43 @@ export class BridgeKitJs {
                     const w = waiters.shift();
                     if (w) w({ value: v, done: false });
                   } else {
-                    queue.push(v);
+                    if (size === QUEUE_CAPACITY) {
+                      // DROP_OLDEST: advance head to drop the oldest item
+                      head = (head + 1) % QUEUE_CAPACITY;
+                      diagnostics.incrementStreamDrops();
+                    } else {
+                      size++;
+                    }
+                    ringBuf[tail] = v;
+                    tail = (tail + 1) % QUEUE_CAPACITY;
                   }
                 };
+                // Called when native closes the stream — resolves all pending waiters.
+                const iterEndCb = () => {
+                  closed = true;
+                  subscribers.delete(iterCb);
+                  endSubscribers.delete(iterEndCb);
+                  for (const w of waiters.splice(0)) w({ value: undefined, done: true });
+                };
                 subscribers.add(iterCb);
+                endSubscribers.add(iterEndCb);
                 openIfNeeded();
                 return {
                   next(): Promise<IteratorResult<unknown>> {
-                    if (queue.length > 0)
-                      return Promise.resolve({ value: queue.shift() as unknown, done: false });
+                    if (size > 0) {
+                      const value = ringBuf[head];
+                      ringBuf[head] = undefined; // allow GC
+                      head = (head + 1) % QUEUE_CAPACITY;
+                      size--;
+                      return Promise.resolve({ value, done: false });
+                    }
                     if (closed) return Promise.resolve({ value: undefined, done: true });
                     return new Promise((resolve) => waiters.push(resolve));
                   },
                   return(): Promise<IteratorResult<unknown>> {
                     closed = true;
                     subscribers.delete(iterCb);
+                    endSubscribers.delete(iterEndCb);
                     if (subscribers.size === 0) closeIfNeeded();
                     for (const w of waiters.splice(0)) w({ value: undefined, done: true });
                     return Promise.resolve({ value: undefined, done: true });
@@ -516,6 +656,7 @@ export class BridgeKitJs {
                 };
               },
             };
+            return wrapStreamSourceWithDiagnostics(transportSource);
           };
         }
 
@@ -565,19 +706,49 @@ export class BridgeKitJs {
   }
 
   /**
+   * Check whether a contract is currently provided in the given scope.
+   *
+   * Checks the JS-local registry first (truthful for JS-provided contracts without
+   * a native round-trip). Falls through to transport readiness if transport exposes it.
+   */
+  isProvided(contract: BridgeContract<unknown>, opts?: { scope?: BridgeScope }): boolean {
+    const scope = opts?.scope ?? _ambientScope;
+    return this.registry.isProvided(contract.descriptor.id, scope);
+  }
+
+  /**
+   * Await until a contract is provided in the given scope.
+   *
+   * Resolves immediately if already provided. Rejects with CONTRACT_NOT_PROVIDED
+   * if no provider registers within the timeout window.
+   */
+  awaitProvided(
+    contract: BridgeContract<unknown>,
+    opts?: { scope?: BridgeScope; timeoutMs?: number },
+  ): Promise<void> {
+    const scope = opts?.scope ?? _ambientScope;
+    return this.registry.whenProvided(contract.descriptor.id, {
+      scope,
+      timeoutMs: opts?.timeoutMs,
+    });
+  }
+
+  /**
    * Dump current state for diagnostics.
    */
   dump(): {
     bindings: ReturnType<Registry['dump']>;
     mirrors: ReturnType<MirrorRegistry['dump']>;
     openStreams: number;
+    streamDrops: number;
     counters: ReturnType<typeof diagnostics.getCounters>;
     epoch: number;
   } {
     return {
       bindings: this.registry.dump(),
       mirrors: this._mirrors.dump(),
-      openStreams: 0, // transport-level tracking; mirrors via transport
+      openStreams: diagnostics.getOpenStreams(),
+      streamDrops: diagnostics.getStreamDrops(),
       counters: diagnostics.getCounters(),
       epoch: this._epoch,
     };

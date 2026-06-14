@@ -41,6 +41,26 @@ export interface CallEnvelope {
   payload?: unknown;
   correlationId: string;
   epoch: number;
+  /**
+   * The caller's contractHash (FNV-1a over the descriptor). Carried on the hot path
+   * so the receiver can detect wire skew (design Decision 2). The receiver caches the
+   * first hash it sees per contract and, in enforce mode, returns INCOMPATIBLE_CONTRACT
+   * when a later hash differs. Optional for backward/loopback compatibility.
+   */
+  contractHash?: string;
+}
+
+// ---- handshake / connect envelope -----------------------------------------
+
+/**
+ * Connect-time handshake payload. Carries per-contract hashes so the receiving
+ * side learns the caller's contract identities up front (design Decision 2).
+ * `memberHashes` rides the handshake (and the INCOMPATIBLE_CONTRACT error) for
+ * diffing; the per-call envelope only re-sends `contractHash` for the hot path.
+ */
+export interface ConnectEnvelope {
+  contractHashes?: Record<string, string>;
+  memberHashes?: Record<string, Record<string, string>>;
 }
 
 export interface ResultOk {

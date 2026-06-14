@@ -35,6 +35,10 @@ function envelopeToMap(env: CallEnvelope): Record<string, unknown> {
   if (env.payload !== undefined) {
     map.payload = env.payload;
   }
+  // Carry the caller's contractHash on the hot path for wire skew detection (D2).
+  if (env.contractHash !== undefined) {
+    map.contractHash = env.contractHash;
+  }
   return map;
 }
 
@@ -52,6 +56,8 @@ function mapToResult(map: Record<string, unknown>): ResultEnvelope {
     contractId: map.contractId as string | undefined,
     member: map.member as string | undefined,
     scope: map.scope as CallEnvelope['scope'] | undefined,
+    // Carry skew-diff details (e.g. INCOMPATIBLE_CONTRACT callerHash/receiverHash).
+    details: map.details,
   };
 }
 
@@ -83,6 +89,7 @@ function mapToEnvelope(map: Record<string, unknown>): CallEnvelope {
     payload: map.payload,
     correlationId: (map.correlationId as string | undefined) ?? '',
     epoch: (map.epoch as number | undefined) ?? 0,
+    contractHash: map.contractHash as string | undefined,
   };
 }
 

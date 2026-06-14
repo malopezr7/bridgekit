@@ -16,6 +16,7 @@ export type {
   ContractDescriptor,
   ContractShape,
   FireDescriptor,
+  GeneratedSchemas,
   MethodDescriptor,
   MethodParams,
   MethodResult,
