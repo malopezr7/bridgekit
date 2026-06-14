@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flow
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -230,6 +231,149 @@ class StreamHubTest {
         )
 
         hub.cancelAll()
+    }
+
+    // ---- ADR-6: Error terminal semantics -----------------------------------------
+
+    /**
+     * ADR-6: When the upstream flow throws, each consumer MUST receive an error terminal
+     * (ok=false, code=PROVIDER_ERROR), NOT a normal OK terminal.
+     *
+     * FAILS TODAY: `.catch {}` in the upstream pump swallows the error, then collect
+     * returns normally, so HUB_TERMINAL_OK is emitted even when the upstream errored.
+     */
+    @Test
+    fun `ADR-6 upstream error causes consumers to receive error terminal not OK`() {
+        val consumer1Ends = mutableListOf<Map<String, Any?>>()
+        val consumer2Ends = mutableListOf<Map<String, Any?>>()
+        val endLatch = CountDownLatch(2) // both consumers must receive a terminal
+
+        val errorMessage = "provider blew up"
+        val adapter = object : InboundContractAdapter {
+            override val stateInitials: Map<String, Any?> = emptyMap()
+            override suspend fun invoke(member: String, payload: Map<String, Any?>?): Any? = null
+            override fun invokeSync(member: String, payload: Map<String, Any?>?): Any? = null
+            override fun stateFlows(): Map<String, StateFlow<Any?>> = emptyMap()
+            override fun openStream(member: String, payload: Map<String, Any?>?): Flow<Any?> =
+                kotlinx.coroutines.flow.flow {
+                    emit("before-error")
+                    throw RuntimeException(errorMessage)
+                }
+        }
+
+        val contractId = "hub.error.test"
+        val member = "erroring"
+        val scope = Scope.Global
+        val paramsHash = 0L
+
+        hub.attach(
+            contractId = contractId, member = member, scope = scope, paramsHash = paramsHash,
+            adapter = adapter, payload = null, streamEpoch = 1L, streamId = "c1",
+            onNext = {},
+            onEnd = { terminal ->
+                consumer1Ends.add(terminal)
+                endLatch.countDown()
+            },
+        )
+        hub.attach(
+            contractId = contractId, member = member, scope = scope, paramsHash = paramsHash,
+            adapter = adapter, payload = null, streamEpoch = 1L, streamId = "c2",
+            onNext = {},
+            onEnd = { terminal ->
+                consumer2Ends.add(terminal)
+                endLatch.countDown()
+            },
+        )
+
+        assertTrue(
+            "Both consumers must receive a terminal within 3s",
+            endLatch.await(3, TimeUnit.SECONDS)
+        )
+
+        // Each consumer must receive EXACTLY ONE terminal.
+        assertEquals("Consumer 1 must receive exactly one terminal", 1, consumer1Ends.size)
+        assertEquals("Consumer 2 must receive exactly one terminal", 1, consumer2Ends.size)
+
+        // The terminal must be an ERROR terminal, NOT an OK terminal.
+        val term1 = consumer1Ends[0]
+        val term2 = consumer2Ends[0]
+
+        assertFalse(
+            "Consumer 1 terminal must be ok=false (error), got ok=${term1["ok"]}",
+            term1["ok"] as Boolean
+        )
+        assertFalse(
+            "Consumer 2 terminal must be ok=false (error), got ok=${term2["ok"]}",
+            term2["ok"] as Boolean
+        )
+        assertEquals("Consumer 1 error code must be PROVIDER_ERROR", "PROVIDER_ERROR", term1["code"])
+        assertEquals("Consumer 2 error code must be PROVIDER_ERROR", "PROVIDER_ERROR", term2["code"])
+    }
+
+    /**
+     * ADR-6: After a normal terminal (upstream completes), the consumer Job MUST be
+     * completed (cancelled). In the broken code, `return@collect` does not stop collection
+     * on the hot MutableSharedFlow — the coroutine stays alive and the Job remains Active.
+     *
+     * FAILS TODAY: `return@collect` inside the lambda returns only from the collect lambda,
+     * not from the coroutine. The consumer Job stays Active indefinitely after the terminal,
+     * meaning a subsequent emission would still reach the consumer.
+     *
+     * The fix: call `consumerJob.cancel("terminal-ok")` inside the collect block on terminal.
+     * After fix: Job transitions to Cancelled (isCompleted=true) within a short grace period.
+     */
+    @Test
+    fun `ADR-6 consumer job completes after upstream normal termination`() {
+        val terminalLatch = CountDownLatch(1)
+        val onEndFinal = mutableListOf<Map<String, Any?>>()
+
+        // Upstream completes after emitting one item.
+        val completingAdapter = object : InboundContractAdapter {
+            override val stateInitials: Map<String, Any?> = emptyMap()
+            override suspend fun invoke(member: String, payload: Map<String, Any?>?): Any? = null
+            override fun invokeSync(member: String, payload: Map<String, Any?>?): Any? = null
+            override fun stateFlows(): Map<String, StateFlow<Any?>> = emptyMap()
+            override fun openStream(member: String, payload: Map<String, Any?>?): Flow<Any?> =
+                kotlinx.coroutines.flow.flow {
+                    emit("only-item")
+                    // Flow ends normally → HUB_TERMINAL_OK emitted by pump.
+                }
+        }
+
+        val consumerJob = hub.attach(
+            contractId = "hub.job-completes.test",
+            member = "items",
+            scope = Scope.Global,
+            paramsHash = 0L,
+            adapter = completingAdapter,
+            payload = null,
+            streamEpoch = 1L,
+            streamId = "c1",
+            onNext = {},
+            onEnd = { t ->
+                onEndFinal.add(t)
+                terminalLatch.countDown()
+            },
+        )
+
+        assertTrue(
+            "Consumer must receive terminal from completing upstream within 3s",
+            terminalLatch.await(3, TimeUnit.SECONDS)
+        )
+
+        // Terminal must be exactly one OK terminal.
+        assertEquals("Must receive exactly one terminal", 1, onEndFinal.size)
+        assertTrue("Terminal must be ok=true for clean completion", onEndFinal[0]["ok"] as Boolean)
+
+        // The consumer Job MUST be completed (cancelled) after the terminal.
+        // Wait briefly for job cancellation to propagate.
+        Thread.sleep(200)
+
+        assertTrue(
+            "Consumer job must be completed (cancelled) after terminal — it must not stay Active. " +
+            "FAILS TODAY because return@collect does not stop the hot SharedFlow collection.",
+            consumerJob.isCompleted
+        )
     }
 
     // ---- Integration: cancelling the returned Job (Router.closeStream) detaches --------

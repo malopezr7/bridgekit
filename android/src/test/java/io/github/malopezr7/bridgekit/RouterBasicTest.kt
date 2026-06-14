@@ -212,6 +212,86 @@ class RouterBasicTest {
         )
     }
 
+    // ---- ADR-5: isProvided via REAL JS-provide path (stateWrite) ----------------
+
+    // ADR-5: markJsProvided must be called by Router.stateWrite for contracts not
+    // owned by native. This test drives the REAL provide path — it does NOT call
+    // markJsProvided directly. A stateWrite envelope simulates what JS runtime sends
+    // when bk.provide() pushes initial state for a JS-provided contract.
+    @Test
+    fun `ADR-5 isProvided true after JS stateWrite for non-native-owned contract`() {
+        val contractId = "test.js-provided"
+
+        // No native binding registered — JS is the provider.
+        assertFalse(
+            "isProvided must be false before any stateWrite",
+            router.isProvided(contractId, Scope.Global)
+        )
+
+        // Simulate JS calling bk.provide(contract, impl) which pushes initial state.
+        // This is the REAL provide path — does NOT call markJsProvided directly.
+        val env = mapOf(
+            "contractId" to contractId,
+            "member" to "someStateKey",
+            "scope" to mapOf("kind" to "global"),
+            "payload" to mapOf("v" to "initial-value"),
+        )
+        router.stateWrite(env)
+
+        // After the stateWrite arrives and there is no native binding, the Router
+        // must call markJsProvided internally so isProvided returns true.
+        assertTrue(
+            "isProvided must be true after JS stateWrite for a non-native-owned contract (ADR-5)",
+            router.isProvided(contractId, Scope.Global)
+        )
+    }
+
+    @Test
+    fun `ADR-5 awaitProvided resolves after JS stateWrite for non-native-owned contract`() = runTest {
+        val contractId = "test.js-await-provided"
+
+        // Simulate JS stateWrite arriving (the real JS provide path).
+        val env = mapOf(
+            "contractId" to contractId,
+            "member" to "value",
+            "scope" to mapOf("kind" to "global"),
+            "payload" to mapOf("v" to 42),
+        )
+        router.stateWrite(env)
+
+        // awaitProvided must resolve (not time out) because markJsProvided and
+        // parkBuffer.unpark were called by stateWrite.
+        val resolved = router.awaitProvided(contractId, Scope.Global, timeoutMs = 200)
+        assertTrue(
+            "awaitProvided must resolve (not time out) after JS stateWrite (ADR-5)",
+            resolved
+        )
+    }
+
+    @Test
+    fun `ADR-5 native-owned contract stateWrite does NOT mark as JS-provided`() {
+        val defn = stubDefinition("native.owned")
+        val entry = makeEntry(defn, Scope.Global)
+        router.registerBinding(entry)
+
+        // stateWrite for a contract that IS native-owned must not mark it as JS-provided
+        // (native binding already covers isProvided).
+        val env = mapOf(
+            "contractId" to "native.owned",
+            "member" to "value",
+            "scope" to mapOf("kind" to "global"),
+            "payload" to mapOf("v" to "data"),
+        )
+        router.stateWrite(env)
+
+        // isProvided is true (via native binding), but for the right reason.
+        // The JS-provided set must NOT have added "native.owned".
+        assertTrue(
+            "isProvided must be true via native binding after native-owned stateWrite",
+            router.isProvided("native.owned", Scope.Global)
+        )
+    }
+
     // ---- helpers ---------------------------------------------------------------
 
     private fun stubDefinition(id: String) = object : io.github.malopezr7.bridgekit.runtime.BridgeContractDefinition<Any, Any>(

@@ -6,7 +6,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.buffer
-import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -97,7 +97,10 @@ internal class StreamHub(
 
         entry.refCount.incrementAndGet()
 
-        // Start the upstream Flow exactly once (for the first attaching consumer)
+        // Start the upstream Flow exactly once (for the first attaching consumer).
+        // ADR-6 Fix A: remove the swallowing .catch {} so the try/catch here classifies
+        // completion as exactly one terminal — HubTerminalError on failure, HUB_TERMINAL_OK
+        // on normal completion — and CancellationException is rethrown (cooperative cancel).
         synchronized(entry) {
             if (entry.upstreamJob == null || entry.upstreamJob?.isActive == false) {
                 entry.upstreamJob = engineScope.launch {
@@ -105,14 +108,18 @@ internal class StreamHub(
                         val flow = adapter.openStream(member, payload)
                         flow
                             .buffer(UPSTREAM_BUFFER, BufferOverflow.DROP_OLDEST)
-                            .catch { /* upstream error handled below */ }
+                            // No .catch here — errors must reach the outer catch so we can
+                            // emit HubTerminalError instead of silently emitting HUB_TERMINAL_OK.
                             .collect { value -> entry.sharedFlow.emit(value) }
-                        // upstream completed — signal end to all current consumers via null sentinel
-                        // We cannot call onEnd here directly because multiple consumers exist.
-                        // Instead emit a terminal null and let each consumer's collection handle it.
+                        // Upstream completed normally — emit exactly one OK terminal.
                         entry.sharedFlow.emit(HUB_TERMINAL_OK)
-                    } catch (e: Exception) {
-                        // Emit error sentinel so collecting coroutines can propagate it
+                    } catch (ce: CancellationException) {
+                        // Cooperative cancel (epoch-swap, last-consumer-detach). Do NOT emit
+                        // any terminal sentinel — the consumer job is already being cancelled.
+                        throw ce
+                    } catch (e: Throwable) {
+                        // Upstream error — emit an error terminal so each consumer receives
+                        // ok=false/PROVIDER_ERROR, never a false OK.
                         entry.sharedFlow.emit(HubTerminalError(e.message ?: "Stream error"))
                     } finally {
                         hubs.remove(key)
@@ -121,13 +128,18 @@ internal class StreamHub(
             }
         }
 
-        // Each consumer gets its own collection coroutine on the shared flow
-        val consumerJob = engineScope.launch {
+        // ADR-6 Fix B: capture the consumer job so we can cancel it from inside the
+        // collect block on terminal. `return@collect` alone does NOT stop collection on
+        // a hot MutableSharedFlow — only job cancellation stops the coroutine.
+        lateinit var consumerJob: Job
+        consumerJob = engineScope.launch {
             entry.sharedFlow.collect { value ->
                 when {
                     value === HUB_TERMINAL_OK -> {
                         onEnd(mapOf("ok" to true, "value" to null))
-                        return@collect
+                        // Cancel this consumer's coroutine so the SharedFlow collection
+                        // actually stops. invokeOnCompletion below will then call detach().
+                        consumerJob.cancel(CancellationException("terminal-ok"))
                     }
                     value is HubTerminalError -> {
                         onEnd(mapOf(
@@ -138,20 +150,20 @@ internal class StreamHub(
                             "member" to member,
                             "scope" to mapOf("kind" to scope.serialize()),
                         ))
-                        return@collect
+                        // Cancel so the collector stops — guarantees exactly one terminal.
+                        consumerJob.cancel(CancellationException("terminal-error"))
                     }
                     else -> {
                         onNext(mapOf("v" to value))
                     }
                 }
             }
-            // SharedFlow collection completes only if the scope is cancelled
         }
 
         // Tie the hub refcount to the consumer job lifecycle. When the consumer job
-        // completes or is cancelled (Router.closeStream cancels it, epoch swap, or scope
-        // cancellation), detach so the refcount decrements and the upstream provider Flow
-        // is released once the last consumer leaves. detach() is null-safe if the entry
+        // completes or is cancelled (terminal cancel, Router.closeStream, epoch swap, or
+        // scope cancellation), detach so the refcount decrements and the upstream provider
+        // Flow is released once the last consumer leaves. detach() is null-safe if the entry
         // was already removed (upstream completion / cancelAll), so this never double-frees.
         consumerJob.invokeOnCompletion {
             detach(contractId, member, scope, paramsHash)

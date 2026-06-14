@@ -289,8 +289,18 @@ internal class Router(
         @Suppress("UNCHECKED_CAST")
         val value = (valueWrapped as? Map<String, Any?>)?.get("v")
 
-        // Check if native side owns this binding
+        // Check if native side owns this binding.
         val nativeOwns = resolveBinding(contractId, scope) != null
+        if (!nativeOwns) {
+            // A stateWrite for a contract native does NOT own ⇒ JS is the provider.
+            // Record it so isProvided / awaitProvided / tryConsume are truthful for
+            // JS-provided contracts. Also unpark any native-side awaitProvided waiters.
+            // ADR-5: markJsProvided is the real JS-provide path signal.
+            // Accepted limitation: stateless JS contracts emit no stateWrite, so they
+            // won't be marked here — noted follow-up (ADR-5 edge case).
+            markJsProvided(contractId)
+            parkBuffer.unpark(contractId, scope)
+        }
         return stateStore.writeFromJs(contractId, scope, stateKey, value, nativeOwns)
     }
 
@@ -354,9 +364,11 @@ internal class Router(
     /**
      * Await until (contractId, scope) is provided, with timeout.
      * Returns true if provided, false if timed out.
+     * ADR-5: also returns true immediately for JS-provided contracts (jsProvidedContracts set).
      */
     internal suspend fun awaitProvided(contractId: String, scope: Scope, timeoutMs: Long): Boolean {
         if (resolveBinding(contractId, scope) != null) return true
+        if (jsProvidedContracts.contains(contractId)) return true
         val deferred = parkBuffer.park(contractId, scope) ?: return false
         return try {
             withTimeout(timeoutMs) { deferred.await() }
