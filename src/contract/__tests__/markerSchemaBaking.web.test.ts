@@ -1,60 +1,37 @@
-// Wave 1 keystone: marker descriptors carry resolved AnySchema (design Decision 1).
+// W3 — Schema-first markers: descriptor byte-identity proof.
 //
-// These tests assert that defineContract(id, shape, generatedSchemas) bakes the
-// resolved schemas into each descriptor member, and that the resulting runtime
-// contractHash is byte-for-byte equal to the hash the CLI computes over the SAME
-// descriptor structure (hash parity by construction).
+// These tests assert that schema-first markers (design D1) produce descriptors
+// that are byte-identical to the equivalent t.* descriptor for the same shapes.
+// No generatedSchemas third-argument is required — the schemas are carried directly.
 //
-// ADR-7 (W4): demo contract dogfood — demo contracts must pass generatedSchemas as
-// the 3rd arg so the in-app runtime hash matches the generated Kotlin Contract hash.
+// ADR-7 (W3): schema-first markers make hash parity structural — the descriptor
+// IS the t.* descriptor, so the CLI hash and the runtime hash are always identical.
 
-import type { GeneratedSchemas } from '../index';
 import { Async, defineContract, State, Stream, stableHash, Void } from '../index';
+import { t } from '../schema';
 
-// Generated schemas as the CLI would emit them into *.bridge.ts for this contract.
-const generatedSchemas: GeneratedSchemas = {
-  methods: {
-    getUserById: {
-      params: { kind: 'object', fields: { id: { kind: 'string' } } },
-      result: {
-        kind: 'object',
-        fields: {
-          userId: { kind: 'string' },
-          name: { kind: 'string' },
-        },
-      },
-    },
-    ping: {},
-  },
-  streams: {
-    tick: { value: { kind: 'object', fields: { n: { kind: 'number' } } } },
-  },
-  state: {
-    status: { value: { kind: 'string' } },
-  },
-};
+// ---- schema-first marker contract (no third arg needed) --------------------
 
 function makeContract() {
-  return defineContract(
-    'wave1.fixture',
-    {
-      methods: {
-        getUserById: Async<{ id: string }, { userId: string; name: string }>(),
-        ping: Void(),
-      },
-      streams: {
-        tick: Stream<{ n: number }>(),
-      },
-      state: {
-        status: State('idle'),
-      },
+  return defineContract('wave1.fixture', {
+    methods: {
+      getUserById: Async(
+        t.object({ id: t.string() }),
+        t.object({ userId: t.string(), name: t.string() }),
+      ),
+      ping: Void(),
     },
-    generatedSchemas,
-  );
+    streams: {
+      tick: Stream(t.object({ n: t.number() })),
+    },
+    state: {
+      status: State(t.string(), 'idle'),
+    },
+  });
 }
 
-describe('Wave 1 keystone — marker schema baking', () => {
-  it('bakes the resolved param/result schema into method descriptors', () => {
+describe('W3 schema-first markers — descriptor byte-identity', () => {
+  it('carries the param/result schema into method descriptors directly', () => {
     const contract = makeContract();
     const getUserById = contract.descriptor.methods.getUserById;
     expect(getUserById.params).toEqual({
@@ -67,7 +44,7 @@ describe('Wave 1 keystone — marker schema baking', () => {
     });
   });
 
-  it('bakes the resolved value schema into stream and state descriptors', () => {
+  it('carries the value schema into stream and state descriptors directly', () => {
     const contract = makeContract();
     expect(contract.descriptor.streams.tick.value).toEqual({
       kind: 'object',
@@ -76,17 +53,16 @@ describe('Wave 1 keystone — marker schema baking', () => {
     expect(contract.descriptor.state.status.value).toEqual({ kind: 'string' });
   });
 
-  it('preserves the marker initial value on state descriptors', () => {
+  it('preserves the initial value on state descriptors', () => {
     const contract = makeContract();
     expect(contract.descriptor.state.status.initial).toBe('idle');
   });
 
-  it('produces a contractHash equal to the CLI hash over the same descriptor', () => {
+  it('hash is byte-identical to an equivalent t.* contract descriptor', () => {
     const contract = makeContract();
 
-    // This is exactly the descriptor structure the CLI hashes (load.ts
-    // markerDescriptorToToken → _stableHash over the full descriptor with schemas).
-    const cliDescriptor = {
+    // Build the equivalent descriptor using t.* directly (the reference shape).
+    const tStarDescriptor = {
       $type: 'io.github.malopezr7.bridgekit.contract',
       descriptorVersion: 1,
       id: 'wave1.fixture',
@@ -109,146 +85,32 @@ describe('Wave 1 keystone — marker schema baking', () => {
       },
     };
 
-    expect(contract.hash).toBe(stableHash(cliDescriptor));
+    expect(contract.hash).toBe(stableHash(tStarDescriptor));
   });
 
-  it('hashes a no-param Void marker differently from a typed Query marker', () => {
-    const a = defineContract(
-      'skew.a',
-      { methods: { ping: Void() } },
-      { methods: { ping: {} }, streams: {}, state: {} },
-    );
-    const b = defineContract(
-      'skew.a',
-      { methods: { ping: Async<{ id: string }, { ok: boolean }>() } },
-      {
-        methods: {
-          ping: {
-            params: { kind: 'object', fields: { id: { kind: 'string' } } },
-            result: { kind: 'object', fields: { ok: { kind: 'boolean' } } },
-          },
-        },
-        streams: {},
-        state: {},
+  it('no-param Void marker hashes differently from a typed Async marker', () => {
+    const a = defineContract('skew.a', { methods: { ping: Void() } });
+    const b = defineContract('skew.a', {
+      methods: {
+        ping: Async(t.object({ id: t.string() }), t.object({ ok: t.boolean() })),
       },
-    );
+    });
     expect(a.hash).not.toBe(b.hash);
   });
 
-  it('still works without generatedSchemas (legacy schema-less marker path)', () => {
-    const contract = defineContract('legacy.fixture', {
-      methods: { ping: Void() },
-      state: { status: State('idle') },
+  it('schema-first State carries schema in descriptor — no generatedSchemas needed', () => {
+    const contract = defineContract('state.fixture', {
+      state: {
+        count: State(t.number(), 0),
+        label: State(t.string(), 'hello'),
+      },
     });
-    // No schema baked → descriptor stays schema-less, hash still deterministic.
-    expect(contract.descriptor.methods.ping.kind).toBe('fire');
-    expect(contract.descriptor.state.status.initial).toBe('idle');
-    expect(typeof contract.hash).toBe('string');
+    expect(contract.descriptor.state.count.value).toEqual({ kind: 'number' });
+    expect(contract.descriptor.state.count.initial).toBe(0);
+    expect(contract.descriptor.state.label.value).toEqual({ kind: 'string' });
+    expect(contract.descriptor.state.label.initial).toBe('hello');
   });
 });
 
-// ---------------------------------------------------------------------------
-// ADR-7 — dogfood generated schemas in demo contracts (W4 hash-parity proof)
-//
-// The bridgekit.demo-host contract is the keystone dogfood target.
-// The generated hash (from bridgekit.demo-host.bridge.ts) is 7eae3360.
-// These tests prove:
-//   1. Without the 3rd arg → runtime hash differs from 7eae3360 (the defect).
-//   2. With the 3rd arg (generatedSchemas) → runtime hash === 7eae3360 (the fix).
-//
-// W1 fix: imports the REAL co-located .bridge.ts (not an inline constant) so any
-// schema drift causes this test to pick up the updated schemas automatically.
-// ---------------------------------------------------------------------------
-
-// Import the ACTUAL generated schema artifact — same file the demo contract imports.
-// If the CLI regenerates and the schema changes, this test picks it up automatically.
-import { generatedSchemas as demoHostGeneratedSchemas } from '../../../../../features/simple-feature/src/bridgekit-demo/contracts/bridgekit.demo-host.bridge';
-
-const DEMO_HOST_GENERATED_HASH = '7eae3360';
-
-/** Shape matching features/simple-feature/src/bridgekit-demo/contracts/demo-host.contract.ts */
-function makeDemoHostShape() {
-  return {
-    methods: {
-      ping: Async<{ message: string }, { reply: string; epoch: number }>(),
-      increment: Async<number>(),
-      say: Void<{ text: string }>(),
-    },
-    streams: {
-      ticker: Stream<number>(),
-      echoes: Stream<string>(),
-    },
-    state: {
-      counter: State<number>(0),
-    },
-  };
-}
-
-describe('ADR-7 — demo-host hash parity (dogfood schema proof)', () => {
-  it('without 3rd arg the runtime hash differs from the generated CLI hash (proves the defect)', () => {
-    const contractNoSchema = defineContract('bridgekit.demo-host', makeDemoHostShape());
-    // This is the pre-fix state: no schema baked → hash does not match the generated one.
-    expect(contractNoSchema.hash).not.toBe(DEMO_HOST_GENERATED_HASH);
-  });
-
-  it('with generatedSchemas the runtime hash equals the generated CLI hash (proves the fix)', () => {
-    const contractWithSchema = defineContract(
-      'bridgekit.demo-host',
-      makeDemoHostShape(),
-      demoHostGeneratedSchemas,
-    );
-    // Hash parity: the in-app runtime hash must equal the Kotlin Contract hash 7eae3360.
-    expect(contractWithSchema.hash).toBe(DEMO_HOST_GENERATED_HASH);
-  });
-
-  it('generatedSchemas bakes method schemas into the demo-host descriptor', () => {
-    const contract = defineContract(
-      'bridgekit.demo-host',
-      makeDemoHostShape(),
-      demoHostGeneratedSchemas,
-    );
-    expect(contract.descriptor.methods.ping.params).toEqual({
-      fields: { message: { kind: 'string' } },
-      kind: 'object',
-    });
-    expect(contract.descriptor.streams.ticker.value).toEqual({ kind: 'number' });
-    expect(contract.descriptor.state.counter.value).toEqual({ kind: 'number' });
-  });
-});
-
-// ---------------------------------------------------------------------------
-// W1(b) — Schema copy parity: feature co-located .bridge.ts files must stay
-// byte-identical to the platforms/android generated copies.
-//
-// When `bridgekit generate` runs, it writes to platforms/android/.../generated/.
-// The co-located copies in features/.../contracts/ are updated manually or via
-// a re-run with --into. This test fails if the two sets drift apart, giving CI
-// a hard enforcement gate to catch stale manual copies.
-// ---------------------------------------------------------------------------
-
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-
-const REPO_ROOT = resolve(__dirname, '../../../../../');
-const FEATURE_CONTRACTS = `${REPO_ROOT}/features/simple-feature/src/bridgekit-demo/contracts`;
-const ANDROID_GENERATED = `${REPO_ROOT}/platforms/android/app/src/main/java/com/example/demo/bridgekit/generated`;
-
-const SCHEMA_FILES = [
-  'bridgekit.demo-host.bridge.ts',
-  'bridgekit.demo-reverse.bridge.ts',
-  'bridgekit.demo-jsinfo.bridge.ts',
-  'bridgekit.demo-feature.bridge.ts',
-  'bridgekit.localhost.bridge.ts',
-];
-
-describe('W1(b) — dogfood .bridge.ts copy parity (CI drift gate)', () => {
-  for (const fileName of SCHEMA_FILES) {
-    it(`${fileName}: feature copy is byte-identical to android generated copy`, () => {
-      const featurePath = `${FEATURE_CONTRACTS}/${fileName}`;
-      const androidPath = `${ANDROID_GENERATED}/${fileName}`;
-      const featureContent = readFileSync(featurePath, 'utf8');
-      const androidContent = readFileSync(androidPath, 'utf8');
-      expect(featureContent).toBe(androidContent);
-    });
-  }
-});
+// W4: .bridge.ts files deleted — schema-first contracts carry schemas directly.
+// The W1(b) copy-parity gate is removed as the files no longer exist.

@@ -1,152 +1,147 @@
 // ---------------------------------------------------------------------------
-// Marker API — type-first BridgeKit descriptors.
+// Schema-first Marker API — W3 rewrite (design D1).
 //
-// CORE CONSTRAINT: TypeScript generic type arguments are ERASED at runtime.
-// Each marker factory returns a MINIMAL runtime object carrying only { kind }
-// (plus initial for State, and opts fields). The P / R / V types are PHANTOM
-// — they exist only at compile time, declared in a `declare`d phantom field
-// that is NEVER populated at runtime.
+// Markers now accept t.* schema VALUES instead of phantom generic type args.
+// The runtime descriptor carries the schema nodes directly, so no ts-morph,
+// no .bridge.ts, and no third-argument re-injection are required.
 //
-// The internal `kind` strings match the existing descriptor vocabulary so the
-// runtime proxy and codegen remain unchanged: 'querySync' | 'query' | 'fire'
-// | 'stream' | 'state'.
+// Arity is resolved at runtime via `isSchema()` (an object with a `kind`
+// string field), not a NoParams sentinel.
 //
-// Codegen (ts-morph, DX-2) must STATIC-PARSE these generic arguments from
-// source; it cannot read them at runtime.
+// The produced descriptors are structurally identical to the t.* descriptor
+// forms already in contract.ts, so `_detectMarkerStyle` returns false and
+// defineContract takes the standard t.* path — giving hash parity by
+// construction.
 // ---------------------------------------------------------------------------
 
-// ---- NoParams sentinel ----------------------------------------------------
-// A unique sentinel meaning "no params type argument was supplied".
-// Used to resolve the Sync<R> vs Sync<P, R> arity ambiguity.
+import type {
+  FireDescriptor,
+  FireWithParamsDescriptor,
+  QueryDescriptor,
+  QuerySyncDescriptor,
+  QuerySyncTypedDescriptor,
+  QuerySyncWithParamsDescriptor,
+  QueryTypedDescriptor,
+  QueryWithParamsDescriptor,
+  StateDescriptor,
+  StateTypedDescriptor,
+  StreamDescriptor,
+  StreamTypedDescriptor,
+  StreamWithParamsDescriptor,
+} from './contract';
+import type { AnySchema, Infer, ObjectSchema } from './schema';
 
-declare const NoParamsBrand: unique symbol;
-export interface NoParams {
-  readonly [NoParamsBrand]: true;
+// ---- isSchema discriminator -----------------------------------------------
+// An object with a `kind` string field is a schema node.
+// Opts objects (AsyncOpts, StreamOpts) deliberately have no `kind`.
+
+function isSchema(x: unknown): x is AnySchema {
+  return (
+    x != null && typeof x === 'object' && typeof (x as Record<string, unknown>).kind === 'string'
+  );
 }
 
-// ---- Phantom carrier -------------------------------------------------------
-// Covariant function box so P/R never collapse to `never` and never need a
-// runtime value. `declare` → zero runtime footprint.
+// ---- Opts types ------------------------------------------------------------
 
-type Phantom<T> = (x: never) => T;
-
-// ---- IsNoParams helper -----------------------------------------------------
-
-type IsNoParams<P> = [P] extends [NoParams] ? true : false;
-
-// ===========================================================================
-// Marker shapes (phantom-typed). __p / __r / __v are NEVER assigned at
-// runtime — declared optional + phantom.
-// ===========================================================================
-
-export interface SyncMarker<P, R> {
-  readonly kind: 'querySync';
-  readonly __p?: Phantom<P>;
-  readonly __r?: Phantom<R>;
+export interface AsyncOpts {
+  timeoutMs?: number | null;
 }
 
-export interface AsyncMarker<P, R> {
-  readonly kind: 'query';
-  readonly timeoutMs?: number | null;
-  readonly __p?: Phantom<P>;
-  readonly __r?: Phantom<R>;
+export interface StreamOpts {
+  latestOnly?: boolean;
+  sticky?: boolean;
 }
-
-export interface VoidMarker<P> {
-  readonly kind: 'fire';
-  readonly __p?: Phantom<P>;
-}
-
-export interface StreamMarkerT<V, P> {
-  readonly kind: 'stream';
-  readonly latestOnly?: boolean;
-  readonly sticky?: boolean;
-  readonly __v?: Phantom<V>;
-  readonly __p?: Phantom<P>;
-}
-
-export interface StateMarkerT<V> {
-  readonly kind: 'state';
-  readonly initial: V; // RUNTIME value — the only non-phantom payload
-  readonly __v?: Phantom<V>;
-}
-
-export type AnyMarkerT =
-  | SyncMarker<unknown, unknown>
-  | AsyncMarker<unknown, unknown>
-  | VoidMarker<unknown>
-  | StreamMarkerT<unknown, unknown>
-  | StateMarkerT<unknown>;
-
-// ===========================================================================
-// Marker factories — overloaded to resolve 1- vs 2-type-arg arity.
-// ===========================================================================
 
 // ---- Sync (querySync) ------------------------------------------------------
 
 /** Synchronous query — result only (no params). */
-export function Sync<R>(): SyncMarker<NoParams, R>;
+export function Sync<R extends AnySchema>(result: R): QuerySyncTypedDescriptor<R>;
 /** Synchronous query — params + result. */
-export function Sync<P, R>(): SyncMarker<P, R>;
-export function Sync(): SyncMarker<unknown, unknown> {
-  return { kind: 'querySync' };
+export function Sync<P extends ObjectSchema, R extends AnySchema>(
+  params: P,
+  result: R,
+): QuerySyncWithParamsDescriptor<P, R>;
+export function Sync(a: AnySchema, b?: AnySchema): QuerySyncDescriptor {
+  return b === undefined
+    ? { kind: 'querySync', result: a }
+    : { kind: 'querySync', params: a as ObjectSchema, result: b };
 }
 
 // ---- Async (query) ---------------------------------------------------------
 
 /** Async query — result only (no params). */
-export function Async<R>(opts?: { timeoutMs?: number | null }): AsyncMarker<NoParams, R>;
+export function Async<R extends AnySchema>(result: R, opts?: AsyncOpts): QueryTypedDescriptor<R>;
 /** Async query — params + result. */
-export function Async<P, R>(opts?: { timeoutMs?: number | null }): AsyncMarker<P, R>;
-export function Async(opts?: { timeoutMs?: number | null }): AsyncMarker<unknown, unknown> {
-  const marker = { kind: 'query' } as unknown as Record<string, unknown>;
+export function Async<P extends ObjectSchema, R extends AnySchema>(
+  params: P,
+  result: R,
+  opts?: AsyncOpts,
+): QueryWithParamsDescriptor<P, R>;
+export function Async(a: AnySchema, b?: AnySchema | AsyncOpts, c?: AsyncOpts): QueryDescriptor {
+  const hasParams = isSchema(b);
+  const result = hasParams ? (b as AnySchema) : a;
+  const params = hasParams ? a : undefined;
+  const opts = hasParams ? c : (b as AsyncOpts | undefined);
+
+  const descriptor: Record<string, unknown> = {
+    kind: 'query',
+    result,
+    ...(params !== undefined ? { params } : {}),
+  };
   if (opts?.timeoutMs !== undefined) {
-    marker.timeoutMs = opts.timeoutMs;
+    descriptor.timeoutMs = opts.timeoutMs;
   }
-  return marker as unknown as AsyncMarker<unknown, unknown>;
+  return descriptor as unknown as QueryDescriptor;
 }
 
-// ---- Void (fire) ---------------------------------------------------------
+// ---- Void (fire) -----------------------------------------------------------
 
 /** Fire-and-forget — no params. */
-export function Void(): VoidMarker<NoParams>;
+export function Void(): FireDescriptor;
 /** Fire-and-forget — with params. */
-export function Void<P>(): VoidMarker<P>;
-export function Void(): VoidMarker<unknown> {
-  return { kind: 'fire' };
+export function Void<P extends ObjectSchema>(params: P): FireWithParamsDescriptor<P>;
+export function Void(params?: ObjectSchema): FireDescriptor {
+  return params === undefined ? { kind: 'fire' } : { kind: 'fire', params };
 }
 
 // ---- Stream ----------------------------------------------------------------
 
-/** Stream of values — no params. */
-export function Stream<V>(opts?: {
-  latestOnly?: boolean;
-  sticky?: boolean;
-}): StreamMarkerT<V, NoParams>;
-/** Stream of values — with params. */
-export function Stream<V, P>(opts?: {
-  latestOnly?: boolean;
-  sticky?: boolean;
-}): StreamMarkerT<V, P>;
-export function Stream(opts?: {
-  latestOnly?: boolean;
-  sticky?: boolean;
-}): StreamMarkerT<unknown, unknown> {
-  const marker = { kind: 'stream' } as unknown as Record<string, unknown>;
-  if (opts?.latestOnly !== undefined) marker.latestOnly = opts.latestOnly;
-  if (opts?.sticky !== undefined) marker.sticky = opts.sticky;
-  return marker as unknown as StreamMarkerT<unknown, unknown>;
+/** Stream of values — value schema only, no params. */
+export function Stream<V extends AnySchema>(value: V, opts?: StreamOpts): StreamTypedDescriptor<V>;
+/** Stream of values — value schema + params. */
+export function Stream<V extends AnySchema, P extends ObjectSchema>(
+  value: V,
+  params: P,
+  opts?: StreamOpts,
+): StreamWithParamsDescriptor<V, P>;
+export function Stream(
+  a: AnySchema,
+  b?: ObjectSchema | StreamOpts,
+  c?: StreamOpts,
+): StreamDescriptor {
+  const hasParams = isSchema(b);
+  const opts = hasParams ? c : (b as StreamOpts | undefined);
+
+  const descriptor: Record<string, unknown> = {
+    kind: 'stream',
+    value: a,
+    ...(hasParams ? { params: b as ObjectSchema } : {}),
+  };
+  if (opts?.latestOnly !== undefined) descriptor.latestOnly = opts.latestOnly;
+  if (opts?.sticky !== undefined) descriptor.sticky = opts.sticky;
+  return descriptor as unknown as StreamDescriptor;
 }
 
 // ---- State -----------------------------------------------------------------
 
-/** Observable state with a required runtime initial value. */
-export function State<V>(initial: V): StateMarkerT<V> {
-  return { kind: 'state', initial };
+/** Observable state — value schema required, initial value must match the schema at runtime. */
+export function State<V extends AnySchema>(value: V, initial: unknown): StateTypedDescriptor<V>;
+export function State(value: AnySchema, initial: unknown): StateDescriptor {
+  return { kind: 'state', value, initial };
 }
 
 // ===========================================================================
-// Type derivation helpers — map markers to call signatures.
+// Type derivation helpers — map descriptors to call signatures.
 // ===========================================================================
 
 // Stream handle (subscribable + async iterable)
@@ -166,120 +161,88 @@ export interface CallOpts {
   signal?: AbortSignal;
 }
 
-// ---- MethodSig: marker → call signature -----------------------------------
+// ---- MethodSig: descriptor → call signature --------------------------------
+// Reads Infer<> off descriptor interfaces — no NoParams, no Phantom<T>.
+// Order: most-specific (WithParams) first, then result-only, then never.
 
-type MethodSig<M> =
-  M extends SyncMarker<infer P, infer R>
-    ? IsNoParams<P> extends true
-      ? () => R
-      : (params: P) => R
-    : M extends AsyncMarker<infer P, infer R>
-      ? IsNoParams<P> extends true
-        ? (opts?: CallOpts) => Promise<R>
-        : (params: P, opts?: CallOpts) => Promise<R>
-      : M extends VoidMarker<infer P>
-        ? IsNoParams<P> extends true
-          ? () => void
-          : (params: P) => void
-        : never;
+export type MethodSig<M> =
+  M extends QuerySyncWithParamsDescriptor<infer P, infer R>
+    ? (p: Infer<P>) => Infer<R>
+    : M extends QuerySyncTypedDescriptor<infer R>
+      ? () => Infer<R>
+      : M extends QueryWithParamsDescriptor<infer P, infer R>
+        ? (p: Infer<P>, o?: CallOpts) => Promise<Infer<R>>
+        : M extends QueryTypedDescriptor<infer R>
+          ? (o?: CallOpts) => Promise<Infer<R>>
+          : M extends FireWithParamsDescriptor<infer P>
+            ? (p: Infer<P>) => void
+            : M extends FireDescriptor
+              ? () => void
+              : never;
 
 type StreamSig<M> =
-  M extends StreamMarkerT<infer V, infer P>
-    ? IsNoParams<P> extends true
-      ? () => BridgeStreamSource<V>
-      : (params: P) => BridgeStreamSource<V>
-    : never;
+  M extends StreamWithParamsDescriptor<infer V, infer P>
+    ? (params: Infer<P>) => BridgeStreamSource<Infer<V>>
+    : M extends StreamTypedDescriptor<infer V>
+      ? () => BridgeStreamSource<Infer<V>>
+      : never;
 
-// ---- Input shape to defineContract (marker style) -------------------------
+// ---- Input shape to defineContract (descriptor style) ----------------------
 
 export interface MarkerContractInput {
-  methods?: Record<string, AnyMarkerT>;
-  streams?: Record<string, StreamMarkerT<unknown, unknown>>;
-  state?: Record<string, StateMarkerT<unknown>>;
+  methods?: Record<string, MethodDescriptorLike>;
+  streams?: Record<string, StreamDescriptorLike>;
+  state?: Record<string, StateDescriptorLike>;
 }
 
+type MethodDescriptorLike = FireDescriptor | QueryDescriptor | QuerySyncDescriptor;
+type StreamDescriptorLike = StreamDescriptor;
+type StateDescriptorLike = StateDescriptor;
+
 // ---- DerivedConsumer -------------------------------------------------------
-// The snapshot returned by useLiaHost() — merges method fns + stream fns +
-// state handles, mirroring Zustand's merged state+actions.
+// Merges method fns + stream fns + state handles.
 
 export type DerivedConsumer<T extends MarkerContractInput> = (T['methods'] extends Record<
   string,
-  AnyMarkerT
+  MethodDescriptorLike
 >
   ? { [K in keyof T['methods']]: MethodSig<T['methods'][K]> }
   : Record<never, never>) &
-  (T['streams'] extends Record<string, StreamMarkerT<unknown, unknown>>
+  (T['streams'] extends Record<string, StreamDescriptorLike>
     ? { [K in keyof T['streams']]: StreamSig<T['streams'][K]> }
     : Record<never, never>) &
-  (T['state'] extends Record<string, StateMarkerT<unknown>>
+  (T['state'] extends Record<string, StateDescriptorLike>
     ? {
         state: {
-          [K in keyof T['state']]: T['state'][K] extends StateMarkerT<infer V>
-            ? StateHandle<V>
-            : never;
+          [K in keyof T['state']]: T['state'][K] extends StateTypedDescriptor<infer V>
+            ? StateHandle<Infer<V>>
+            : StateHandle<unknown>;
         };
       }
     : Record<never, never>);
 
-// ---- Runtime contract descriptor (marker-style, no schema) ----------------
+// ---- ScopeArg for .scoped() ------------------------------------------------
 
-export interface MarkerContractDescriptor {
-  readonly $type: 'io.github.malopezr7.bridgekit.contract';
-  readonly descriptorVersion: 1;
-  readonly id: string;
-  readonly methods: Record<string, { kind: string; timeoutMs?: number | null }>;
-  readonly streams: Record<string, { kind: string; latestOnly?: boolean; sticky?: boolean }>;
-  readonly state: Record<string, { kind: string; initial: unknown }>;
-}
-
-// ===========================================================================
-// ContractHook — Zustand-style callable with statics.
-//
-// Mirrors Zustand's UseBoundStore pattern:
-//   useLiaHost()              → full DerivedConsumer (snapshot)
-//   useLiaHost(selector)      → selected slice (subscribes if state key)
-//   useLiaHost.getState()     → imperative non-React snapshot
-//   useLiaHost.scoped(scope)  → another ContractHook bound to that scope
-//   useLiaHost.useProvide(impl) → React provide hook (JS→native direction)
-// Statics for codegen:
-//   useLiaHost.descriptor     → BridgeContract-compatible descriptor
-//   useLiaHost.hash           → stable hash (same as BridgeContract.hash)
-//   useLiaHost.id             → contract id string
-//   useLiaHost.$contract      → brand 'io.github.malopezr7.bridgekit.contract'
-//   useLiaHost.$descriptor    → frozen runtime descriptor (kinds + initials)
-// ===========================================================================
-
-// BridgeScope re-export for .scoped() parameter
 export interface ScopeArg {
   feature?: string;
   instance?: string;
 }
 
+// ---- ContractHook ----------------------------------------------------------
+// Callable hook + statics for codegen compatibility.
+
 export interface ContractHook<T extends MarkerContractInput> {
-  // No-arg: full snapshot
   (): DerivedConsumer<T>;
-  // Selector: selected slice
   <U>(selector: (consumer: DerivedConsumer<T>) => U): U;
 
-  /** Imperative (non-React) access — no subscription. Like zustand store.getState(). */
   getState(): DerivedConsumer<T>;
-
-  /** Scope the hook to a feature/instance — returns new ContractHook. */
   scoped(scope: ScopeArg | import('./protocol').BridgeScope): ContractHook<T>;
-
-  /** React provide hook — registers impl as JS provider on mount, unregisters on unmount. */
   useProvide(impl: Partial<DerivedConsumer<T>>): void;
 
-  // Statics for codegen compatibility
-  /** Contract id (never used as lookup key). */
   readonly id: string;
-  /** Stable hash (same algorithm as BridgeContract.hash). */
   readonly hash: string;
-  /** BridgeContract-compatible descriptor (for codegen + load.ts duck-typing). */
-  readonly descriptor: MarkerContractDescriptor;
-  /** Frozen runtime descriptor (kinds + initials). */
-  readonly $descriptor: MarkerContractDescriptor;
-  /** Brand. */
+  readonly descriptor: import('./contract').ContractDescriptor;
+  readonly $descriptor: import('./contract').ContractDescriptor;
   readonly $contract: 'io.github.malopezr7.bridgekit.contract';
 }
 

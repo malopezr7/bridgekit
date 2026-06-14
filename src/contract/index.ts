@@ -36,21 +36,14 @@ export { defineContract, isMarkerDescriptor, t } from './contract';
 export { memberHashes, stableHash } from './hash';
 // Marker API (DX-1)
 export type {
-  AnyMarkerT,
-  AsyncMarker,
   BridgeStreamSource as MarkerStreamSource,
   CallOpts,
   ConsumerOf,
   ContractHook,
   DerivedConsumer,
   MarkerContractInput,
-  NoParams,
   ScopeArg,
   StateHandle,
-  StateMarkerT,
-  StreamMarkerT,
-  SyncMarker,
-  VoidMarker,
 } from './markers';
 export { Async, State, Stream, Sync, Void } from './markers';
 export type {

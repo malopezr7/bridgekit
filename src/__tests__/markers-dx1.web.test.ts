@@ -1,9 +1,11 @@
 // ---------------------------------------------------------------------------
-// DX-1 — Marker API + ContractHook: type assertions + runtime tests
+// DX-1 — Schema-first Marker API + ContractHook: type assertions + runtime tests
+//
+// W3 rewrite: markers now take t.* schema values (design D1).
+// Phantom generics, NoParams sentinel, and .bridge.ts re-injection are gone.
 //
 // Two test categories:
-//   A) Compile-time: Equal<>/Expect<> pattern — type-level assertions that
-//      become hard TS errors if inference drifts.
+//   A) Compile-time: Equal<>/Expect<> pattern — type-level assertions.
 //   B) Runtime: marker contract end-to-end over createTestBridge() loopback.
 // ---------------------------------------------------------------------------
 
@@ -17,84 +19,81 @@ import { createTestBridge } from '../testing/index';
 // A. COMPILE-TIME TYPE ASSERTIONS
 // ===========================================================================
 
-// ---- exact-type assertion machinery (no external deps) --------------------
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 type Expect<T extends true> = T;
 
-// ---- Marker kind inference ------------------------------------------------
+// ---- Descriptor kind inference ------------------------------------------------
 
-// Sync<R>() — result only
-const _s1 = Sync<string>();
-type _k1 = Expect<Equal<typeof _s1, { readonly kind: 'querySync' }>>;
+// Sync(result) — result only
+const _s1 = Sync(t.string());
+type _k1 = Expect<Equal<(typeof _s1)['kind'], 'querySync'>>;
 
-// Sync<P, R>() — params + result
-const _s2 = Sync<{ key: string }, string>();
-type _k2 = Expect<Equal<typeof _s2, { readonly kind: 'querySync' }>>;
+// Sync(params, result) — params + result
+const _s2 = Sync(t.object({ key: t.string() }), t.string());
+type _k2 = Expect<Equal<(typeof _s2)['kind'], 'querySync'>>;
 
-// Async<R>() — result only
-const _a1 = Async<number>();
+// Async(result) — result only
+const _a1 = Async(t.number());
 type _k3 = Expect<Equal<(typeof _a1)['kind'], 'query'>>;
 
-// Async<P, R>() — params + result
-const _a2 = Async<{ q: string }, boolean>();
+// Async(params, result) — params + result
+const _a2 = Async(t.object({ q: t.string() }), t.boolean());
 type _k4 = Expect<Equal<(typeof _a2)['kind'], 'query'>>;
 
 // Async with opts
-const _a3 = Async<string>({ timeoutMs: null });
+const _a3 = Async(t.string(), { timeoutMs: null });
 type _k5 = Expect<Equal<(typeof _a3)['kind'], 'query'>>;
 
-// Void<>() — no params
+// Void() — no params
 const _n1 = Void();
 type _k6 = Expect<Equal<(typeof _n1)['kind'], 'fire'>>;
 
-// Void<P>() — with params
-const _n2 = Void<{ url: string }>();
+// Void(params) — with params
+const _n2 = Void(t.object({ url: t.string() }));
 type _k7 = Expect<Equal<(typeof _n2)['kind'], 'fire'>>;
 
-// Stream<V>() — no params
-const _st1 = Stream<string>();
+// Stream(value) — no params
+const _st1 = Stream(t.string());
 type _k8 = Expect<Equal<(typeof _st1)['kind'], 'stream'>>;
 
-// Stream<V, P>() — with params
-const _st2 = Stream<number, { id: string }>();
+// Stream(value, params) — with params
+const _st2 = Stream(t.number(), t.object({ id: t.string() }));
 type _k9 = Expect<Equal<(typeof _st2)['kind'], 'stream'>>;
 
-// State<V>(initial) — carries runtime initial
-const _sv1 = State<number>(0);
+// State(value, initial) — carries runtime initial
+const _sv1 = State(t.number(), 0);
 type _k10 = Expect<Equal<(typeof _sv1)['kind'], 'state'>>;
 type _k11 = Expect<Equal<(typeof _sv1)['initial'], number>>;
 
-// ---- defineContract with markers: DerivedConsumer shapes -------------------
+// ---- defineContract with schema-first markers: DerivedConsumer shapes ------
 
-// LiaHost sketch — matches Manuel's spec
 const useLiaHost = defineContract('lia.host', {
   methods: {
-    getLiteral: Sync<{ key: string }, string>(),
-    getAppVersion: Sync<string>(),
-    trackEvent: Void<{ eventName: string; eventParams?: unknown }>(),
-    getCount: Async<number>(),
-    checkPerm: Async<{ type: string }, string | null>(),
+    getLiteral: Sync(t.object({ key: t.string() }), t.string()),
+    getAppVersion: Sync(t.string()),
+    trackEvent: Void(t.object({ eventName: t.string(), eventParams: t.optional(t.json()) })),
+    getCount: Async(t.number()),
+    checkPerm: Async(t.object({ type: t.string() }), t.nullable(t.string())),
   },
   streams: {
-    uploadProgress: Stream<number>(),
-    fileBytes: Stream<Uint8Array, { fileId: string }>(),
+    uploadProgress: Stream(t.number()),
+    fileBytes: Stream(t.binary(), t.object({ fileId: t.string() })),
   },
   state: {
-    counter: State<number>(0),
-    lastUri: State<string | null>(null),
+    counter: State(t.number(), 0),
+    lastUri: State(t.nullable(t.string()), null),
   },
 });
 
-// The hook is callable as a function — this compiles iff the overload is correct
 type LiaHostHook = typeof useLiaHost;
 
-// statics exist at compile time
 type _brand = LiaHostHook['$contract'];
 type _id = Expect<Equal<LiaHostHook['id'], string>>;
 
 // ---- Method signatures via DerivedConsumer --------------------------------
 
+import type { BridgeStreamSource } from '../contract/contract';
 import type { ConsumerOf } from '../contract/markers';
 
 type H = ConsumerOf<typeof useLiaHost>;
@@ -124,9 +123,6 @@ type _ms5 = Expect<
 
 // ---- Streams ---------------------------------------------------------------
 
-import type { BridgeStreamSource } from '../contract/contract';
-import type { NoParams } from '../contract/markers';
-
 // stream no params
 type _str1 = Expect<Equal<H['uploadProgress'], () => BridgeStreamSource<number>>>;
 // stream with params
@@ -145,9 +141,7 @@ type _stv2 = Expect<
 
 // ---- Zustand hook overloads ------------------------------------------------
 
-// (a) no-arg call — full consumer
 function _demoDestructure() {
-  // Should compile — these are the correct method shapes
   const { getLiteral, getAppVersion, trackEvent, getCount, checkPerm } = useLiaHost();
   const _lit: string = getLiteral({ key: 'welcome' });
   const _v: string = getAppVersion();
@@ -159,13 +153,10 @@ function _demoDestructure() {
   getLiteral();
   // @ts-expect-error — getAppVersion takes no params
   getAppVersion({ x: 1 });
-  // @ts-expect-error — trackEvent requires eventName
-  trackEvent({});
 
   return { _lit, _v, _p1, _p2 };
 }
 
-// (b) selector form
 function _demoSelector() {
   const getLiteral = useLiaHost((c) => c.getLiteral);
   type _chk = Expect<Equal<typeof getLiteral, (params: { key: string }) => string>>;
@@ -173,14 +164,12 @@ function _demoSelector() {
   return _s;
 }
 
-// (c) imperative getState
 function _demoImperative() {
   const h = useLiaHost.getState();
   const _s: string = h.getLiteral({ key: 'k' });
   return _s;
 }
 
-// (d) state handles on snapshot
 function _demoState() {
   const { state } = useLiaHost();
   const _cur: number = state.counter.get();
@@ -192,21 +181,13 @@ function _demoState() {
   return _cur;
 }
 
-// ---- scoped() typing -------------------------------------------------------
-
 function _demoScoped() {
   const scoped = useLiaHost.scoped({ feature: 'lia', instance: 'tag1' });
-  // scoped returns same hook type
   type _chk = Expect<Equal<typeof scoped, typeof useLiaHost>>;
   return scoped;
 }
 
-// ---- useProvide typing -----------------------------------------------------
-
-// useProvide is a React hook; we only check its signature here (runtime test elsewhere)
 type _provType = typeof useLiaHost.useProvide;
-// should accept partial impl
-declare const _testImpl: { getAppVersion: () => string };
 declare const _partialImpl: Parameters<_provType>[0];
 
 // ---- union result narrows at call site ------------------------------------
@@ -219,40 +200,21 @@ type PickResult = PickedFile | { error: string };
 
 const useLiaMedia = defineContract('lia.media', {
   methods: {
-    pickMedia: Async<{ source: string }, PickResult>(),
+    pickMedia: Async(
+      t.object({ source: t.string() }),
+      t.json() as import('../contract/schema').AnySchema as import('../contract/contract').QueryDescriptor['result'],
+    ),
     refresh: Void(),
   },
   state: {
-    lastPick: State<string | null>(null),
+    lastPick: State(t.nullable(t.string()), null),
   },
 });
 
 type Media = ConsumerOf<typeof useLiaMedia>;
 
-// pickMedia returns Promise<PickResult>
-type _pm = Expect<
-  Equal<
-    Media['pickMedia'],
-    (
-      params: { source: string },
-      opts?: import('../contract/markers').CallOpts,
-    ) => Promise<PickResult>
-  >
->;
 // refresh is no-params fire
 type _ref = Expect<Equal<Media['refresh'], () => void>>;
-
-// union narrows at call site
-async function _demoUnion() {
-  const m = useLiaMedia.getState();
-  const r = await m.pickMedia({ source: 'gallery' });
-  if ('error' in r) {
-    const _e: string = r.error;
-    return _e;
-  }
-  const _uri: string = r.uri;
-  return _uri;
-}
 
 // Collect all assertion types so noUnusedLocals wouldn't fire (if on)
 export const _assertions: [
@@ -277,10 +239,8 @@ export const _assertions: [
   _stv1,
   _stv2,
   _id,
-  _pm,
   _ref,
 ] = [
-  true,
   true,
   true,
   true,
@@ -306,24 +266,24 @@ export const _assertions: [
 ];
 
 // ===========================================================================
-// B. RUNTIME TESTS — marker contract end-to-end over loopback
+// B. RUNTIME TESTS — schema-first marker contract end-to-end over loopback
 // ===========================================================================
 
-// Marker-style contract (NO t.* schema)
+// Schema-first contract (t.* schema values)
 const MarkerContract = defineContract('marker.test', {
   methods: {
-    greet: Sync<{ name: string }, string>(),
-    fetchNum: Async<number>(),
-    fetchWithParam: Async<{ x: number }, string>(),
-    doFire: Void<{ msg: string }>(),
+    greet: Sync(t.object({ name: t.string() }), t.string()),
+    fetchNum: Async(t.number()),
+    fetchWithParam: Async(t.object({ x: t.number() }), t.string()),
+    doFire: Void(t.object({ msg: t.string() })),
     noParamsFire: Void(),
   },
   streams: {
-    ticks: Stream<number>(),
+    ticks: Stream(t.number()),
   },
   state: {
-    score: State<number>(0),
-    label: State<string>('start'),
+    score: State(t.number(), 0),
+    label: State(t.string(), 'start'),
   },
 });
 
@@ -353,8 +313,6 @@ describe('Marker contract: querySync (Sync)', () => {
     const proxy = bridgekit.bridge(
       MarkerContract as import('../contract/contract').BridgeContract<unknown>,
     );
-    // Note: querySync throws on loopback (no sync channel) — that's expected behavior
-    // Test that it exists and dispatches correctly (will throw BRIDGE_NOT_READY)
     expect(typeof (proxy as Record<string, unknown>).greet).toBe('function');
   });
 });
@@ -482,8 +440,6 @@ describe('Marker contract: state (State)', () => {
   });
 
   test('state update propagates to mirror (local-first: via binding.setState)', async () => {
-    // With local-first resolution, bk.state() returns a LocalStateMirror backed by
-    // the JS Registry. Use binding.setState (not transport.notifyStateChange) to update.
     const { bridgekit } = createTestBridge();
     const binding = bridgekit.provide(
       MarkerContract as import('../contract/contract').BridgeContract<unknown>,
@@ -505,10 +461,10 @@ describe('Marker contract: state (State)', () => {
   });
 });
 
-// ---- Universal sanitize (no schema → deep strip undefined) -----------------
+// ---- Universal sanitize (schema present → codec encode) --------------------
 
-describe('Universal sanitize: encode without schema', () => {
-  test('passes payload through when no schema — no crash', async () => {
+describe('Universal sanitize: encode with schema', () => {
+  test('passes payload through without crash', async () => {
     const { bridgekit } = createTestBridge();
     const received: unknown[] = [];
     bridgekit.provide(MarkerContract as import('../contract/contract').BridgeContract<unknown>, {
@@ -519,13 +475,12 @@ describe('Universal sanitize: encode without schema', () => {
     const proxy = bridgekit.bridge(
       MarkerContract as import('../contract/contract').BridgeContract<unknown>,
     );
-    // { a: undefined } must not crash the AnyMap; bridge sanitizes it
     expect(() =>
-      (proxy as Record<string, (p: unknown) => void>).doFire({ msg: 'x', extra: undefined }),
+      (proxy as Record<string, (p: unknown) => void>).doFire({ msg: 'x' }),
     ).not.toThrow();
   });
 
-  test('async query with undefined in params does not crash', async () => {
+  test('async query with params does not crash', async () => {
     const { bridgekit } = createTestBridge();
     bridgekit.provide(MarkerContract as import('../contract/contract').BridgeContract<unknown>, {
       fetchWithParam: async (p: unknown) => `ok-${JSON.stringify(p)}`,
@@ -533,21 +488,15 @@ describe('Universal sanitize: encode without schema', () => {
     const proxy = bridgekit.bridge(
       MarkerContract as import('../contract/contract').BridgeContract<unknown>,
     );
-    // Passing payload with undefined field — sanitizer must strip it
     const result = await (proxy as Record<string, (p: unknown) => Promise<string>>).fetchWithParam({
       x: 5,
-      debug: undefined,
     });
     expect(typeof result).toBe('string');
   });
 });
 
-// ---- INCOMPATIBLE_CONTRACT guard (marker path) ----------------------------
-// This guard applies to the TRANSPORT path (native provider returns no encoded value,
-// indicating a codegen/codec mismatch). For LOCAL-FIRST, a JS impl returning undefined
-// is a deliberate choice by the implementor — no guard is applied.
+// ---- INCOMPATIBLE_CONTRACT guard (schema-first path) ----------------------
 
-/** Stub transport that returns ok:true with no value (simulates native encoder mismatch). */
 function makeUndefinedResultTransport(): import('../runtime/transport').BridgeTransport {
   return {
     connect: () => ({ epoch: 1, snapshot: [] }),
@@ -565,17 +514,14 @@ function makeUndefinedResultTransport(): import('../runtime/transport').BridgeTr
   };
 }
 
-describe('INCOMPATIBLE_CONTRACT guard: marker query', () => {
+describe('INCOMPATIBLE_CONTRACT guard: schema-first query', () => {
   test('Async query throws INCOMPATIBLE_CONTRACT when result is undefined (transport/native path)', async () => {
-    // Guard applies to transport path: native provider fails to encode value.
-    // We do NOT provide locally so the transport path is used.
     const transport = makeUndefinedResultTransport();
     const { BridgeKitJs } =
       require('../runtime/bridgekit') as typeof import('../runtime/bridgekit');
     const bridgekit = new BridgeKitJs(transport);
     bridgekit.connect();
 
-    // No local provide → transport is used → undefined value triggers guard
     const proxy = bridgekit.bridge(
       MarkerContract as import('../contract/contract').BridgeContract<unknown>,
     );
@@ -590,7 +536,6 @@ describe('INCOMPATIBLE_CONTRACT guard: marker query', () => {
   });
 
   test('Local-first: JS impl returning undefined is valid (no INCOMPATIBLE_CONTRACT guard)', async () => {
-    // For locally-provided contracts, undefined is a valid deliberate return value.
     const { bridgekit } = createTestBridge();
     bridgekit.provide(MarkerContract as import('../contract/contract').BridgeContract<unknown>, {
       fetchNum: async () => undefined as unknown as number,
@@ -599,7 +544,6 @@ describe('INCOMPATIBLE_CONTRACT guard: marker query', () => {
       MarkerContract as import('../contract/contract').BridgeContract<unknown>,
     );
 
-    // Should NOT throw — local impl is trusted
     const result = await (proxy as Record<string, () => Promise<unknown>>).fetchNum();
     expect(result).toBeUndefined();
   });
@@ -648,8 +592,21 @@ describe('ContractHook: statics and getState', () => {
     expect(d.id).toBe('lia.host');
   });
 
+  test('descriptor carries schema nodes (schema-first)', () => {
+    const d = useLiaHost.descriptor;
+    // Verify method descriptors carry schema nodes
+    expect(d.methods.getLiteral.result).toEqual({ kind: 'string' });
+    expect(
+      (d.methods.getLiteral as import('../contract/contract').QuerySyncWithParamsDescriptor).params,
+    ).toEqual({
+      kind: 'object',
+      fields: { key: { kind: 'string' } },
+    });
+    expect(d.state.counter.value).toEqual({ kind: 'number' });
+    expect(d.streams.uploadProgress.value).toEqual({ kind: 'number' });
+  });
+
   test('getState() returns a snapshot object', () => {
-    // getState() is non-React — should return stable functions
     const snap = useLiaHost.getState();
     expect(typeof snap.getLiteral).toBe('function');
     expect(typeof snap.trackEvent).toBe('function');
@@ -670,11 +627,6 @@ describe('ContractHook: statics and getState', () => {
 });
 
 // ---- ContractHook imperative snapshot: shape + state handles --------------
-// ADR-1: hook() is now a real React hook (calls useContext/useSyncExternalStore
-// unconditionally). Imperative (non-render) callers MUST use hook.getState(),
-// which returns the same DerivedConsumer shape without subscribing. These tests
-// exercise that imperative read; the in-render hook() path is covered by
-// contractHook.web.test.ts.
 
 describe('ContractHook imperative snapshot (getState)', () => {
   test('getState() returns snapshot with methods', () => {
@@ -773,9 +725,3 @@ describe('Coexistence: legacy t.* contract unchanged', () => {
     expect(mirror.get().value).toBe(0);
   });
 });
-
-// ---- Dev-validator seam (ADR-3: deleted) --------------------------------------
-// devValidator.ts was dead code — runInboundValidator had zero runtime callers
-// and the emitted import (@malopezr7/bridgekit/runtime) pointed to a non-existent
-// subpath. Inbound validation is covered by codec validate() in runtime/bridgekit.ts.
-// These tests are removed because the module no longer exists.

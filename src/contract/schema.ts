@@ -66,6 +66,38 @@ export interface UnionSchema<
   readonly variants: TVariants;
 }
 
+export interface Int64Schema {
+  readonly kind: 'int64';
+}
+
+export interface DateSchema {
+  readonly kind: 'date';
+}
+
+export interface BinarySchema {
+  readonly kind: 'binary';
+}
+
+export interface EnumSchema<
+  TMembers extends readonly { name: string; value: number }[] = readonly {
+    name: string;
+    value: number;
+  }[],
+> {
+  readonly kind: 'enum';
+  readonly members: TMembers;
+}
+
+export interface TupleSchema<TItems extends readonly AnySchema[] = readonly AnySchema[]> {
+  readonly kind: 'tuple';
+  readonly items: TItems;
+}
+
+export interface OneOfSchema<TOptions extends readonly AnySchema[] = readonly AnySchema[]> {
+  readonly kind: 'oneOf';
+  readonly options: TOptions;
+}
+
 // ---- union type -----------------------------------------------------------
 
 export type AnySchema =
@@ -80,7 +112,13 @@ export type AnySchema =
   | RecordSchema
   | OptionalSchema
   | NullableSchema
-  | UnionSchema;
+  | UnionSchema
+  | Int64Schema
+  | DateSchema
+  | BinarySchema
+  | EnumSchema
+  | TupleSchema
+  | OneOfSchema;
 
 // ---- type inference -------------------------------------------------------
 
@@ -91,6 +129,25 @@ type InferObjectFields<TFields extends Record<string, AnySchema>> = {
 type InferVariants<TKey extends string, TVariants extends Record<string, ObjectSchema>> = {
   [K in keyof TVariants]: { [D in TKey]: K } & InferObjectFields<TVariants[K]['fields']>;
 }[keyof TVariants];
+
+type InferTuple<TItems extends readonly AnySchema[]> = {
+  readonly [K in keyof TItems]: TItems[K] extends AnySchema ? Infer<TItems[K]> : never;
+};
+
+type InferOneOf<TOptions extends readonly AnySchema[]> = TOptions extends readonly [
+  infer H extends AnySchema,
+  ...infer Rest extends readonly AnySchema[],
+]
+  ? Infer<H> | InferOneOf<Rest>
+  : never;
+
+type InferEnumMembers<TMembers extends readonly { name: string; value: number }[]> =
+  TMembers extends readonly [
+    infer H extends { name: string; value: number },
+    ...infer Rest extends readonly { name: string; value: number }[],
+  ]
+    ? H['value'] | InferEnumMembers<Rest>
+    : never;
 
 /**
  * Infer the TypeScript type from a schema node.
@@ -123,7 +180,19 @@ export type Infer<T extends AnySchema> = T extends StringSchema
                       ? Infer<I> | null
                       : T extends UnionSchema<infer K, infer V>
                         ? InferVariants<K, V>
-                        : never;
+                        : T extends Int64Schema
+                          ? bigint
+                          : T extends DateSchema
+                            ? Date
+                            : T extends BinarySchema
+                              ? Uint8Array
+                              : T extends EnumSchema<infer M>
+                                ? InferEnumMembers<M>
+                                : T extends TupleSchema<infer I>
+                                  ? InferTuple<I>
+                                  : T extends OneOfSchema<infer O>
+                                    ? InferOneOf<O>
+                                    : never;
 
 // ---- DSL builder ----------------------------------------------------------
 
@@ -212,6 +281,74 @@ export const t = {
     }
     return { kind: 'union', discriminant, variants };
   },
+
+  /**
+   * 64-bit integer. JS carrier: `bigint`. Kotlin: `Long`.
+   * Wire: native Int64 (AnyMap.ValueType includes bigint as Int64).
+   * Use this when values may exceed 2^53 (Number.MAX_SAFE_INTEGER).
+   */
+  int64: (): Int64Schema => ({ kind: 'int64' }),
+
+  /**
+   * Point-in-time value. JS carrier: `Date`. Kotlin: `java.time.Instant`.
+   * Wire: epoch milliseconds as a number (UTC, tz-free).
+   */
+  date: (): DateSchema => ({ kind: 'date' }),
+
+  /**
+   * Raw bytes. JS carrier: `Uint8Array` (also accepts `ArrayBuffer` on input).
+   * Kotlin: `ByteArray`. Wire: base64-encoded string.
+   */
+  binary: (): BinarySchema => ({ kind: 'binary' }),
+
+  /**
+   * Numeric enum. JS carrier: the numeric member values (number).
+   * Kotlin: Int-backed `enum class` with `wireValue: Int`.
+   *
+   * @param members - Record of name → numeric value (matches a TS numeric enum).
+   *
+   * @example
+   * t.enum({ Red: 0, Green: 1, Blue: 2 })
+   */
+  enum: <const TRecord extends Record<string, number>>(
+    members: TRecord,
+  ): EnumSchema<
+    {
+      readonly [K in keyof TRecord & string]: { readonly name: K; readonly value: TRecord[K] };
+    }[keyof TRecord & string][]
+  > => ({
+    kind: 'enum',
+    members: Object.entries(members).map(([name, value]) => ({ name, value })) as never,
+  }),
+
+  /**
+   * Fixed-arity positional tuple. JS carrier: readonly tuple. Kotlin: generated data class.
+   * Wire: positional JSON array.
+   *
+   * @example
+   * t.tuple([t.string(), t.number()]) // [string, number]
+   */
+  tuple: <const TItems extends readonly AnySchema[]>(items: TItems): TupleSchema<TItems> => ({
+    kind: 'tuple',
+    items,
+  }),
+
+  /**
+   * Primitive / non-discriminated union. Wire: `{ "@k": branchIndex, "@v": value }` envelope.
+   * Encoding picks the FIRST branch whose validate passes (first-match-by-validate).
+   * When two branches accept the same value, the first match wins — document this at author sites.
+   *
+   * Distinct from `t.union` (which requires object variants + discriminant key).
+   *
+   * @example
+   * t.oneOf([t.string(), t.number()]) // string | number
+   */
+  oneOf: <const TOptions extends readonly AnySchema[]>(
+    options: TOptions,
+  ): OneOfSchema<TOptions> => ({
+    kind: 'oneOf',
+    options,
+  }),
 } as const;
 
 // Attach Infer to the t namespace for ergonomic usage: t.Infer<typeof schema>

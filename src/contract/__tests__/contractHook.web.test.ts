@@ -30,7 +30,7 @@ import { Async } from '../markers';
 
 const SubscriptionContract = defineContract('contract-hook.subscription.test', {
   methods: {
-    ping: Async<string>(),
+    ping: Async(t.string()),
   },
   state: {
     count: t.state(t.number(), 0),
@@ -39,7 +39,7 @@ const SubscriptionContract = defineContract('contract-hook.subscription.test', {
 
 const ProvideScopeContract = defineContract('contract-hook.provide-scope.test', {
   methods: {
-    ping: Async<string>(),
+    ping: Async(t.string()),
   },
   state: {
     value: t.state(t.string(), 'initial'),

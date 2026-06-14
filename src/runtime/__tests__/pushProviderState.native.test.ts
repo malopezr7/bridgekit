@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { defineContract } from '../../contract/contract';
 import { Async, State, Stream, Void } from '../../contract/markers';
 import type { CallEnvelope, ResultEnvelope } from '../../contract/protocol';
+import { t } from '../../contract/schema';
 import { BridgeKitJs } from '../bridgekit';
 import { GLOBAL_SCOPE, streamSource } from '../registry';
 import type { BridgeTransport, ConnectResult, JsDispatcher } from '../transport';
@@ -110,15 +111,15 @@ function makeMockNitroTransport(): BridgeTransport & {
 
 const ReverseContract = defineContract('test.reverse', {
   methods: {
-    greet: Async<{ name: string }, string>(),
-    notifyEvent: Void<{ type: string }>(),
+    greet: Async(t.object({ name: t.string() }), t.string()),
+    notifyEvent: Void(t.object({ type: t.string() })),
   },
   streams: {
-    counter: Stream<number>(),
+    counter: Stream(t.number()),
   },
   state: {
-    status: State<string>('idle'),
-    count: State<number>(0),
+    status: State(t.string(), 'idle'),
+    count: State(t.number(), 0),
   },
 });
 

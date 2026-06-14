@@ -1,47 +1,27 @@
 // Wave 1 (W1-5): JS inbound validation on decode (design Decision 3).
 //
-// With the keystone (Decision 1) the marker descriptor carries the result/value
-// schema, so the runtime validates inbound native payloads against it. A payload
+// W3 update: schema-first markers carry the result schema directly.
+// No generatedSchemas third-arg is needed — the descriptor already has `result`.
+// The runtime validates inbound native payloads against it. A payload
 // with a missing required field or a wrong-type field MUST be rejected with a
 // VALIDATION_FAILED error, not coerced or silently returned.
 
 import { describe, expect, test } from '@jest/globals';
-import type { GeneratedSchemas } from '../contract/contract';
 import { defineContract } from '../contract/contract';
 import { Async, Sync } from '../contract/markers';
 import { isBridgeError } from '../contract/protocol';
+import { t } from '../contract/schema';
 import { BridgeKitJs } from '../runtime/bridgekit';
 import type { BridgeTransport } from '../runtime/transport';
 
-const schemas: GeneratedSchemas = {
-  methods: {
-    getUser: {
-      result: {
-        kind: 'object',
-        fields: { name: { kind: 'string' }, age: { kind: 'number' } },
-      },
-    },
-    getUserSync: {
-      result: {
-        kind: 'object',
-        fields: { name: { kind: 'string' }, age: { kind: 'number' } },
-      },
-    },
-  },
-  streams: {},
-  state: {},
-};
+const userResultSchema = t.object({ name: t.string(), age: t.number() });
 
-const Contract = defineContract(
-  'inbound.validation',
-  {
-    methods: {
-      getUser: Async<{ name: string; age: number }>(),
-      getUserSync: Sync<{ name: string; age: number }>(),
-    },
+const Contract = defineContract('inbound.validation', {
+  methods: {
+    getUser: Async(userResultSchema),
+    getUserSync: Sync(userResultSchema),
   },
-  schemas,
-);
+});
 
 function makeStubTransport(
   syncResult: () => ReturnType<BridgeTransport['invokeSync']>,

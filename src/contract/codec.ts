@@ -12,11 +12,14 @@
 import type {
   AnySchema,
   ArraySchema,
+  EnumSchema,
   LiteralsSchema,
   NullableSchema,
   ObjectSchema,
+  OneOfSchema,
   OptionalSchema,
   RecordSchema,
+  TupleSchema,
   UnionSchema,
 } from './schema';
 
@@ -149,6 +152,55 @@ export function encode(schema: AnySchema, value: unknown): unknown {
       return encoded;
     }
 
+    case 'int64': {
+      // bigint passes through as Int64 on the AnyMap wire
+      return value;
+    }
+
+    case 'date': {
+      if (!(value instanceof Date) || Number.isNaN((value as Date).getTime())) return value;
+      return (value as Date).getTime();
+    }
+
+    case 'binary': {
+      let bytes: Uint8Array;
+      if (value instanceof Uint8Array) {
+        bytes = value;
+      } else if (value instanceof ArrayBuffer) {
+        bytes = new Uint8Array(value);
+      } else {
+        return value;
+      }
+      // base64-encode: works in both Node and React Native
+      return Buffer.from(bytes).toString('base64');
+    }
+
+    case 'enum': {
+      const enumSchema = schema as EnumSchema;
+      const isValid = enumSchema.members.some((m) => m.value === value);
+      if (!isValid) return value;
+      return value; // wire is the numeric value
+    }
+
+    case 'tuple': {
+      if (!Array.isArray(value)) return value;
+      const tupleSchema = schema as TupleSchema;
+      return tupleSchema.items.map((itemSchema, i) => encode(itemSchema, (value as unknown[])[i]));
+    }
+
+    case 'oneOf': {
+      const oneOfSchema = schema as OneOfSchema;
+      for (let i = 0; i < oneOfSchema.options.length; i++) {
+        const opt = oneOfSchema.options[i];
+        if (opt === undefined) continue;
+        const result = validateAt(opt, value, '');
+        if (result.ok) {
+          return { '@k': i, '@v': encode(opt, value) };
+        }
+      }
+      return value; // no match — pass through
+    }
+
     default:
       return value;
   }
@@ -231,6 +283,45 @@ export function decode(schema: AnySchema, value: unknown): unknown {
         return { [unionSchema.discriminant]: discriminantValue, ...decoded };
       }
       return decoded;
+    }
+
+    case 'int64': {
+      if (typeof value === 'bigint') return value;
+      if (typeof value === 'number') return BigInt(Math.trunc(value));
+      return BigInt(String(value));
+    }
+
+    case 'date': {
+      if (value instanceof Date) return value;
+      return new Date(value as number);
+    }
+
+    case 'binary': {
+      if (value instanceof Uint8Array) return value;
+      if (value instanceof ArrayBuffer) return new Uint8Array(value);
+      // wire is base64 string
+      return Uint8Array.from(Buffer.from(value as string, 'base64'));
+    }
+
+    case 'enum': {
+      // wire is the numeric value — return as-is (skew tolerance)
+      return value;
+    }
+
+    case 'tuple': {
+      if (!Array.isArray(value)) return value;
+      const tupleSchema = schema as TupleSchema;
+      return tupleSchema.items.map((itemSchema, i) => decode(itemSchema, (value as unknown[])[i]));
+    }
+
+    case 'oneOf': {
+      if (!isObject(value)) return value;
+      const oneOfSchema = schema as OneOfSchema;
+      const envelope = value as Record<string, unknown>;
+      const idx = envelope['@k'] as number;
+      const opt = oneOfSchema.options[idx];
+      if (opt === undefined) return value;
+      return decode(opt, envelope['@v']);
     }
 
     default:
@@ -359,6 +450,71 @@ function validateAt(schema: AnySchema, value: unknown, path: string): Validation
         );
       }
       return validateAt(variantSchema, value, path);
+    }
+
+    case 'int64': {
+      if (typeof value !== 'bigint') {
+        return validationError(path, `Expected bigint (int64), got ${typeof value}`);
+      }
+      return { ok: true };
+    }
+
+    case 'date': {
+      if (!(value instanceof Date) || Number.isNaN((value as Date).getTime())) {
+        return validationError(path, `Expected valid Date, got ${typeof value}`);
+      }
+      return { ok: true };
+    }
+
+    case 'binary': {
+      if (!(value instanceof Uint8Array) && !(value instanceof ArrayBuffer)) {
+        return validationError(path, `Expected Uint8Array or ArrayBuffer, got ${typeof value}`);
+      }
+      return { ok: true };
+    }
+
+    case 'enum': {
+      const enumSchema = schema as EnumSchema;
+      if (!enumSchema.members.some((m) => m.value === value)) {
+        const validValues = enumSchema.members.map((m) => m.value).join(', ');
+        return validationError(
+          path,
+          `Expected one of enum values [${validValues}], got ${JSON.stringify(value)}`,
+        );
+      }
+      return { ok: true };
+    }
+
+    case 'tuple': {
+      if (!Array.isArray(value)) {
+        return validationError(path, `Expected tuple (array), got ${typeof value}`);
+      }
+      const tupleSchema = schema as TupleSchema;
+      if ((value as unknown[]).length !== tupleSchema.items.length) {
+        return validationError(
+          path,
+          `Expected tuple of arity ${tupleSchema.items.length}, got ${(value as unknown[]).length}`,
+        );
+      }
+      for (let i = 0; i < tupleSchema.items.length; i++) {
+        const item = tupleSchema.items[i];
+        if (item === undefined) break;
+        const result = validateAt(item, (value as unknown[])[i], `${path}[${i}]`);
+        if (!result.ok) return result;
+      }
+      return { ok: true };
+    }
+
+    case 'oneOf': {
+      const oneOfSchema = schema as OneOfSchema;
+      const hasMatch = oneOfSchema.options.some((opt) => validateAt(opt, value, path).ok);
+      if (!hasMatch) {
+        return validationError(
+          path,
+          `Value did not match any oneOf option: ${JSON.stringify(value)}`,
+        );
+      }
+      return { ok: true };
     }
 
     default:

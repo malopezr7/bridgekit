@@ -28,17 +28,17 @@ import type { BridgeTransport, ConnectResult } from '../runtime/transport';
 
 const LocalContract = defineContract('bridgekit.local-first.test', {
   methods: {
-    getMotto: Sync<string>(),
-    greet: Async<{ name: string }, string>(),
-    doFire: Void<{ value: number }>(),
-    slowQuery: Async<string>({ timeoutMs: null }),
+    getMotto: Sync(t.string()),
+    greet: Async(t.object({ name: t.string() }), t.string()),
+    doFire: Void(t.object({ value: t.number() })),
+    slowQuery: Async(t.string(), { timeoutMs: null }),
   },
   streams: {
-    ticks: Stream<number>(),
+    ticks: Stream(t.number()),
   },
   state: {
-    count: State<number>(0),
-    label: State<string>('hello'),
+    count: State(t.number(), 0),
+    label: State(t.string(), 'hello'),
   },
 });
 
@@ -46,7 +46,7 @@ const LocalContract = defineContract('bridgekit.local-first.test', {
 
 const ScopedContract = defineContract('bridgekit.scoped.test', {
   methods: {
-    who: Async<string>(),
+    who: Async(t.string()),
   },
 });
 

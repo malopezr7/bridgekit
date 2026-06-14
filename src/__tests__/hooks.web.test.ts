@@ -25,7 +25,7 @@ import { GLOBAL_SCOPE } from '../runtime/registry';
 
 const ScopeTestContract = defineContract('hooks.scope.test', {
   methods: {
-    ping: Async<string>(),
+    ping: Async(t.string()),
   },
   state: {
     value: t.state(t.string(), 'initial'),
@@ -44,10 +44,10 @@ const StateContract = defineContract('hooks.state.test', {
 
 const MarkerHookTest = defineContract('hooks.marker.test', {
   methods: {
-    ping: Async<string>(),
+    ping: Async(t.string()),
   },
   state: {
-    msg: State<string>('hello'),
+    msg: State(t.string(), 'hello'),
   },
 });
 

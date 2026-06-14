@@ -278,3 +278,288 @@ describe('validate – full type checking', () => {
     expect(validate(t.json(), 42).ok).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// W2 Nitro-parity types — round-trip tests
+// ---------------------------------------------------------------------------
+
+describe('W2 T05 — t.int64() round-trip (bigint, precision above 2^53)', () => {
+  const schema = t.int64();
+  const VALUE_ABOVE_MAX_SAFE = 9007199254740993n; // 2^53 + 1
+
+  it('encode passes bigint through (wire = bigint)', () => {
+    expect(encode(schema, VALUE_ABOVE_MAX_SAFE)).toBe(VALUE_ABOVE_MAX_SAFE);
+  });
+
+  it('decode bigint → bigint', () => {
+    expect(decode(schema, VALUE_ABOVE_MAX_SAFE)).toBe(VALUE_ABOVE_MAX_SAFE);
+  });
+
+  it('decode number → bigint (from wire)', () => {
+    // Small values may arrive as number from AnyMap
+    expect(decode(schema, 42 as unknown as bigint)).toBe(42n);
+  });
+
+  it('full round-trip preserves value above 2^53', () => {
+    const wire = encode(schema, VALUE_ABOVE_MAX_SAFE);
+    const back = decode(schema, wire as bigint);
+    expect(back).toBe(VALUE_ABOVE_MAX_SAFE);
+  });
+
+  it('validate ok for bigint', () => {
+    expect(validate(schema, 9007199254740993n).ok).toBe(true);
+  });
+
+  it('validate fails for number', () => {
+    expect(validate(schema, 42).ok).toBe(false);
+  });
+
+  it('int64 field inside object round-trips', () => {
+    const objSchema = t.object({ count: t.int64(), label: t.string() });
+    const encoded = encode(objSchema, { count: VALUE_ABOVE_MAX_SAFE, label: 'x' });
+    const decoded = decode(objSchema, encoded);
+    expect((decoded as { count: bigint }).count).toBe(VALUE_ABOVE_MAX_SAFE);
+  });
+});
+
+describe('W2 T06 — t.date() round-trip (Date ↔ epoch millis)', () => {
+  const schema = t.date();
+  const KNOWN_DATE = new Date('2025-06-14T12:00:00.000Z');
+  const KNOWN_MS = 1749902400000;
+
+  it('encode Date → epoch millis (number)', () => {
+    expect(encode(schema, KNOWN_DATE)).toBe(KNOWN_MS);
+  });
+
+  it('decode number → Date with same epoch millis', () => {
+    const result = decode(schema, KNOWN_MS) as Date;
+    expect(result).toBeInstanceOf(Date);
+    expect(result.getTime()).toBe(KNOWN_MS);
+  });
+
+  it('full round-trip preserves the instant', () => {
+    const wire = encode(schema, KNOWN_DATE);
+    const back = decode(schema, wire as number) as Date;
+    expect(back.getTime()).toBe(KNOWN_DATE.getTime());
+  });
+
+  it('validate ok for valid Date', () => {
+    expect(validate(schema, KNOWN_DATE).ok).toBe(true);
+  });
+
+  it('validate fails for invalid Date', () => {
+    expect(validate(schema, new Date('invalid')).ok).toBe(false);
+  });
+
+  it('validate fails for number', () => {
+    expect(validate(schema, KNOWN_MS).ok).toBe(false);
+  });
+
+  it('date field inside object round-trips', () => {
+    const objSchema = t.object({ createdAt: t.date(), name: t.string() });
+    const encoded = encode(objSchema, { createdAt: KNOWN_DATE, name: 'event' });
+    expect((encoded as { createdAt: number }).createdAt).toBe(KNOWN_MS);
+    const decoded = decode(objSchema, encoded) as { createdAt: Date; name: string };
+    expect(decoded.createdAt.getTime()).toBe(KNOWN_MS);
+  });
+});
+
+describe('W2 T07 — t.binary() round-trip (Uint8Array ↔ base64)', () => {
+  const schema = t.binary();
+  const BYTES = new Uint8Array([0x01, 0x02, 0xff]);
+
+  it('encode Uint8Array → base64 string', () => {
+    const wire = encode(schema, BYTES) as string;
+    expect(typeof wire).toBe('string');
+    // Decode back to verify correctness
+    const back = Buffer.from(wire, 'base64');
+    expect(back[0]).toBe(0x01);
+    expect(back[1]).toBe(0x02);
+    expect(back[2]).toBe(0xff);
+  });
+
+  it('encode ArrayBuffer → base64 string', () => {
+    const wire = encode(schema, BYTES.buffer) as string;
+    expect(typeof wire).toBe('string');
+  });
+
+  it('decode base64 string → Uint8Array preserving all bytes', () => {
+    const wire = Buffer.from(BYTES).toString('base64');
+    const result = decode(schema, wire) as Uint8Array;
+    expect(result).toBeInstanceOf(Uint8Array);
+    expect(result[0]).toBe(0x01);
+    expect(result[1]).toBe(0x02);
+    expect(result[2]).toBe(0xff);
+  });
+
+  it('full round-trip preserves bytes', () => {
+    const wire = encode(schema, BYTES);
+    const back = decode(schema, wire as string) as Uint8Array;
+    expect(back[0]).toBe(BYTES[0]);
+    expect(back[1]).toBe(BYTES[1]);
+    expect(back[2]).toBe(BYTES[2]);
+  });
+
+  it('validate ok for Uint8Array', () => {
+    expect(validate(schema, BYTES).ok).toBe(true);
+  });
+
+  it('validate ok for ArrayBuffer', () => {
+    expect(validate(schema, BYTES.buffer).ok).toBe(true);
+  });
+
+  it('validate fails for string', () => {
+    expect(validate(schema, 'hello').ok).toBe(false);
+  });
+});
+
+describe('W2 T08 — t.enum() round-trip (numeric members)', () => {
+  const schema = t.enum({ Red: 0, Green: 1, Blue: 2 });
+
+  it('encode passes numeric value through', () => {
+    expect(encode(schema, 1)).toBe(1);
+    expect(encode(schema, 0)).toBe(0);
+  });
+
+  it('decode passes numeric value through', () => {
+    expect(decode(schema, 1)).toBe(1);
+  });
+
+  it('full round-trip: Green (1) → wire 1 → back 1', () => {
+    const wire = encode(schema, 1);
+    const back = decode(schema, wire as number);
+    expect(back).toBe(1);
+  });
+
+  it('validate ok for known member value', () => {
+    expect(validate(schema, 0).ok).toBe(true);
+    expect(validate(schema, 1).ok).toBe(true);
+    expect(validate(schema, 2).ok).toBe(true);
+  });
+
+  it('validate fails for unknown value', () => {
+    expect(validate(schema, 99).ok).toBe(false);
+  });
+
+  it('validate fails for string', () => {
+    expect(validate(schema, 'Green').ok).toBe(false);
+  });
+});
+
+describe('W2 T09 — t.tuple() round-trip (positional array)', () => {
+  const schema = t.tuple([t.string(), t.number()] as const);
+
+  it('encode [string, number] → positional array', () => {
+    const wire = encode(schema, ['hello', 42] as unknown as readonly [string, number]);
+    expect(Array.isArray(wire)).toBe(true);
+    expect((wire as unknown[])[0]).toBe('hello');
+    expect((wire as unknown[])[1]).toBe(42);
+  });
+
+  it('decode positional array → tuple', () => {
+    const result = decode(schema, ['hello', 42]) as [string, number];
+    expect(result[0]).toBe('hello');
+    expect(result[1]).toBe(42);
+  });
+
+  it('full round-trip preserves values and order', () => {
+    const original: readonly [string, number] = ['hello', 42] as const;
+    const wire = encode(schema, original as unknown as readonly [string, number]);
+    const back = decode(schema, wire as [string, number]) as [string, number];
+    expect(back[0]).toBe('hello');
+    expect(back[1]).toBe(42);
+  });
+
+  it('validate ok for correct arity and types', () => {
+    expect(validate(schema, ['hello', 42] as unknown as readonly [string, number]).ok).toBe(true);
+  });
+
+  it('validate fails for wrong arity', () => {
+    expect(validate(schema, ['hello'] as unknown as readonly [string, number]).ok).toBe(false);
+  });
+
+  it('validate fails for wrong element type', () => {
+    expect(validate(schema, ['hello', 'world'] as unknown as readonly [string, number]).ok).toBe(
+      false,
+    );
+  });
+});
+
+describe('W2 T10 — t.oneOf() round-trip (primitive union, @k/@v envelope)', () => {
+  const schema = t.oneOf([t.string(), t.number()] as const);
+
+  it('string branch: encode → {"@k":0, "@v":"hello"}', () => {
+    const wire = encode(schema, 'hello') as { '@k': number; '@v': unknown };
+    expect(wire['@k']).toBe(0);
+    expect(wire['@v']).toBe('hello');
+  });
+
+  it('number branch: encode → {"@k":1, "@v":99}', () => {
+    const wire = encode(schema, 99) as { '@k': number; '@v': unknown };
+    expect(wire['@k']).toBe(1);
+    expect(wire['@v']).toBe(99);
+  });
+
+  it('string branch: decode {"@k":0, "@v":"hello"} → "hello"', () => {
+    const result = decode(schema, { '@k': 0, '@v': 'hello' });
+    expect(result).toBe('hello');
+  });
+
+  it('number branch: decode {"@k":1, "@v":99} → 99', () => {
+    const result = decode(schema, { '@k': 1, '@v': 99 });
+    expect(result).toBe(99);
+  });
+
+  it('full round-trip: string branch', () => {
+    const wire = encode(schema, 'world');
+    const back = decode(schema, wire as { '@k': number; '@v': unknown });
+    expect(back).toBe('world');
+  });
+
+  it('full round-trip: number branch', () => {
+    const wire = encode(schema, 3.14);
+    const back = decode(schema, wire as { '@k': number; '@v': unknown });
+    expect(back).toBe(3.14);
+  });
+
+  it('validate ok for string (matches opt 0)', () => {
+    expect(validate(schema, 'hello').ok).toBe(true);
+  });
+
+  it('validate ok for number (matches opt 1)', () => {
+    expect(validate(schema, 42).ok).toBe(true);
+  });
+
+  it('validate fails for boolean (neither branch matches)', () => {
+    expect(validate(schema, true).ok).toBe(false);
+  });
+
+  it('oneOf field inside object round-trips (T10 + W1 composition)', () => {
+    const objSchema = t.object({
+      value: t.oneOf([t.string(), t.number()] as const),
+      tag: t.string(),
+    });
+    const encodedStr = encode(objSchema, { value: 'hello', tag: 'x' }) as {
+      value: unknown;
+      tag: string;
+    };
+    expect((encodedStr.value as { '@k': number })['@k']).toBe(0);
+    const decodedStr = decode(objSchema, encodedStr) as { value: unknown; tag: string };
+    expect(decodedStr.value).toBe('hello');
+
+    const encodedNum = encode(objSchema, { value: 99, tag: 'y' }) as {
+      value: unknown;
+      tag: string;
+    };
+    expect((encodedNum.value as { '@k': number })['@k']).toBe(1);
+    const decodedNum = decode(objSchema, encodedNum) as { value: unknown; tag: string };
+    expect(decodedNum.value).toBe(99);
+  });
+
+  it('first-match-by-validate: number also matches a "number|string" schema at opt 0 position', () => {
+    // When number is option 0, it matches before string can
+    const reversedSchema = t.oneOf([t.number(), t.string()] as const);
+    const wire = encode(reversedSchema, 5) as { '@k': number; '@v': unknown };
+    expect(wire['@k']).toBe(0); // number is first
+  });
+});
