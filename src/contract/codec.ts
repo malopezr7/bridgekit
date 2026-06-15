@@ -25,6 +25,82 @@ import type {
 
 // ---- internal helpers -----------------------------------------------------
 
+// D6: Pure-JS base64 helpers — no Buffer dependency (safe for Hermes/JSC/RN).
+// Standard base64 alphabet per RFC 4648.
+const BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+// Lookup table: charCode → 6-bit value (or -1 for '=', -2 for invalid)
+const BASE64_DECODE_TABLE = ((): Int8Array => {
+  const t = new Int8Array(256).fill(-2);
+  for (let i = 0; i < BASE64_CHARS.length; i++) {
+    t[BASE64_CHARS.charCodeAt(i)] = i;
+  }
+  t['='.charCodeAt(0)] = -1; // padding
+  return t;
+})();
+
+/** Encode a Uint8Array to a base64 string (no line breaks, standard alphabet). */
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  // Use charAt() so noUncheckedIndexedAccess doesn't widen the return to string|undefined.
+  const c = (idx: number): string => BASE64_CHARS.charAt(idx);
+  const len = bytes.length;
+  let out = '';
+  let i = 0;
+  for (; i + 2 < len; i += 3) {
+    const b0 = bytes[i] ?? 0;
+    const b1 = bytes[i + 1] ?? 0;
+    const b2 = bytes[i + 2] ?? 0;
+    out +=
+      c(b0 >> 2) +
+      c(((b0 & 0x03) << 4) | (b1 >> 4)) +
+      c(((b1 & 0x0f) << 2) | (b2 >> 6)) +
+      c(b2 & 0x3f);
+  }
+  if (i + 1 === len) {
+    const b0 = bytes[i] ?? 0;
+    out += `${c(b0 >> 2) + c((b0 & 0x03) << 4)}==`;
+  } else if (i + 2 === len) {
+    const b0 = bytes[i] ?? 0;
+    const b1 = bytes[i + 1] ?? 0;
+    out += `${c(b0 >> 2) + c(((b0 & 0x03) << 4) | (b1 >> 4)) + c((b1 & 0x0f) << 2)}=`;
+  }
+  return out;
+}
+
+/** Decode a base64 string to a Uint8Array. Non-base64 chars are ignored (RFC 4648 §3.3 permissive). */
+function base64ToUint8Array(str: string): Uint8Array {
+  // Int8Array[n] returns number|undefined with noUncheckedIndexedAccess; ?? -2 keeps the -2 default.
+  const lookup = (code: number): number => BASE64_DECODE_TABLE[code] ?? -2;
+  // Pre-pass: count valid chars and padding to size the output buffer.
+  let validChars = 0;
+  let padCount = 0;
+  for (let i = 0; i < str.length; i++) {
+    const v = lookup(str.charCodeAt(i));
+    if (v === -1) padCount++;
+    else if (v >= 0) validChars++;
+  }
+  // Standard formula: every 4 base64 chars → 3 bytes; subtract padding.
+  const byteLen = Math.floor(((validChars + padCount) * 3) / 4) - padCount;
+  const out = new Uint8Array(byteLen);
+  let outIdx = 0;
+  let buf = 0;
+  let bits = 0;
+  for (let i = 0; i < str.length; i++) {
+    const v = lookup(str.charCodeAt(i));
+    if (v < 0) {
+      if (v === -1) break; // padding: stop
+      continue; // -2: non-alphabet char, skip
+    }
+    buf = (buf << 6) | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out[outIdx++] = (buf >> bits) & 0xff;
+    }
+  }
+  return outIdx === byteLen ? out : out.slice(0, outIdx);
+}
+
 function isObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
@@ -171,8 +247,8 @@ export function encode(schema: AnySchema, value: unknown): unknown {
       } else {
         return value;
       }
-      // base64-encode: works in both Node and React Native
-      return Buffer.from(bytes).toString('base64');
+      // D6: inline pure-JS base64 — no Buffer dependency (Hermes/JSC/RN safe)
+      return uint8ArrayToBase64(bytes);
     }
 
     case 'enum': {
@@ -293,14 +369,17 @@ export function decode(schema: AnySchema, value: unknown): unknown {
 
     case 'date': {
       if (value instanceof Date) return value;
-      return new Date(value as number);
+      // C-1: Kotlin Long arrives as bigint via Nitro Int64; new Date(bigint) throws TypeError.
+      // Handle both bigint (native bridge path) and number (JS self-invoke / older wire).
+      const ms = typeof value === 'bigint' ? Number(value) : (value as number);
+      return new Date(ms);
     }
 
     case 'binary': {
       if (value instanceof Uint8Array) return value;
       if (value instanceof ArrayBuffer) return new Uint8Array(value);
-      // wire is base64 string
-      return Uint8Array.from(Buffer.from(value as string, 'base64'));
+      // D6: wire is base64 string — decode without Buffer (Hermes/JSC/RN safe)
+      return base64ToUint8Array(value as string);
     }
 
     case 'enum': {
