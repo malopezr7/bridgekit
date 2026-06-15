@@ -184,11 +184,40 @@ internal class StateStore(
         }
     }
 
+    /**
+     * H-13: notify observers of a "gone" state (Unprovided / Replacing / grace-expiry).
+     * Sends a map WITHOUT the "v" key so that map.v === undefined on the JS side,
+     * which triggers the existing stale/unprovided branch in StateMirror._attachObserver.
+     * This is ADDITIVE — no new BridgeValue sealed branch is introduced.
+     */
+    private fun notifyObserversGone(contractId: String, stateKey: String, scope: Scope) {
+        val scopeKey = scope.serialize()
+        for ((_, obs) in observers) {
+            if (
+                obs.contractId != contractId ||
+                obs.stateKey != stateKey ||
+                obs.scopeKey != scopeKey
+            ) {
+                continue
+            }
+            try {
+                // Omit "v" key — JS onChange(map.v) receives undefined → gone signal.
+                obs.callback(mapOf("status" to "gone"))
+            } catch (_: Exception) {
+                // Never let observer failure propagate
+            }
+        }
+    }
+
     // ---- unprovide (epoch swap / binding close) --------------------------------
 
     /**
      * Transition all state entries for a contract+scope to Unprovided.
      * Called when the provider binding is closed or the JS runtime disconnects.
+     *
+     * H-13: notifyObservers is called after the state transition so JS observers
+     * receive an explicit "gone" signal (map without "v" key → map.v === undefined
+     * on JS side → stale/unprovided branch in _attachObserver).
      */
     fun markUnprovided(contractId: String, scope: Scope) {
         val scopeKey = scope.serialize()
@@ -196,6 +225,8 @@ internal class StateStore(
             if (key.contractId == contractId && key.scopeKey == scopeKey) {
                 val lastKnown = flow.value.valueOrNull()
                 flow.value = BridgeValue.Unprovided(lastKnown)
+                // H-13: notify observers — omit "v" key so map.v === undefined in JS.
+                notifyObserversGone(contractId, key.stateKey, scope)
             }
         }
     }
@@ -216,6 +247,10 @@ internal class StateStore(
             val lastKnown = flow.value.valueOrNull()
             flow.value = BridgeValue.Replacing(lastKnown)
 
+            // H-13: notify observers on Replacing transition.
+            // Omit "v" key so map.v === undefined in JS → stale/unprovided branch.
+            notifyObserversGone(key.contractId, key.stateKey, Scope.deserialize(key.scopeKey))
+
             // Cancel any prior grace job for this key before starting a new one.
             val keyStr = key.toString()
             graceJobs.remove(keyStr)?.cancel()
@@ -227,6 +262,8 @@ internal class StateStore(
                 // and we should NOT overwrite it.
                 if (flow.value is BridgeValue.Replacing) {
                     flow.value = BridgeValue.Unprovided(lastKnown)
+                    // H-13: notify observers on grace-expiry → Unprovided transition.
+                    notifyObserversGone(key.contractId, key.stateKey, Scope.deserialize(key.scopeKey))
                 }
                 graceJobs.remove(keyStr)
             }

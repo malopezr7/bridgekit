@@ -121,13 +121,20 @@ export function invokeLocalAsync(
     );
   });
 
+  // H-9: track cleanup resources that must be released on any settlement.
+  // Mirror the .finally() pattern from bridgekit.ts so timer + listener are
+  // always cleaned regardless of which branch (impl, timeout, abort) wins.
+  let timerId: ReturnType<typeof setTimeout> | undefined;
+  let abortHandler: (() => void) | undefined;
+  let abortSignal: AbortSignal | undefined;
+
   // Apply timeoutMs
   const { timeoutMs } = opts ?? {};
   if (timeoutMs !== undefined && timeoutMs !== null) {
     invocation = Promise.race([
       invocation,
-      new Promise<never>((_, reject) =>
-        setTimeout(
+      new Promise<never>((_, reject) => {
+        timerId = setTimeout(
           () =>
             reject(
               createBridgeError(
@@ -136,30 +143,34 @@ export function invokeLocalAsync(
               ),
             ),
           timeoutMs,
-        ),
-      ),
+        );
+      }),
     ]);
   }
 
   // Apply AbortSignal
   if (opts?.signal) {
     const signal = opts.signal;
+    abortSignal = signal;
     invocation = Promise.race([
       invocation,
       new Promise<never>((_, reject) => {
-        signal.addEventListener(
-          'abort',
-          () =>
-            reject(
-              createBridgeError('CANCELLED', '[bridgekit] local CANCELLED: AbortSignal aborted'),
-            ),
-          { once: true },
-        );
+        abortHandler = () =>
+          reject(
+            createBridgeError('CANCELLED', '[bridgekit] local CANCELLED: AbortSignal aborted'),
+          );
+        signal.addEventListener('abort', abortHandler, { once: true });
       }),
     ]);
   }
 
-  return invocation;
+  // H-9: .finally() cleans both timer AND listener on any settlement branch.
+  return invocation.finally(() => {
+    if (timerId !== undefined) clearTimeout(timerId);
+    if (abortSignal !== undefined && abortHandler !== undefined) {
+      abortSignal.removeEventListener('abort', abortHandler);
+    }
+  });
 }
 
 // ---- invokeLocalFire -------------------------------------------------------

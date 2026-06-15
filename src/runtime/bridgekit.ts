@@ -242,7 +242,12 @@ export class BridgeKitJs {
       };
 
       binding.close = (reason?: 'replacing' | 'final') => {
+        // C-3: capture live-ness BEFORE originalClose sets isLive=false.
+        // A stale handle (isLive already false — superseded by a new provider)
+        // must NOT push unprovide side-effects that corrupt the live provider's state.
+        const wasLive = binding.isLive;
         originalClose(reason);
+        if (!wasLive) return; // stale close: no-op on transport
         // Signal unprovided to observers for all state keys (stateful contracts)
         for (const key of Object.keys(contract.descriptor.state)) {
           transport.pushProviderState(contract.descriptor.id, scope, key, undefined);

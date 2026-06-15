@@ -85,7 +85,6 @@ export function BridgeScopeProvider({
 }: BridgeScopeProviderProps): ReactNode {
   // Memoize the scope object so Provider value reference is stable across renders
   // when feature/instance strings haven't changed.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — scope fields are the stable deps
   const scope: BridgeScope = useMemo(
     () =>
       instance
@@ -203,6 +202,9 @@ export function useBridgeState<TShape, K extends string>(
 
 /**
  * Reactive boolean: true when the contract is provided in the given scope.
+ *
+ * H-12: re-evaluates when scope changes by keying the effect on scope identity fields.
+ * Initial state is derived at render time per the CURRENT scope (not captured at mount).
  */
 export function useBridgeReady<TShape>(
   contract: BridgeContract<TShape>,
@@ -212,36 +214,39 @@ export function useBridgeReady<TShape>(
   const contextScope = useContext(ScopeContext);
   const scope = opts?.scope ?? contextScope;
 
-  const [ready, setReady] = useState(() => bk.registry.isProvided(contract.descriptor.id, scope));
+  // H-12: derive initial readiness per current scope at render time.
+  // We need to re-derive when scope changes; useState lazy init only runs once,
+  // so we read synchronously during render and update via the effect when scope changes.
+  const contractId = contract.descriptor.id;
+  const scopeKind = scope.kind;
+  const scopeFeature = (scope as { feature?: string }).feature;
+  const scopeInstance = (scope as { instance?: string }).instance;
 
-  // External system sync: poll/subscribe to registry readiness
-  useMountEffect(() => {
-    let mounted = true;
+  const [ready, setReady] = useState(() => bk.registry.isProvided(contractId, scope));
+
+  // H-12: effect re-runs on scope identity change, re-deriving readiness for the new scope.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — scope fields are the stable deps
+  useEffect(() => {
     let cancelled = false;
 
-    const check = () => {
-      if (!mounted) return;
-      const isNow = bk.registry.isProvided(contract.descriptor.id, scope);
-      setReady(isNow);
-    };
-
-    check();
+    // Immediately snapshot current readiness for new scope
+    setReady(bk.registry.isProvided(contractId, scope));
 
     // Wait for provision if not yet ready
-    if (!bk.registry.isProvided(contract.descriptor.id, scope)) {
+    if (!bk.registry.isProvided(contractId, scope)) {
       bk.registry
-        .whenProvided(contract.descriptor.id, { scope })
+        .whenProvided(contractId, { scope })
         .then(() => {
-          if (!cancelled) check();
+          if (!cancelled) setReady(bk.registry.isProvided(contractId, scope));
         })
         .catch(() => {});
     }
 
     return () => {
-      mounted = false;
       cancelled = true;
     };
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bk, contractId, scopeKind, scopeFeature, scopeInstance]);
 
   return ready;
 }

@@ -56,8 +56,6 @@ interface RegistryEntry {
   graceTimer: ReturnType<typeof setTimeout> | null;
   /** Per-key state values */
   state: Map<string, unknown>;
-  /** State change listeners (key → set of callbacks) */
-  stateListeners: Map<string, Set<(value: unknown) => void>>;
 }
 
 // ---- Readiness waiters -----------------------------------------------------
@@ -78,10 +76,18 @@ const DEFAULT_GRACE_WINDOW_MS = 1500;
 export class Registry {
   private readonly _entries = new Map<string, RegistryEntry>();
   private readonly _readinessWaiters = new Map<string, ReadinessWaiter[]>();
+  // H-10: registry-level state listeners keyed contractId|scopeKey|stateKey.
+  // Surviving across provider swaps — never cleared by an entry close.
+  private readonly _stateListeners = new Map<string, Set<(value: unknown) => void>>();
 
   /** Composite key for a (contractId, scopeKey) pair */
   private _key(contractId: string, scopeKey: string): string {
     return `${contractId}|${scopeKey}`;
+  }
+
+  /** H-10: composite key for a registry-level state listener */
+  private _stateKey(contractId: string, scopeKey: string, key: string): string {
+    return `${contractId}|${scopeKey}|${key}`;
   }
 
   /**
@@ -120,7 +126,6 @@ export class Registry {
       pendingCallers: [],
       graceTimer: null,
       state: new Map(),
-      stateListeners: new Map(),
     };
 
     // Seed initial state values from descriptor
@@ -137,7 +142,9 @@ export class Registry {
       setState: (key: string, value: unknown) => {
         if (!binding.isLive) return;
         entry.state.set(key, value);
-        const listeners = entry.stateListeners.get(key);
+        // H-10: notify registry-level listeners (survive provider swap)
+        const sk = this._stateKey(contractId, scopeKey, key);
+        const listeners = this._stateListeners.get(sk);
         if (listeners) {
           for (const cb of listeners) {
             cb(value);
@@ -164,10 +171,12 @@ export class Registry {
           for (const w of pending) {
             w.reject(new Error('CONTRACT_NOT_PROVIDED'));
           }
-          // Notify state listeners of unprovided
-          for (const listeners of entry.stateListeners.values()) {
-            for (const cb of listeners) {
-              cb(undefined); // undefined signals unprovided
+          // H-10: notify registry-level state listeners of unprovided
+          for (const [sk, listeners] of this._stateListeners) {
+            if (sk.startsWith(`${contractId}|${scopeKey}|`)) {
+              for (const cb of listeners) {
+                cb(undefined); // undefined signals unprovided
+              }
             }
           }
         }
@@ -269,21 +278,24 @@ export class Registry {
     return this.resolve(contractId, scope ?? GLOBAL_SCOPE) !== undefined;
   }
 
-  /** Subscribe to state changes for a (contractId, scope, key). Returns unsubscribe. */
+  /** Subscribe to state changes for a (contractId, scope, key). Returns unsubscribe.
+   * H-10: listeners are stored at registry level (keyed contractId|scopeKey|key) so
+   * they survive provider swaps — a new provider binding notifies the same listener set.
+   */
   subscribeState(
     contractId: string,
     scope: BridgeScope,
     key: string,
     cb: (value: unknown) => void,
   ): () => void {
-    const entry = this.resolve(contractId, scope);
-    if (!entry) return () => {};
-    if (!entry.stateListeners.has(key)) {
-      entry.stateListeners.set(key, new Set());
+    const scopeKey = serializeScope(scope);
+    const sk = this._stateKey(contractId, scopeKey, key);
+    if (!this._stateListeners.has(sk)) {
+      this._stateListeners.set(sk, new Set());
     }
-    entry.stateListeners.get(key)?.add(cb);
+    this._stateListeners.get(sk)?.add(cb);
     return () => {
-      entry.stateListeners.get(key)?.delete(cb);
+      this._stateListeners.get(sk)?.delete(cb);
     };
   }
 
@@ -299,7 +311,9 @@ export class Registry {
     for (const [k, entry] of this._entries) {
       if (k === this._key(contractId, scopeKey)) {
         entry.state.set(key, value);
-        const listeners = entry.stateListeners.get(key);
+        // H-10: notify registry-level listeners
+        const sk = this._stateKey(contractId, scopeKey, key);
+        const listeners = this._stateListeners.get(sk);
         if (listeners) {
           for (const cb of listeners) cb(value);
         }
