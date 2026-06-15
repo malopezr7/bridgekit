@@ -111,6 +111,12 @@ internal class Router(
         val currentEpoch = epoch
 
         engineScope.launch {
+            // D1 epoch guard: reject stale ops before any side-effect.
+            // epochEnv == 0L means "pre-connection" (no epoch in envelope) — do NOT reject.
+            if (epochEnv != 0L && epochEnv < currentEpoch) {
+                complete(errEnv("BRIDGE_NOT_READY", "Stale epoch: request epoch=$epochEnv current=$currentEpoch", contractId, member, scope))
+                return@launch
+            }
             val result = invokeWithReadiness(contractId, scope, member, payload, epochEnv, currentEpoch, correlationId, env)
             val dur = System.currentTimeMillis() - t0
             diagnostics.trace("invoke", contractId, member, scope.serialize(), if (result["ok"] == true) "OK" else (result["code"] as? String ?: "ERR"), dur, currentEpoch)
@@ -161,6 +167,17 @@ internal class Router(
             for (job in jsStreamJobs.values) job.cancel("Epoch swap $newEpoch")
             jsStreamJobs.clear()
 
+            // H-8: close and clear all prior-epoch JS→native stream channels and end deferreds.
+            // Mirrors loopbackTransport.ts:264 simulateReconnect which closes channels on reconnect.
+            // Without this, prior-epoch Flow coroutines hang waiting on a channel that will never
+            // receive items or a terminal from the (now disconnected) JS side.
+            for (ch in jsStreamChannels.values) ch.close()
+            jsStreamChannels.clear()
+            for (deferred in jsStreamEnds.values) deferred.complete(
+                mapOf("ok" to false, "code" to "BRIDGE_NOT_READY", "message" to "Epoch swap: prior stream invalidated")
+            )
+            jsStreamEnds.clear()
+
             // 3. Fail in-flight native→JS calls (park buffer for JS-provided)
             parkBuffer.failAllPending()
 
@@ -200,6 +217,13 @@ internal class Router(
         val scope = parseScopeEnv(env)
         val streamEpoch = (env["epoch"] as? Number)?.toLong() ?: epoch
         val payload = extractPayload(env)
+
+        // D1 epoch guard: reject stale openStream before any side-effect.
+        val currentEpochAtOpen = epoch
+        if (streamEpoch != 0L && streamEpoch < currentEpochAtOpen) {
+            onEnd(errEnv("BRIDGE_NOT_READY", "Stale epoch: request epoch=$streamEpoch current=$currentEpochAtOpen", contractId, member, scope))
+            return ""
+        }
 
         val binding = resolveBinding(contractId, scope) ?: run {
             onEnd(errEnv("CONTRACT_NOT_PROVIDED", "Contract '$contractId' not provided", contractId, member, scope))
@@ -285,6 +309,14 @@ internal class Router(
         val contractId = env["contractId"] as? String ?: return errEnv("CONTRACT_NOT_PROVIDED", "Missing contractId")
         val scope = parseScopeEnv(env)
         val op = env["op"] as? String
+
+        // D1 epoch guard: reject stale stateWrite (including provide/unprovide ops) before
+        // any side-effect. epochEnv == 0L = pre-connection sentinel, do NOT reject.
+        val epochEnv = (env["epoch"] as? Number)?.toLong() ?: 0L
+        val currentEpochAtWrite = epoch
+        if (epochEnv != 0L && epochEnv < currentEpochAtWrite) {
+            return errEnv("BRIDGE_NOT_READY", "Stale epoch: request epoch=$epochEnv current=$currentEpochAtWrite", contractId)
+        }
 
         // ADR-5b: branch on op='provide' / op='unprovide' BEFORE touching the state store.
         // These are explicit readiness announcements sent by JS runtime at provide()/close()

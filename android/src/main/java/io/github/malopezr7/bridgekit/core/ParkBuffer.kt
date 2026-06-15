@@ -1,6 +1,7 @@
 package io.github.malopezr7.bridgekit.core
 
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Job
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -23,7 +24,8 @@ internal class ParkBuffer {
 
     private data class ParkKey(val contractId: String, val scopeKey: String)
 
-    // Deferred signals for waiting coroutines: true = provided, false = failed
+    // Deferred signals for waiting coroutines: true = provided, false = timed-out/failed.
+    // CopyOnWriteArrayList: safe for concurrent remove (one writer) + iteration (unpark/failAll).
     private val waiters = ConcurrentHashMap<ParkKey, CopyOnWriteArrayList<CompletableDeferred<Boolean>>>()
 
     /**
@@ -36,6 +38,10 @@ internal class ParkBuffer {
     fun park(contractId: String, scope: Scope): CompletableDeferred<Boolean>? {
         val key = ParkKey(contractId, scope.serialize())
         val list = waiters.getOrPut(key) { CopyOnWriteArrayList() }
+        // Capacity check: only count waiters that have not yet completed.
+        // H-ParkBuffer: timed-out waiters complete with false but stay in the list today.
+        // Fix: remove completed (dead) entries before checking capacity.
+        list.removeIf { it.isCompleted }
         if (list.size >= MAX_PARKED) return null
         val deferred = CompletableDeferred<Boolean>()
         list.add(deferred)
