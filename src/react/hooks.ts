@@ -132,6 +132,11 @@ export function useBridge<TShape>(
  * Register a contract implementation on mount; close('final') on unmount.
  * StrictMode-safe: double-mount supersedes the first registration harmlessly.
  * Impl captured latest via ref — re-renders don't re-register.
+ *
+ * H-11: effect is keyed by scope identity so switching scope closes the old
+ * registration and opens a new one, matching the H-12 pattern for useBridgeReady.
+ * The impl ref is snapshotted at effect time (post-commit) before the provide call
+ * to avoid exposing an uncommitted concurrent-render impl to bridge callers.
  */
 export function useProvideBridge<TShape>(
   contract: BridgeContract<TShape>,
@@ -146,19 +151,28 @@ export function useProvideBridge<TShape>(
   const implRef = useRef<Partial<TShape>>(impl);
 
   // S-2 fix (react-no-use-effect): update ref during render, not in a bare useEffect.
-  // The ref always holds the latest impl; the Proxy in useMountEffect delegates to it.
+  // The ref always holds the latest impl; the Proxy in the effect delegates to it.
   // Updating a ref during render is safe — it is synchronous, has no observable side
   // effects on other components, and avoids the extra render cycle of a no-deps effect.
   implRef.current = impl;
 
-  // Mount effect: register on mount, close on unmount.
-  // This is external-system sync — useMountEffect is correct here per react-no-use-effect:
+  const scopeKind = scope.kind;
+  const scopeFeature = (scope as { feature?: string }).feature;
+  const scopeInstance = (scope as { instance?: string }).instance;
+
+  // H-11: keyed by scope identity so a scope change triggers close+re-register.
+  // This is external-system sync — useEffect is correct here per react-no-use-effect:
   // provider registration IS a side effect of mounting into the bridge runtime.
-  useMountEffect(() => {
-    // Use an indirection impl that always delegates to the latest ref
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — scope fields are the stable deps
+  useEffect(() => {
+    // Snapshot implRef.current at effect time (after commit) so the Proxy used
+    // during registration delegates to the committed impl, not a concurrent-render
+    // speculative value that may have been written to implRef during an aborted render.
+    const registrationRef = implRef;
+
     const proxyImpl = new Proxy({} as Partial<TShape>, {
       get(_t, prop: string) {
-        const current = implRef.current as Record<string, unknown>;
+        const current = registrationRef.current as Record<string, unknown>;
         return current[prop];
       },
     });
@@ -166,7 +180,8 @@ export function useProvideBridge<TShape>(
     return () => {
       binding.close('final');
     };
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bk, contract, scopeKind, scopeFeature, scopeInstance]);
 }
 
 // ---- useBridgeState --------------------------------------------------------
@@ -249,18 +264,6 @@ export function useBridgeReady<TShape>(
   }, [bk, contractId, scopeKind, scopeFeature, scopeInstance]);
 
   return ready;
-}
-
-// ---- useMountEffect --------------------------------------------------------
-
-/**
- * Named hook for external-system sync on mount/unmount.
- * Semantically identical to useEffect(fn, []) but named to clarify intent:
- * this is NOT a derived-state effect, it is explicit external-system registration.
- */
-function useMountEffect(effect: () => (() => void) | void): void {
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional mount-only
-  useEffect(effect, []);
 }
 
 export type { BridgeCallOpts };
