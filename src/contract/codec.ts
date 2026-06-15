@@ -397,9 +397,26 @@ export function decode(schema: AnySchema, value: unknown): unknown {
       if (!isObject(value)) return value;
       const oneOfSchema = schema as OneOfSchema;
       const envelope = value as Record<string, unknown>;
-      const idx = envelope['@k'] as number;
-      const opt = oneOfSchema.options[idx];
-      if (opt === undefined) return value;
+      const rawK = envelope['@k'];
+      // 5.1-5.2: @k must be a number — throw descriptively if absent or wrong type
+      if (typeof rawK !== 'number') {
+        throw new TypeError(
+          `[bridgekit] oneOf decode: @k must be a number, got ${typeof rawK} (value: ${String(rawK)})`,
+        );
+      }
+      // 5.1: @v must be present (the key must exist)
+      if (!('@v' in envelope)) {
+        throw new TypeError(
+          `[bridgekit] oneOf decode: @v is missing from envelope (schema has ${oneOfSchema.options.length} option(s))`,
+        );
+      }
+      // 5.3: @k must be within range
+      const opt = oneOfSchema.options[rawK];
+      if (opt === undefined) {
+        throw new RangeError(
+          `[bridgekit] oneOf decode: @k=${rawK} is out of range (schema has ${oneOfSchema.options.length} option(s))`,
+        );
+      }
       return decode(opt, envelope['@v']);
     }
 

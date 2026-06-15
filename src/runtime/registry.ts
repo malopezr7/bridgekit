@@ -157,14 +157,20 @@ export class Registry {
         this._entries.delete(entryKey);
 
         if (reason === 'replacing') {
-          // Grace window: hold pending callers briefly
+          // Grace window: pendingCallers is never populated before this fires
+          // (no callers can arrive during the synchronous close() call), so
+          // the loop below is intentionally a no-op — kept for safety.
           const graceEntry = entry;
-          entry.graceTimer = setTimeout(() => {
+          const graceTimer = setTimeout(() => {
+            // pendingCallers is always empty here (dead code path — kept for safety).
             const pending = graceEntry.pendingCallers.splice(0);
             for (const w of pending) {
               w.reject(new Error('CONTRACT_NOT_PROVIDED'));
             }
           }, DEFAULT_GRACE_WINDOW_MS);
+          // 5.8: unref so the timer does not prevent Node.js process exit / test runner from terminating.
+          (graceTimer as unknown as { unref?: () => void }).unref?.();
+          entry.graceTimer = graceTimer;
         } else {
           // final: fail immediately
           const pending = entry.pendingCallers.splice(0);

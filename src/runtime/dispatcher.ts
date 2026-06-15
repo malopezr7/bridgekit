@@ -144,6 +144,9 @@ export class Dispatcher implements JsDispatcher {
               member: env.member,
               scope: env.scope,
             });
+            // 5.7: clean up the producer entry so onStreamClose does not attempt
+            // a second unsubscribe/endFromJs on an already-finished stream.
+            this._openProducers.delete(streamId);
           }
         }
       };
