@@ -1,16 +1,9 @@
-// W3 — Schema-first markers: descriptor byte-identity proof.
-//
-// These tests assert that schema-first markers (design D1) produce descriptors
-// that are byte-identical to the equivalent t.* descriptor for the same shapes.
-// No generatedSchemas third-argument is required — the schemas are carried directly.
-//
-// ADR-7 (W3): schema-first markers make hash parity structural — the descriptor
-// IS the t.* descriptor, so the CLI hash and the runtime hash are always identical.
+// Schema-first markers: descriptor byte-identity proof.
+// Markers carry schemas directly — no generatedSchemas arg needed.
+// Hash parity is structural: the descriptor IS the t.* descriptor.
 
 import { Async, defineContract, State, Stream, stableHash, Void } from '../index';
 import { t } from '../schema';
-
-// ---- schema-first marker contract (no third arg needed) --------------------
 
 function makeContract() {
   return defineContract('wave1.fixture', {
@@ -30,7 +23,7 @@ function makeContract() {
   });
 }
 
-describe('W3 schema-first markers — descriptor byte-identity', () => {
+describe('schema-first markers — descriptor byte-identity', () => {
   it('carries the param/result schema into method descriptors directly', () => {
     const contract = makeContract();
     const getUserById = contract.descriptor.methods.getUserById;
@@ -61,7 +54,6 @@ describe('W3 schema-first markers — descriptor byte-identity', () => {
   it('hash is byte-identical to an equivalent t.* contract descriptor', () => {
     const contract = makeContract();
 
-    // Build the equivalent descriptor using t.* directly (the reference shape).
     const tStarDescriptor = {
       $type: 'io.github.malopezr7.bridgekit.contract',
       descriptorVersion: 1,
@@ -112,5 +104,4 @@ describe('W3 schema-first markers — descriptor byte-identity', () => {
   });
 });
 
-// W4: .bridge.ts files deleted — schema-first contracts carry schemas directly.
-// The W1(b) copy-parity gate is removed as the files no longer exist.
+// .bridge.ts files deleted — schema-first contracts carry schemas directly.

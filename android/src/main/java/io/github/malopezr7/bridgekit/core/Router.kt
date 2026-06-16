@@ -18,7 +18,7 @@ import kotlinx.coroutines.withTimeout
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
-// W3-3 helper: deterministic params hash for StreamHub keying.
+// Deterministic params hash for StreamHub keying.
 // Uses sorted key order so params with the same entries in different order hash the same.
 private fun paramsHash(payload: Map<String, Any?>?): Long {
     if (payload == null || payload.isEmpty()) return 0L
@@ -49,11 +49,9 @@ internal class Router(
     internal val readinessTimeoutMs: Long = 5_000,
     internal val callTimeoutMs: Long = 30_000,
     /**
-     * Wire hash skew enforcement (design Decision 2, three-stage rollout).
-     *   false (default) = OBSERVE: log mismatches via diagnostics, NEVER reject — the
-     *     live demo keeps working before on-device hash-parity verification.
+     * Wire hash skew enforcement.
+     *   false (default) = OBSERVE: log mismatches via diagnostics, never reject.
      *   true = ENFORCE: return INCOMPATIBLE_CONTRACT on mismatch without dispatching.
-     * The final flip to true is gated on real-device verification (out of scope here).
      */
     internal val strictHashCheck: Boolean = false,
 ) : io.github.malopezr7.bridgekit.runtime.BridgeKitNativeDelegate {
@@ -88,7 +86,6 @@ internal class Router(
     // coroutine scope for all stream pumps + state observations
     private var engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    // W3-3: StreamHub — multiplexes provider Flows across N consumers with same params.
     private var streamHub = StreamHub(engineScope)
 
     // ---- JS-provided contract set (for epoch-swap markings) --------------------
@@ -155,7 +152,7 @@ internal class Router(
         val newEpoch = epochCounter.incrementAndGet()
 
         synchronized(lock) {
-            // 1. Cancel prior-epoch stream pump jobs + StreamHub (W3-3)
+            // 1. Cancel prior-epoch stream pump jobs + StreamHub
             val priorEpochJobs = streamPumpJobs.values.filter { it.first < newEpoch }
             for ((_, job) in priorEpochJobs) job.cancel("Epoch swap: prior epoch $newEpoch")
             streamPumpJobs.entries.removeIf { it.value.first < newEpoch }
@@ -167,10 +164,9 @@ internal class Router(
             for (job in jsStreamJobs.values) job.cancel("Epoch swap $newEpoch")
             jsStreamJobs.clear()
 
-            // H-8: close and clear all prior-epoch JS→native stream channels and end deferreds.
-            // Mirrors loopbackTransport.ts:264 simulateReconnect which closes channels on reconnect.
-            // Without this, prior-epoch Flow coroutines hang waiting on a channel that will never
-            // receive items or a terminal from the (now disconnected) JS side.
+            // Close and clear all prior-epoch JS→native stream channels and end deferreds.
+            // Without this, prior-epoch Flow coroutines hang waiting on a channel that will
+            // never receive items or a terminal from the now-disconnected JS side.
             for (ch in jsStreamChannels.values) ch.close()
             jsStreamChannels.clear()
             for (deferred in jsStreamEnds.values) deferred.complete(
@@ -236,8 +232,7 @@ internal class Router(
             return ""
         }
 
-        // W3-3: Multiplex consumers of the same provider+params through StreamHub.
-        // This replaces the per-call Flow creation with a shared Flow fan-out.
+        // Multiplex consumers of the same provider+params through StreamHub.
         val pHash = paramsHash(payload)
         val streamId = "${contractId}_${member}_${pHash}_${System.nanoTime()}"
 
@@ -318,9 +313,9 @@ internal class Router(
             return errEnv("BRIDGE_NOT_READY", "Stale epoch: request epoch=$epochEnv current=$currentEpochAtWrite", contractId)
         }
 
-        // ADR-5b: branch on op='provide' / op='unprovide' BEFORE touching the state store.
+        // Branch on op='provide' / op='unprovide' BEFORE touching the state store.
         // These are explicit readiness announcements sent by JS runtime at provide()/close()
-        // time, reusing the existing BridgeState.write Nitro channel (no Nitro regen needed).
+        // time, reusing the existing BridgeState.write Nitro channel.
         when (op) {
             "provide" -> {
                 // A JS contract is now available. Mark it and unpark any native waiters.
@@ -347,14 +342,10 @@ internal class Router(
         @Suppress("UNCHECKED_CAST")
         val value = (valueWrapped as? Map<String, Any?>)?.get("v")
 
-        // Check if native side owns this binding.
+        // If native does NOT own this binding, JS is the provider.
+        // Record it so isProvided / awaitProvided are truthful, and unpark any waiters.
         val nativeOwns = resolveBinding(contractId, scope) != null
         if (!nativeOwns) {
-            // A stateWrite for a contract native does NOT own ⇒ JS is the provider.
-            // Record it so isProvided / awaitProvided / tryConsume are truthful for
-            // JS-provided contracts. Also unpark any native-side awaitProvided waiters.
-            // ADR-5: markJsProvided is the real JS-provide path signal (stateful path).
-            // ADR-5b: stateless contracts now use the explicit provide/unprovide ops above.
             markJsProvided(contractId)
             parkBuffer.unpark(contractId, scope)
         }
@@ -420,8 +411,7 @@ internal class Router(
 
     /**
      * Await until (contractId, scope) is provided, with timeout.
-     * Returns true if provided, false if timed out.
-     * ADR-5: also returns true immediately for JS-provided contracts (jsProvidedContracts set).
+     * Returns true if provided (native or JS), false if timed out.
      */
     internal suspend fun awaitProvided(contractId: String, scope: Scope, timeoutMs: Long): Boolean {
         if (resolveBinding(contractId, scope) != null) return true
@@ -448,8 +438,8 @@ internal class Router(
     internal fun currentEpoch(): Long = epoch
 
     /**
-     * Track a JS-provided contract id (arrives when JS calls provide on the JS registry).
-     * This is registered implicitly when a JS-directed invoke/stream/stateWrite arrives.
+     * Track a JS-provided contract id.
+     * Registered implicitly when a JS-directed invoke/stream/stateWrite arrives.
      */
     internal fun markJsProvided(contractId: String) {
         jsProvidedContracts.add(contractId)
@@ -555,13 +545,12 @@ internal class Router(
     }
 
     /**
-     * Wire hash skew check (design Decision 2). Compares the caller's envelope
-     * contractHash against the native binding's generated contractHash.
+     * Wire hash skew check. Compares the caller's envelope contractHash against the
+     * native binding's generated contractHash.
      *
-     * Returns an INCOMPATIBLE_CONTRACT error envelope ONLY when [strictHashCheck]
-     * is enabled AND the hashes both exist and differ. In observe mode (default) or
-     * when either hash is absent (legacy schema-less contract / loopback), it records
-     * the skew for diagnostics and returns null so the call dispatches normally.
+     * Returns an INCOMPATIBLE_CONTRACT error envelope ONLY when [strictHashCheck] is
+     * enabled AND the hashes both exist and differ. In observe mode (default) or when
+     * either hash is absent, it records the skew for diagnostics and returns null.
      */
     private fun checkContractHash(
         contractId: String,

@@ -1,30 +1,17 @@
 // BridgeKitNative.swift
-// BridgeKit iOS engine — singleton seam between the Nitro Hybrid objects (L3) and
-// the BridgeKit Swift core (L2).
+// BridgeKit iOS engine — singleton seam between Nitro Hybrid objects and the Swift core.
 //
-// Port of io/github/malopezr7/bridgekit/runtime/BridgeKitNative.kt
-//
-// DESIGN:
-//  - `delegate` is the mutable seam. Default = NotReadyDelegate (returns BRIDGE_NOT_READY).
-//  - `nonisolated(unsafe)` on the backing storage + NSLock protection: Nitro callbacks
-//    arrive on arbitrary threads before the engine is set.
-//  - NOT an actor (would force async access to a var that must be set synchronously).
-//
-// PORT NOTE: Kotlin `@Volatile var delegate` is a straightforward atomic assignment.
-// Swift does not have `@Volatile` or atomic properties on reference types.
-// Strategy: NSLock-protected backing + nonisolated(unsafe) storage.
-// The set path is: lock → assign → unlock.
-// The read path (Nitro callbacks): lock → read → unlock → call.
-// This matches the Kotlin semantics where reads/writes are atomic.
+// `delegate` defaults to NotReadyDelegate (returns BRIDGE_NOT_READY) and is swapped
+// once at startup. NSLock + nonisolated(unsafe) provide thread safety because Nitro
+// callbacks arrive on arbitrary threads and the delegate must be settable synchronously
+// (an actor would force async access).
 
 import Foundation
 
-// ---- BridgeKitNativeDelegate protocol --------------------------------------
+// MARK: - BridgeKitNativeDelegate
 
 /// Full delegate surface exposed to the Swift core.
 /// All [String: Any?] values conform to the {v: <value>} wire rule.
-///
-/// Port: `interface BridgeKitNativeDelegate` (Kotlin).
 public protocol BridgeKitNativeDelegate: AnyObject {
 
     // BridgeHost
@@ -45,22 +32,15 @@ public protocol BridgeKitNativeDelegate: AnyObject {
     func stateWrite(env: [String: Any?]) -> [String: Any?]
 }
 
-// ---- BridgeKitNative singleton ---------------------------------------------
+// MARK: - BridgeKitNative singleton
 
-/// Singleton seam. HybridBridgeHost/State/Streams (L3) delegate every call here.
-///
-/// Port: `object BridgeKitNative` (Kotlin).
+/// Singleton seam — HybridBridgeHost/State/Streams delegate every call here.
 public final class BridgeKitNative {
 
     /// Shared singleton.
     public static let shared = BridgeKitNative()
 
-    // nonisolated(unsafe): delegate is set once before the Nitro host is created.
-    // Lock protects the assignment window (concurrent set + read during startup).
-    //
-    // PORT NOTE: Kotlin `@Volatile var delegate` — Swift nonisolated(unsafe) + NSLock.
-    // `nonisolated(unsafe)` suppresses the actor-isolation warning on global-actor-less
-    // types. The NSLock provides the actual thread safety.
+    // nonisolated(unsafe): set once before Nitro host creation; NSLock guards the window.
     private let _lock = NSLock()
     nonisolated(unsafe) private var _delegate: BridgeKitNativeDelegate = NotReadyDelegate.shared
 
@@ -82,7 +62,7 @@ public final class BridgeKitNative {
     }
 }
 
-// ---- NotReadyDelegate ------------------------------------------------------
+// MARK: - NotReadyDelegate
 
 private let BRIDGE_NOT_READY_MSG = "BridgeKit native core not initialized. " +
     "Ensure the JS bundle entry imports '@malopezr7/bridgekit' before the first call."
@@ -91,9 +71,7 @@ private func notReadyEnvelope() -> [String: Any?] {
     ["ok": false, "code": "BRIDGE_NOT_READY", "message": BRIDGE_NOT_READY_MSG]
 }
 
-/// Default delegate — returns BRIDGE_NOT_READY envelopes until BridgeKit wires in the real impl.
-///
-/// Port: `object NotReadyDelegate` (Kotlin).
+/// Default delegate — returns BRIDGE_NOT_READY envelopes until the real impl is wired in.
 public final class NotReadyDelegate: BridgeKitNativeDelegate {
 
     public static let shared = NotReadyDelegate()

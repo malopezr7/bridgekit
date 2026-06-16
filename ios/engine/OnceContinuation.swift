@@ -1,30 +1,22 @@
 // OnceContinuation.swift
 // BridgeKit iOS engine — single-resume guard for Swift CheckedContinuation.
 //
-// DESIGN (Decision 4): Swift crashes on double-resume of a CheckedContinuation
-// (verified: Promise.swift:46-47,57-58; withUnsafeThrowingContinuation:188).
-// Kotlin CompletableDeferred.complete() is idempotent — all concurrent completers
-// race safely. This wrapper provides the same idempotency in Swift by nil-ing out
-// the continuation after the first resume so subsequent calls are no-ops.
+// Swift crashes on double-resume of a CheckedContinuation. This wrapper provides
+// idempotency by nil-ing out the continuation after the first resume.
 //
-// Used by:
-//  - ParkBuffer: concurrent unpark vs failAllPending vs timeout race.
-//  - OutboundCaller: completion callback vs callTimeout race.
-//  - Stream end deferreds: endFromJs vs epoch-swap close race.
+// Used by ParkBuffer (unpark/failAll/timeout race), OutboundCaller (callback/timeout
+// race), and stream end deferreds (endFromJs/epoch-swap race).
 
 import Foundation
 
 /// A wrapper around `CheckedContinuation` that guarantees at-most-one resume.
 ///
-/// Port: The Kotlin CompletableDeferred.complete() idempotency → Swift needs
-/// an explicit wrapper because `CheckedContinuation` is single-use by contract.
-///
-/// Thread safety: protected by `NSLock`; safe for concurrent resume calls
-/// from arbitrary threads (Nitro callbacks, timer tasks, epoch-swap tasks).
+/// Thread-safe via NSLock; safe for concurrent calls from Nitro callbacks, timer
+/// tasks, and epoch-swap tasks.
 internal final class OnceContinuation<T> {
 
-    // PORT NOTE: NSLock (not NSRecursiveLock) — this wrapper is only ever
-    // locked for the tiny critical section of nil-and-resume, never re-entered.
+    // NSLock (not NSRecursiveLock): only locked for the nil-and-resume critical
+    // section, never re-entered.
     private let lock = NSLock()
     private var continuation: CheckedContinuation<T, Error>?
 

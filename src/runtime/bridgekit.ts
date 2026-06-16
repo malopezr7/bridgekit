@@ -1,7 +1,5 @@
-// ---------------------------------------------------------------------------
 // BridgeKitJs — main JS-side bridge instance.
 // Wires transport + dispatcher + registry + mirrors + typed proxy.
-// ---------------------------------------------------------------------------
 
 import { decode, encode, sanitizeAny, validate } from '../contract/codec';
 import type { BridgeContract, BridgeStreamSource } from '../contract/contract';
@@ -37,8 +35,7 @@ function _isDev(): boolean {
 
 /**
  * Encode method params for transport.
- * - t.* path: schema-driven encode (field-stripping, coercion).
- * - Marker path (no params schema): universal deep-sanitize to prevent AnyMap crashes.
+ * t.* path: schema-driven encode. Marker path (no params schema): deep-sanitize.
  */
 function _encodePayload(
   methodDesc: import('../contract/contract').MethodDescriptor,
@@ -53,12 +50,9 @@ function _encodePayload(
 }
 
 /**
- * Decode an inbound native payload against its schema, then VALIDATE it (W1-5).
- *
- * Validation runs on the inbound seam because wire skew (native returns a payload
- * with a missing required field or a wrong-typed field) is a production concern,
- * not a dev-only concern. A mismatch throws VALIDATION_FAILED with the field path
- * instead of silently coercing or returning a structurally-wrong object.
+ * Decode an inbound native payload against its schema, then validate it.
+ * Validation runs on the inbound seam: wire skew is a production concern. A mismatch
+ * throws VALIDATION_FAILED with the field path instead of silently coercing.
  */
 function _decodeAndValidateInbound(
   schema: AnySchema,
@@ -80,8 +74,7 @@ function _decodeAndValidateInbound(
 
 /**
  * Encode stream params for transport.
- * - t.* path: schema-driven encode.
- * - Marker path: universal deep-sanitize.
+ * t.* path: schema-driven encode. Marker path: deep-sanitize.
  */
 function _encodeStreamPayload(
   streamDesc: import('../contract/contract').StreamDescriptor,
@@ -94,11 +87,8 @@ function _encodeStreamPayload(
   return sanitizeAny(params);
 }
 
-// ---- Stream diagnostics wrapper --------------------------------------------
-
 /**
- * Wraps a BridgeStreamSource to track the number of active subscriptions
- * in the diagnostics counter (increments on subscribe, decrements on unsub).
+ * Wraps a BridgeStreamSource to track active subscription count in diagnostics.
  */
 function wrapStreamSourceWithDiagnostics(
   source: BridgeStreamSource<unknown>,
@@ -113,7 +103,6 @@ function wrapStreamSourceWithDiagnostics(
       };
     },
     [Symbol.asyncIterator](): AsyncIterator<unknown> {
-      // Async iterators are counted separately — each for-await consumer is one subscription.
       diagnostics.incrementOpenStreams();
       const iter = source[Symbol.asyncIterator]();
       return {
@@ -131,7 +120,7 @@ function wrapStreamSourceWithDiagnostics(
   };
 }
 
-// ---- Ambient scope ---------------------------------------------------------
+// ---- Ambient scope --------------------------------------------------------
 
 let _ambientScope: BridgeScope = GLOBAL_SCOPE;
 
@@ -143,14 +132,14 @@ export function getAmbientScope(): BridgeScope {
   return _ambientScope;
 }
 
-// ---- BridgeCallOpts --------------------------------------------------------
+// ---- BridgeCallOpts -------------------------------------------------------
 
 export interface BridgeCallOpts {
   timeoutMs?: number | null;
   signal?: AbortSignal;
 }
 
-// ---- BridgeKitJs -----------------------------------------------------------
+// ---- BridgeKitJs ----------------------------------------------------------
 
 export class BridgeKitJs {
   readonly registry: Registry;
@@ -175,8 +164,7 @@ export class BridgeKitJs {
    */
   connect(): void {
     if (this._connected) {
-      // Reconnect path: clean up prior-epoch resources first.
-      // Order mirrors the native connectDispatcher teardown (Router.kt:133-153).
+      // Reconnect: clean up prior-epoch resources before re-wiring.
       this._dispatcher.closeAllProducers();
       this._mirrors.detachAll();
       this.registry.closeAll('final');
@@ -187,7 +175,6 @@ export class BridgeKitJs {
     this._epoch = result.epoch;
     this._connected = true;
 
-    // Hydrate mirrors from snapshot
     for (const entry of result.snapshot) {
       const stub = {
         descriptor: { id: entry.contractId, methods: {}, streams: {}, state: {} },
@@ -196,7 +183,6 @@ export class BridgeKitJs {
       this._mirrors.getOrCreate(stub, entry.key, entry.scope, entry.value).hydrate(entry.value);
     }
 
-    // Attach transport to all existing mirrors
     this._mirrors.attachAll(this._transport);
   }
 
@@ -212,10 +198,6 @@ export class BridgeKitJs {
     const scope = opts?.scope ?? _ambientScope;
     const binding = this.registry.provide(contract, impl, { scope });
 
-    // Wire setState + close to push state changes to the transport (both loopback and Nitro).
-    // pushProviderState is part of the BridgeTransport interface:
-    //   - LoopbackTransport: delegates to notifyStateChange (stateStore + observers)
-    //   - NitroBridgeTransport: calls stateWrite({ v: value }) → Kotlin StateStore.writeFromJs
     const transport = this._transport;
     const wrappedBinding = binding as Binding & { _statePatched: boolean };
     if (!wrappedBinding._statePatched) {
@@ -224,8 +206,6 @@ export class BridgeKitJs {
       const originalClose = binding.close.bind(binding);
 
       binding.setState = (key: string, value: unknown) => {
-        // W3-1: Validate state value against baked schema (if available) before pushing.
-        // This kills the raw Any? silent coercion on the push path.
         const stateDesc = contract.descriptor.state[key];
         if (stateDesc !== undefined && 'value' in stateDesc && stateDesc.value) {
           const result = validate(stateDesc.value, value);
@@ -242,36 +222,26 @@ export class BridgeKitJs {
       };
 
       binding.close = (reason?: 'replacing' | 'final') => {
-        // C-3: capture live-ness BEFORE originalClose sets isLive=false.
-        // A stale handle (isLive already false — superseded by a new provider)
-        // must NOT push unprovide side-effects that corrupt the live provider's state.
+        // Capture live-ness BEFORE originalClose sets isLive=false.
+        // A stale handle must NOT push unprovide side-effects that corrupt the live provider.
         const wasLive = binding.isLive;
         originalClose(reason);
         if (!wasLive) return; // stale close: no-op on transport
-        // Signal unprovided to observers for all state keys (stateful contracts)
         for (const key of Object.keys(contract.descriptor.state)) {
           transport.pushProviderState(contract.descriptor.id, scope, key, undefined);
         }
-        // ADR-5b: always send explicit unprovide announcement so native marks the
-        // contract as gone even if the contract has no state keys.
+        // Always send unprovide so native marks the contract gone even if stateless.
         transport.announceUnprovided(contract.descriptor.id, scope);
       };
 
-      // Push initial state values at provide() time so native readers see the seed.
-      // These stateWrite calls also implicitly mark the contract as JS-provided on
-      // the native side (stateful path, unchanged). The announceProvided call below
-      // handles the stateless path.
+      // Push initial state values so native readers see the seed.
       for (const [key, stateDesc] of Object.entries(contract.descriptor.state)) {
         const initial = 'initial' in stateDesc ? stateDesc.initial : undefined;
         transport.pushProviderState(contract.descriptor.id, scope, key, initial);
       }
 
-      // ADR-5b: Send an explicit provide announcement through the same BridgeState.write
-      // channel. Stateful contracts already send stateWrite which implicitly marks
-      // them provided; stateless contracts have no state to push so this is the only
-      // signal. Sending for all contracts is safe (idempotent on the native side) and
-      // avoids a branch here. Must be called AFTER the initial state pushes so the
-      // native side has already processed any stateWrite entries.
+      // Explicit provide announcement — covers stateless contracts that send no stateWrite.
+      // Idempotent on the native side. Must come AFTER initial state pushes.
       transport.announceProvided(contract.descriptor.id, scope);
     }
 
@@ -329,12 +299,10 @@ export class BridgeKitJs {
 
           if (methodDesc.kind === 'querySync') {
             return (params?: unknown, _opts?: BridgeCallOpts) => {
-              // --- LOCAL-FIRST: check registry before transport ---
               const localEntry = this.registry.resolve(desc.id, scope);
               if (localEntry) {
                 return invokeLocalSync(localEntry.binding.impl, prop, desc.id, params);
               }
-              // --- FALL-THROUGH: transport path ---
               const env = {
                 op: 'invokeSync' as const,
                 contractId: desc.id,
@@ -355,9 +323,8 @@ export class BridgeKitJs {
                 });
               }
               if ('result' in methodDesc && methodDesc.result) {
-                // Guard: a non-void, non-optional result must carry a value.
-                // undefined here means the provider encoded nothing — likely a
-                // codegen/contract mismatch (e.g. inbound adapter missing encode call).
+                // A non-void, non-optional result must carry a value.
+                // undefined means the provider encoded nothing — likely a codegen mismatch.
                 const schema = methodDesc.result;
                 if (
                   result.value === undefined &&
@@ -371,7 +338,6 @@ export class BridgeKitJs {
                 }
                 return _decodeAndValidateInbound(schema, result.value, desc.id, prop);
               }
-              // Marker path: no schema — guard by kind (querySync always expects a result)
               if (isMarkerDescriptor(methodDesc as unknown as Record<string, unknown>)) {
                 if (result.value === undefined) {
                   throw createBridgeError(
@@ -386,17 +352,13 @@ export class BridgeKitJs {
 
           // query
           return (...args: unknown[]) => {
-            // For methods with params: (params, callOpts?) → first arg is params, second is opts
-            // For methods without params: (callOpts?) → first arg is opts
-            // Marker path: no params schema — detect by checking if first arg looks like opts
             let params: unknown;
             let callOpts: BridgeCallOpts | undefined;
             if (methodDesc.params) {
               params = args[0];
               callOpts = args[1] as BridgeCallOpts | undefined;
             } else if (isMarkerDescriptor(methodDesc as unknown as Record<string, unknown>)) {
-              // Marker: distinguish params from opts heuristically.
-              // Opts only has timeoutMs/signal; if first arg is present and not opts-shaped, it's params.
+              // Marker: no params schema — distinguish params from opts heuristically.
               const firstArg = args[0];
               if (
                 firstArg !== undefined &&
@@ -414,7 +376,6 @@ export class BridgeKitJs {
               callOpts = args[0] as BridgeCallOpts | undefined;
             }
 
-            // --- LOCAL-FIRST: check registry before transport ---
             const localEntry = this.registry.resolve(desc.id, scope);
             if (localEntry) {
               const timeoutMsLocal =
@@ -429,7 +390,6 @@ export class BridgeKitJs {
               });
             }
 
-            // --- FALL-THROUGH: transport path ---
             const env = {
               op: 'invoke' as const,
               contractId: desc.id,
@@ -450,7 +410,6 @@ export class BridgeKitJs {
 
             let invocation = this._transport.invoke(env);
 
-            // Track resources that must be cleaned up when the call settles.
             let timerId: ReturnType<typeof setTimeout> | undefined;
             let abortHandler: (() => void) | undefined;
             let abortSignal: AbortSignal | undefined;
@@ -499,8 +458,6 @@ export class BridgeKitJs {
 
             return invocation
               .finally(() => {
-                // Cancel timeout timer and remove abort listener on any settlement
-                // (success, error, or abort) to prevent resource leaks.
                 if (timerId !== undefined) clearTimeout(timerId);
                 if (abortSignal !== undefined && abortHandler !== undefined) {
                   abortSignal.removeEventListener('abort', abortHandler);
@@ -517,9 +474,7 @@ export class BridgeKitJs {
                   });
                 }
                 if ('result' in methodDesc && methodDesc.result) {
-                  // Guard: a non-void, non-optional result must carry a value.
-                  // undefined here means the provider encoded nothing — likely a
-                  // codegen/contract mismatch (e.g. inbound adapter missing encode call).
+                  // A non-void, non-optional result must carry a value.
                   const schema = methodDesc.result;
                   if (
                     res.value === undefined &&
@@ -533,7 +488,6 @@ export class BridgeKitJs {
                   }
                   return _decodeAndValidateInbound(schema, res.value, desc.id, prop);
                 }
-                // Marker path: no schema — guard by kind (query expects a result)
                 if (isMarkerDescriptor(methodDesc as unknown as Record<string, unknown>)) {
                   if (res.value === undefined) {
                     throw createBridgeError(
@@ -551,14 +505,12 @@ export class BridgeKitJs {
         const streamDesc = desc.streams[prop];
         if (streamDesc) {
           return (params?: unknown): BridgeStreamSource<unknown> => {
-            // --- LOCAL-FIRST: check registry before transport ---
             const localEntry = this.registry.resolve(desc.id, scope);
             if (localEntry) {
               const localSource = openLocalStream(localEntry.binding.impl, prop, desc.id, params);
               return wrapStreamSourceWithDiagnostics(localSource);
             }
 
-            // --- FALL-THROUGH: transport path ---
             const env = {
               op: 'streamOpen' as const,
               contractId: desc.id,
@@ -572,9 +524,8 @@ export class BridgeKitJs {
 
             let streamId: string | null = null;
             const subscribers = new Set<(v: unknown) => void>();
-            // End subscribers are notified when native closes the stream.
-            // Each async iterator registers its own close callback here so pending
-            // next() promises are resolved with { done: true } on native close.
+            // Notified when native closes the stream; async iterators register here
+            // so pending next() calls resolve with { done: true }.
             const endSubscribers = new Set<() => void>();
             const capturedTransport = this._transport;
 
@@ -591,7 +542,6 @@ export class BridgeKitJs {
               streamId = capturedTransport.openStream(
                 env,
                 (value) => {
-                  // t.* path: decode via schema; marker path: pass-through
                   const decoded = streamDesc.value ? decode(streamDesc.value, value) : value;
                   for (const cb of subscribers) cb(decoded);
                 },
@@ -617,8 +567,7 @@ export class BridgeKitJs {
                 };
               },
               [Symbol.asyncIterator](): AsyncIterator<unknown> {
-                // W3-4: Bounded ring buffer with DROP_OLDEST backpressure.
-                // A slow consumer cannot grow this queue unboundedly.
+                // Bounded ring buffer with DROP_OLDEST backpressure.
                 const QUEUE_CAPACITY = 64;
                 const ringBuf = new Array<unknown>(QUEUE_CAPACITY);
                 let head = 0; // index of next read
@@ -642,7 +591,6 @@ export class BridgeKitJs {
                     tail = (tail + 1) % QUEUE_CAPACITY;
                   }
                 };
-                // Called when native closes the stream — resolves all pending waiters.
                 const iterEndCb = () => {
                   closed = true;
                   subscribers.delete(iterCb);
@@ -686,12 +634,7 @@ export class BridgeKitJs {
 
   /**
    * Get a state mirror for a contract key.
-   *
-   * Resolution order:
-   *   1. If a JS-local provider is registered for this (contractId, scope),
-   *      return a LocalStateMirror backed by the Registry state store.
-   *      Transport is NEVER consulted for local-provided state.
-   *   2. Otherwise, return a transport-backed StateMirror (native path, unchanged).
+   * Returns a LocalStateMirror for JS-local providers; transport-backed otherwise.
    */
   state(
     contract: BridgeContract<unknown>,
@@ -700,18 +643,16 @@ export class BridgeKitJs {
   ): StateMirror<unknown> | LocalStateMirror<unknown> {
     this._contracts.set(contract.descriptor.id, contract as BridgeContract<unknown>);
     const stateDesc = contract.descriptor.state[key as string];
-    // Use 'initial' in check to distinguish null (valid initial) from missing descriptor
+    // 'initial' in check distinguishes null (valid initial) from missing descriptor.
     const initial =
       stateDesc !== undefined && 'initial' in stateDesc ? stateDesc.initial : undefined;
     const scope = scopeOverride ?? _ambientScope;
 
-    // --- LOCAL-FIRST: check registry before transport ---
     const localEntry = this.registry.resolve(contract.descriptor.id, scope);
     if (localEntry) {
       return new LocalStateMirror(this.registry, contract.descriptor.id, key, scope, initial);
     }
 
-    // --- FALL-THROUGH: transport path ---
     const mirror = this._mirrors.getOrCreate(
       contract as BridgeContract<unknown>,
       key as string,
@@ -726,9 +667,7 @@ export class BridgeKitJs {
 
   /**
    * Check whether a contract is currently provided in the given scope.
-   *
-   * Checks the JS-local registry first (truthful for JS-provided contracts without
-   * a native round-trip). Falls through to transport readiness if transport exposes it.
+   * Checks the JS-local registry first (no native round-trip needed).
    */
   isProvided(contract: BridgeContract<unknown>, opts?: { scope?: BridgeScope }): boolean {
     const scope = opts?.scope ?? _ambientScope;

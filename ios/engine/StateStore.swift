@@ -1,28 +1,16 @@
 // StateStore.swift
 // BridgeKit iOS engine — bidirectional state store.
 //
-// Port of io/github/malopezr7/bridgekit/core/StateStore.kt
-//
-// DESIGN (Decision 3): lock-guarded current BridgeValue + per-observer callback list.
-// NOT an actor (blocks sync read). NOT Combine (dep). 4-case BridgeValue enum UNCHANGED.
-//
-// INV-6 (H-13): notifyObserversGone sends {"status":"gone"} WITHOUT "v" key.
-//   JS sees map.v === undefined → stale/unprovided branch.
-//   ADDITIVE: no new BridgeValue case.
-//
-// INV-8 (grace window): Replacing → Unprovided after replacingGraceMs (250ms).
-//   grace Task cancelled on re-provision OR seedNativeState.
-//
-// PORT NOTE: Kotlin used MutableStateFlow per key (StateFlow.value is thread-safe).
-// Swift: plain BridgeValue<Any?> stored under the engine NSRecursiveLock.
-// Observers are [String: Observer] (obsId → struct) also under the same lock.
+// Lock-guarded BridgeValue + per-observer callback list. Not an actor (sync reads
+// required). Replacing → Unprovided after a grace window (replacingGraceMs, default 250ms);
+// grace Task cancelled on re-provision or seedNativeState.
+// notifyObserversGone sends {"status":"gone"} WITHOUT "v" — JS sees undefined → stale branch.
 
 import Foundation
 
 internal final class StateStore {
 
     /// Duration in ms that state entries remain in Replacing state before → Unprovided.
-    /// INV-8 (grace window).
     internal let replacingGraceMs: UInt64  // nanoseconds internally; ms at API surface
 
     private struct StoreKey: Hashable {
@@ -32,12 +20,9 @@ internal final class StateStore {
     }
 
     // All state guarded by the engine NSRecursiveLock (shared with Router).
-    // PORT NOTE: Kotlin used ConcurrentHashMap<StoreKey, MutableStateFlow<BridgeValue>>.
-    // Swift: plain Dictionary guarded by the engine lock.
     private var states: [StoreKey: BridgeValue<Any?>] = [:]
 
-    // INV-8: grace-window Task handles (Task<Void,Never>).
-    // Cancelled on re-provision or seedNativeState.
+    // Grace-window Task handles; cancelled on re-provision or seedNativeState.
     private var graceJobs: [String: Task<Void, Never>] = [:]  // StoreKey.description → Task
 
     // Observer registry.
@@ -60,50 +45,38 @@ internal final class StateStore {
         self.replacingGraceMs = replacingGraceMs
     }
 
-    // -------------------------------------------------------------------------
-    // Native-provided seeding
-    // -------------------------------------------------------------------------
+    // MARK: - Native-provided seeding
 
     /// Seed the store with an initial value for a native-provided contract.
     /// Also cancels any active grace job for this key.
-    ///
-    /// INV-8: cancel grace Task on seedNativeState.
     internal func seedNativeState(contractId: String, scope: Scope, stateKey: String, initial: Any?) {
         let key = StoreKey(contractId: contractId, stateKey: stateKey, scopeKey: scope.serialized())
         let keyStr = keyString(key)
-        // INV-8: cancel grace before overwriting with Available.
         graceJobs.removeValue(forKey: keyStr)?.cancel()
         states[key] = .available(initial)
     }
 
-    /// Update a native state entry (provider emitted a new value).
-    /// Writes state under lock AND notifies observers outside lock.
-    /// Caller (stateWrite/writeFromJs paths) holds the lock; use the split methods below.
+    /// Update a native state entry. Notifies observers inline (caller must NOT hold the engine lock).
+    /// For locked paths, use setNativeValueUnderLock + snapshotObserversInternal instead.
     internal func setNativeValue(contractId: String, scope: Scope, stateKey: String, value: Any?) {
         let key = StoreKey(contractId: contractId, stateKey: stateKey, scopeKey: scope.serialized())
         states[key] = .available(value)
         let snapshot = snapshotObservers(contractId: contractId, stateKey: stateKey, scope: scope)
-        // Notifications called inline here only for paths that DON'T hold the engine lock.
-        // For paths that DO hold the lock, use setNativeValueUnderLock + snapshotObserversInternal.
         notifyObservers(snapshot: snapshot, env: ["v": value])
     }
 
-    /// Write native state under the engine lock (lock already held by caller).
-    /// Does NOT notify observers — caller must snapshot and notify outside lock.
+    /// Write native state. Lock must be held; caller must snapshot + notify outside lock.
     internal func setNativeValueUnderLock(contractId: String, scope: Scope, stateKey: String, value: Any?) {
         let key = StoreKey(contractId: contractId, stateKey: stateKey, scopeKey: scope.serialized())
         states[key] = .available(value)
     }
 
-    /// Snapshot the observer callbacks for a given (contractId, stateKey, scope).
-    /// Called under the engine lock; returned closures are called OUTSIDE the lock.
+    /// Snapshot observer callbacks. Called under lock; returned closures called OUTSIDE.
     internal func snapshotObserversInternal(contractId: String, stateKey: String, scope: Scope) -> [([String: Any?]) -> Void] {
         return snapshotObservers(contractId: contractId, stateKey: stateKey, scope: scope)
     }
 
-    // -------------------------------------------------------------------------
-    // JS-provided writes
-    // -------------------------------------------------------------------------
+    // MARK: - JS-provided writes
 
     /// Write a state value from the JS side.
     /// Returns `{ ok: true }` or `{ ok: false, code: "NOT_PROVIDER" }`.
@@ -125,7 +98,6 @@ internal final class StateStore {
         }
         let key = StoreKey(contractId: contractId, stateKey: stateKey, scopeKey: scope.serialized())
         let keyStr = keyString(key)
-        // INV-8: cancel grace on JS re-provision.
         graceJobs.removeValue(forKey: keyStr)?.cancel()
         states[key] = .available(value)
         let snapshot = snapshotObservers(contractId: contractId, stateKey: stateKey, scope: scope)
@@ -133,18 +105,14 @@ internal final class StateStore {
         return ["ok": true, "value": ["v": value]]
     }
 
-    // -------------------------------------------------------------------------
-    // Reads
-    // -------------------------------------------------------------------------
+    // MARK: - Reads
 
     internal func read(contractId: String, scope: Scope, stateKey: String, initial: Any?) -> BridgeValue<Any?> {
         let key = StoreKey(contractId: contractId, stateKey: stateKey, scopeKey: scope.serialized())
         return states[key] ?? .initial(initial)
     }
 
-    // -------------------------------------------------------------------------
-    // Observers
-    // -------------------------------------------------------------------------
+    // MARK: - Observers
 
     internal func observe(
         contractId: String,
@@ -174,14 +142,11 @@ internal final class StateStore {
         observers = observers.filter { $0.value.epoch != epoch }
     }
 
-    // -------------------------------------------------------------------------
-    // Unprovide paths
-    // -------------------------------------------------------------------------
+    // MARK: - Unprovide paths
 
     /// Transition all state entries for a contract+scope to Unprovided.
-    /// INV-6 (H-13): notifyObserversGone after state transition.
     ///
-    /// Called from Router.removeBinding which holds the engine lock.
+    /// Called from Router.removeBinding (engine lock held).
     /// Returns snapshots for caller to notify OUTSIDE lock.
     @discardableResult
     internal func markUnprovided(contractId: String, scope: Scope) -> [ObserverSnapshot] {
@@ -191,7 +156,6 @@ internal final class StateStore {
             guard key.contractId == contractId && key.scopeKey == scopeKey else { continue }
             let lastKnown = value.valueOrNil()
             states[key] = .unprovided(lastKnown)
-            // INV-6 (H-13): snapshot under lock; caller notifies outside lock.
             goneSnapshots.append(snapshotObservers(contractId: key.contractId, stateKey: key.stateKey, scope: scope))
         }
         return goneSnapshots
@@ -202,18 +166,12 @@ internal final class StateStore {
         for snapshot in snapshots { notifyObserversGone(snapshot: snapshot) }
     }
 
-    /// Mark ALL JS-provided contract states as Replacing (grace window), then
-    /// transition to Unprovided after replacingGraceMs if no re-provision arrives.
+    /// Mark all JS-provided contract states as Replacing, then transition to Unprovided
+    /// after replacingGraceMs if no re-provision arrives.
     ///
-    /// INV-8 (grace window): Replacing → Unprovided after 250ms.
-    /// INV-6 (H-13): notifyObserversGone on Replacing transition AND on grace-expiry.
-    ///
-    /// Called from Router.connectDispatcher which holds the engine lock.
-    /// Returns immediate-notification snapshots for caller to fire OUTSIDE lock.
-    /// Grace Task notifications happen inside the Task body (outside lock by design).
-    ///
-    /// PORT NOTE: Kotlin used `graceScope.launch { delay(replacingGraceMs) }`.
-    /// Swift: `Task { try? await Task.sleep(nanoseconds: ms * 1_000_000) }`.
+    /// Called from Router.connectDispatcher (engine lock held).
+    /// Returns immediate snapshots for caller to fire OUTSIDE lock.
+    /// Grace Task notifications fire outside the lock by design.
     @discardableResult
     internal func markJsContractsUnprovided(_ jsContractIds: Set<String>) -> [ObserverSnapshot] {
         var toSchedule: [(StoreKey, Any?)] = []
@@ -223,24 +181,20 @@ internal final class StateStore {
             guard jsContractIds.contains(key.contractId) else { continue }
             let lastKnown = value.valueOrNil()
             states[key] = .replacing(lastKnown)
-            // INV-6 (H-13): snapshot for immediate Replacing notification.
             let scope = Scope.deserialize(key.scopeKey)
             immediateSnapshots.append(snapshotObservers(contractId: key.contractId, stateKey: key.stateKey, scope: scope))
-            // Cancel prior grace job.
             let keyStr = keyString(key)
             graceJobs.removeValue(forKey: keyStr)?.cancel()
             toSchedule.append((key, lastKnown))
         }
 
-        // Schedule grace Tasks (Task.init is non-blocking; safe to call under lock).
         let graceNanos = replacingGraceMs * 1_000_000
         for (key, lastKnown) in toSchedule {
             let keyStr = keyString(key)
             let task = Task<Void, Never> {
                 try? await Task.sleep(nanoseconds: graceNanos)
-                // Re-acquire engine lock to check if still Replacing.
+                // Only transition if still Replacing (a re-provision may have already arrived).
                 self.lock.lock()
-                // INV-8: only transition if still Replacing.
                 guard case .replacing = self.states[key] else {
                     self.graceJobs.removeValue(forKey: keyStr)
                     self.lock.unlock()
@@ -248,23 +202,18 @@ internal final class StateStore {
                 }
                 self.states[key] = .unprovided(lastKnown)
                 self.graceJobs.removeValue(forKey: keyStr)
-                // INV-6 (H-13): snapshot for grace-expiry → Unprovided notification.
                 let scope = Scope.deserialize(key.scopeKey)
                 let snapshot = self.snapshotObservers(contractId: key.contractId, stateKey: key.stateKey, scope: scope)
                 self.lock.unlock()
-                // Notify OUTSIDE lock.
                 self.notifyObserversGone(snapshot: snapshot)
             }
             graceJobs[keyStr] = task
         }
 
-        // Return immediate snapshots for caller to fire outside its lock.
         return immediateSnapshots
     }
 
-    // -------------------------------------------------------------------------
-    // Notification helpers (called outside engine lock)
-    // -------------------------------------------------------------------------
+    // MARK: - Notification helpers (called outside engine lock)
 
     internal typealias ObserverSnapshot = [([String: Any?]) -> Void]
 
@@ -276,30 +225,19 @@ internal final class StateStore {
     }
 
     private func notifyObservers(snapshot: ObserverSnapshot, env: [String: Any?]) {
-        // Swallow per-observer errors (matches Kotlin catch(_: Exception) {}).
-        // The closures are non-throwing; just call them directly.
         for cb in snapshot { cb(env) }
     }
 
-    /// INV-6 (H-13): send {"status":"gone"} WITHOUT "v" key.
+    /// Sends {"status":"gone"} without "v" — JS sees undefined → stale/unprovided branch.
     private func notifyObserversGone(snapshot: ObserverSnapshot) {
-        // PORT NOTE: Kotlin `mapOf("status" to "gone")` — no "v" key.
-        // JS StateMirror._attachObserver: `onChange(map.v)` → undefined → stale branch.
         let goneEnv: [String: Any?] = ["status": "gone"]
         for cb in snapshot { cb(goneEnv) }
     }
 
-    // -------------------------------------------------------------------------
-    // State stream (for OutboundCallerImpl.state())
-    // -------------------------------------------------------------------------
+    // MARK: - State stream (for OutboundCallerImpl.state())
 
-    /// Return an AsyncStream<BridgeValue<Any?>> that delivers the current value
-    /// immediately and then on each subsequent change via observer notification.
-    ///
-    /// PORT NOTE: Kotlin returned StateFlow<BridgeValue<Any?>> which replays the
-    /// current value to each new collector. Swift equivalent: AsyncStream with
-    /// a continuation registered in the observer map. The stream delivers the
-    /// current value immediately, then observers push subsequent changes.
+    /// Returns an AsyncStream that delivers the current value immediately, then
+    /// subsequent values via observer notification.
     internal func stateStream(
         contractId: String,
         scope: Scope,
@@ -308,11 +246,9 @@ internal final class StateStore {
     ) -> AsyncStream<BridgeValue<Any?>> {
         return AsyncStream<BridgeValue<Any?>> { continuation in
             self.lock.lock()
-            // Deliver current value immediately.
             let current = self.states[StoreKey(contractId: contractId, stateKey: stateKey, scopeKey: scope.serialized())] ?? .initial(initial)
             continuation.yield(current)
 
-            // Register observer for changes.
             self.obsCounter += 1
             let obsId = "obs_stream_\(self.obsCounter)"
             self.observers[obsId] = Observer(
@@ -320,11 +256,9 @@ internal final class StateStore {
                 stateKey: stateKey,
                 scopeKey: scope.serialized(),
                 onChange: { env in
-                    // env is either {"v": value} or {"status": "gone"}.
                     if let v = env["v"] {
                         continuation.yield(.available(v))
                     } else {
-                        // Gone signal: deliver Unprovided.
                         continuation.yield(.unprovided(nil))
                     }
                 },
@@ -340,9 +274,7 @@ internal final class StateStore {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Dump
-    // -------------------------------------------------------------------------
+    // MARK: - Dump
 
     internal func dump() -> String {
         let lines = states.sorted(by: { $0.key.contractId < $1.key.contractId }).map { key, value in
@@ -351,9 +283,7 @@ internal final class StateStore {
         return lines.joined(separator: "\n") + "\nobservers=\(observers.count)"
     }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
+    // MARK: - Helpers
 
     private func keyString(_ key: StoreKey) -> String {
         "\(key.contractId)|\(key.stateKey)|\(key.scopeKey)"

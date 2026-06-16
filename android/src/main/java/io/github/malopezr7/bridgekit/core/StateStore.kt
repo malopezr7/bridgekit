@@ -30,7 +30,7 @@ internal class StateStore(
      * Duration in milliseconds that state entries for a JS-provided contract remain in the
      * [BridgeValue.Replacing] (stale-but-accessible) state during a reconnect grace window
      * before transitioning to [BridgeValue.Unprovided]. 250ms is a placeholder; tune against
-     * real reconnect latency on device (design Decision 6).
+     * real reconnect latency on device.
      */
     internal val replacingGraceMs: Long = 250L,
     /**
@@ -185,7 +185,7 @@ internal class StateStore(
     }
 
     /**
-     * H-13: notify observers of a "gone" state (Unprovided / Replacing / grace-expiry).
+     * Notify observers of a "gone" state (Unprovided / Replacing / grace-expiry).
      * Sends a map WITHOUT the "v" key so that map.v === undefined on the JS side,
      * which triggers the existing stale/unprovided branch in StateMirror._attachObserver.
      * This is ADDITIVE — no new BridgeValue sealed branch is introduced.
@@ -214,10 +214,8 @@ internal class StateStore(
     /**
      * Transition all state entries for a contract+scope to Unprovided.
      * Called when the provider binding is closed or the JS runtime disconnects.
-     *
-     * H-13: notifyObservers is called after the state transition so JS observers
-     * receive an explicit "gone" signal (map without "v" key → map.v === undefined
-     * on JS side → stale/unprovided branch in _attachObserver).
+     * Notifies observers after the state transition so JS observers receive an explicit
+     * "gone" signal (map without "v" key → map.v === undefined → stale/unprovided branch).
      */
     fun markUnprovided(contractId: String, scope: Scope) {
         val scopeKey = scope.serialize()
@@ -225,7 +223,6 @@ internal class StateStore(
             if (key.contractId == contractId && key.scopeKey == scopeKey) {
                 val lastKnown = flow.value.valueOrNull()
                 flow.value = BridgeValue.Unprovided(lastKnown)
-                // H-13: notify observers — omit "v" key so map.v === undefined in JS.
                 notifyObserversGone(contractId, key.stateKey, scope)
             }
         }
@@ -236,7 +233,7 @@ internal class StateStore(
      * transition to Unprovided after [replacingGraceMs] if no re-provision arrives.
      *
      * Called on epoch swap (connectDispatcher). The grace window prevents a fast OTA
-     * swap or StrictMode double-mount from flapping consumers to "not ready" (W2-3).
+     * swap or StrictMode double-mount from flapping consumers to "not ready".
      *
      * [jsContractIds] is the set of contractIds currently known to be JS-provided.
      */
@@ -247,8 +244,7 @@ internal class StateStore(
             val lastKnown = flow.value.valueOrNull()
             flow.value = BridgeValue.Replacing(lastKnown)
 
-            // H-13: notify observers on Replacing transition.
-            // Omit "v" key so map.v === undefined in JS → stale/unprovided branch.
+            // Notify on Replacing transition: omit "v" key so map.v === undefined in JS.
             notifyObserversGone(key.contractId, key.stateKey, Scope.deserialize(key.scopeKey))
 
             // Cancel any prior grace job for this key before starting a new one.
@@ -262,7 +258,6 @@ internal class StateStore(
                 // and we should NOT overwrite it.
                 if (flow.value is BridgeValue.Replacing) {
                     flow.value = BridgeValue.Unprovided(lastKnown)
-                    // H-13: notify observers on grace-expiry → Unprovided transition.
                     notifyObserversGone(key.contractId, key.stateKey, Scope.deserialize(key.scopeKey))
                 }
                 graceJobs.remove(keyStr)

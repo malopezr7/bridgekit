@@ -1,22 +1,8 @@
 // OutboundCallerImpl.swift
 // BridgeKit iOS engine — OutboundCaller implementation for native→JS calls.
 //
-// Port of io/github/malopezr7/bridgekit/core/OutboundCallerImpl.kt
-//
-// DESIGN:
-//  - Per-call awaitDispatcher: polls until jsCallbacks non-nil (cooperative suspension,
-//    never blocks the thread).
-//  - invoke(): OnceContinuation guards completion+timeout race (Decision 4).
-//  - fire(): dispatches as unstructured Task, errors swallowed.
-//  - stream(): creates jsStreamChannels entry + sends onStreamOpen.
-//  - state(): returns AsyncStream<BridgeValue<Any?>> from StateStore.
-//  - consume() in BridgeKit returns proxy IMMEDIATELY; readiness deferred to here.
-//
-// PORT NOTE: Kotlin mainThread guard → Swift does not have ANR in the iOS sense, and
-// all suspensions are cooperative (no thread blocking). Guard omitted.
-//
-// PORT NOTE: `withTimeout` is defined at the bottom of this file as a free function
-// using ThrowingTaskGroup — mirrors Kotlin `withTimeout(ms) { }`.
+// Per-call awaitDispatcher polls until jsCallbacks is non-nil (cooperative, no thread
+// blocking). OnceContinuation guards completion/timeout races in invoke().
 
 import Foundation
 
@@ -51,16 +37,12 @@ internal final class OutboundCallerImpl: OutboundCaller {
         self.callTimeoutMs = callTimeoutMs
     }
 
-    // -------------------------------------------------------------------------
-    // invoke (async)
-    // -------------------------------------------------------------------------
+    // MARK: - invoke (async)
 
     public func invoke(member: String, payload: [String: Any?]?) async throws -> Any? {
         let callbacks = try await awaitDispatcher()
         let env = buildEnvelope(op: "invoke", member: member, payload: payload)
 
-        // Decision 4 (OnceContinuation): guards completion + callTimeout race.
-        // PORT NOTE: Kotlin CompletableDeferred → Swift OnceContinuation<[String:Any?]>.
         let raw: [String: Any?] = try await withBridgeTimeout(nanoseconds: callTimeoutMs * 1_000_000) {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<[String: Any?], Error>) in
                 let once = OnceContinuation<[String: Any?]>(cont)
@@ -88,9 +70,7 @@ internal final class OutboundCallerImpl: OutboundCaller {
         throw BridgeKitError.fromEnvelope(raw, contractId: contractId)
     }
 
-    // -------------------------------------------------------------------------
-    // invokeSync
-    // -------------------------------------------------------------------------
+    // MARK: - invokeSync
 
     public func invokeSync(member: String, payload: [String: Any?]?) throws -> Any? {
         throw BridgeKitError(
@@ -101,23 +81,18 @@ internal final class OutboundCallerImpl: OutboundCaller {
         )
     }
 
-    // -------------------------------------------------------------------------
-    // fire (fire-and-forget)
-    // -------------------------------------------------------------------------
+    // MARK: - fire (fire-and-forget)
 
     public func fire(member: String, payload: [String: Any?]?) {
         Task { try? await invoke(member: member, payload: payload) }
     }
 
-    // -------------------------------------------------------------------------
-    // stream
-    // -------------------------------------------------------------------------
+    // MARK: - stream
 
     /// Open an AsyncThrowingStream for a JS-provided stream member.
     ///
-    /// PORT NOTE: Kotlin `callbackFlow { }`.
-    /// Swift: AsyncThrowingStream. Router.jsStreamChannels holds the write-side
-    /// continuation so that emitFromJs/endFromJs can push values.
+    /// Router.jsStreamChannels holds the write-side continuation so emitFromJs/endFromJs
+    /// can push values into it.
     public func stream(member: String, payload: [String: Any?]?) -> AsyncThrowingStream<Any?, Error> {
         return AsyncThrowingStream<Any?, Error> { continuation in
             Task {
@@ -131,29 +106,24 @@ internal final class OutboundCallerImpl: OutboundCaller {
 
                 let streamId = "js_\(self.contractId)_\(member)_\(OutboundCallerImpl.nextStreamId())"
 
-                // Create value pipe (value channel).
-                // PORT NOTE: AsyncStream.makeStream() is iOS 16+; we use the closure-based init
-                // and capture the continuation manually for iOS 15.1 compatibility.
+                // AsyncStream.makeStream() is iOS 16+; use the closure-based init for iOS 15.1 compat.
                 var valCont: AsyncStream<[String: Any?]>.Continuation!
                 let valStream = AsyncStream<[String: Any?]> { cont in valCont = cont }
 
                 var endCont: AsyncStream<[String: Any?]>.Continuation!
                 let endStream = AsyncStream<[String: Any?]> { cont in endCont = cont }
 
-                // Register in Router under engine lock.
                 self.router.lock.lock()
                 self.router.jsStreamChannels[streamId] = (valStream, valCont!)
                 self.router.jsStreamEndContinuations[streamId] = endCont!
                 self.router.lock.unlock()
 
-                // Value pump: relay values to the AsyncThrowingStream.
                 let valuePump = Task {
                     for await valueMap in valStream {
                         continuation.yield(valueMap["v"])
                     }
                 }
 
-                // End pump: relay end signal (ok or error).
                 let endPump = Task {
                     for await end in endStream {
                         valuePump.cancel()
@@ -166,12 +136,10 @@ internal final class OutboundCallerImpl: OutboundCaller {
                     }
                 }
 
-                // Signal JS to start streaming.
                 var openEnv = self.buildEnvelope(op: "streamOpen", member: member, payload: payload)
                 openEnv["streamId"] = streamId
                 callbacks.onStreamOpen(openEnv)
 
-                // Handle cancellation: clean up channels and signal JS producer to stop.
                 continuation.onTermination = { _ in
                     valuePump.cancel()
                     endPump.cancel()
@@ -186,9 +154,7 @@ internal final class OutboundCallerImpl: OutboundCaller {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // state
-    // -------------------------------------------------------------------------
+    // MARK: - state
 
     public func state(member: String) -> AsyncStream<BridgeValue<Any?>> {
         return router.stateStore.stateStream(
@@ -196,12 +162,9 @@ internal final class OutboundCallerImpl: OutboundCaller {
         )
     }
 
-    // -------------------------------------------------------------------------
-    // awaitDispatcher (private)
-    // -------------------------------------------------------------------------
+    // MARK: - awaitDispatcher
 
     /// Poll for the JS dispatcher with readiness timeout.
-    /// PORT NOTE: Kotlin `withTimeout(readinessTimeoutMs) { while(cb==null) delay(10) }`.
     private func awaitDispatcher() async throws -> JsDispatcherCallbacks {
         if let immediate = router.getJsCallbacks() { return immediate }
         let deadline = DispatchTime.now().uptimeNanoseconds + readinessTimeoutMs * 1_000_000
@@ -218,9 +181,7 @@ internal final class OutboundCallerImpl: OutboundCaller {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Envelope builder
-    // -------------------------------------------------------------------------
+    // MARK: - Envelope builder
 
     private func buildEnvelope(op: String, member: String, payload: [String: Any?]?) -> [String: Any?] {
         var env: [String: Any?] = [
@@ -236,10 +197,9 @@ internal final class OutboundCallerImpl: OutboundCaller {
     }
 }
 
-// ---- withBridgeTimeout helper ----------------------------------------------
+// MARK: - withBridgeTimeout
 
 /// Run an async closure with a timeout.
-/// PORT NOTE: Kotlin `withTimeout(ms) { ... }` → Swift ThrowingTaskGroup race.
 internal func withBridgeTimeout<T>(
     nanoseconds: UInt64,
     operation: @escaping () async throws -> T
@@ -256,9 +216,9 @@ internal func withBridgeTimeout<T>(
     }
 }
 
-// ---- BridgeKitError --------------------------------------------------------
+// MARK: - BridgeKitError
 
-/// Swift engine error (mirrors Kotlin BridgeKitException).
+/// Swift engine error type.
 public struct BridgeKitError: Error, CustomStringConvertible {
     public let code: String
     public let message: String

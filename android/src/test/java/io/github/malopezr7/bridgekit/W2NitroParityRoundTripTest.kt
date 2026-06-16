@@ -25,11 +25,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * W2 Nitro-Parity Kotlin round-trip tests.
+ * Round-trip tests for schema types that require codec handling.
  *
- * Proves that all 6 new schema types introduced in Wave 2 survive the full
- * JS → AnyMap → Kotlin → back cycle using the REAL generated codec functions
- * (not just string assertions on the generated Kotlin source).
+ * Proves that each type survives the full JS → AnyMap → Kotlin → back cycle
+ * using the REAL generated codec functions.
  *
  * Types covered:
  *  1. int64  — Long preserves values > 2^53 with full precision

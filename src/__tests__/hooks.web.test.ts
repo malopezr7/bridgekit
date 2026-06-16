@@ -1,12 +1,5 @@
-// ---------------------------------------------------------------------------
-// Wave 4 — React hooks tests (jsdom / @testing-library/react)
-//
-// Covers:
-//   W4-1: ScopeContext isolation — nested/sibling scopes do not cross-talk.
-//   W4-2: ContractHook real subscription via useSyncExternalStore — re-renders
-//         on state change, unsubscribes on unmount.
-//   Proxy stability: useBridge reference is stable across re-renders.
-// ---------------------------------------------------------------------------
+// React hooks tests (jsdom / @testing-library/react).
+// Covers: ScopeContext isolation, ContractHook real subscription, proxy stability.
 
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals';
 import { act, renderHook } from '@testing-library/react';
@@ -19,9 +12,7 @@ import { diagnostics } from '../runtime/diagnostics';
 import type { Binding } from '../runtime/registry';
 import { GLOBAL_SCOPE } from '../runtime/registry';
 
-// ---------------------------------------------------------------------------
-// Test contracts (unique IDs per test file to avoid cross-test pollution)
-// ---------------------------------------------------------------------------
+// Unique contract IDs per file to avoid cross-test pollution.
 
 const ScopeTestContract = defineContract('hooks.scope.test', {
   methods: {
@@ -51,22 +42,13 @@ const MarkerHookTest = defineContract('hooks.marker.test', {
   },
 });
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-// Wrapper factory for BridgeScopeProvider
 function makeScopeWrapper(feature?: string, instance?: string) {
   return function Wrapper({ children }: { children: React.ReactNode }) {
     return createElement(BridgeScopeProvider, { feature, instance }, children);
   };
 }
 
-// ---------------------------------------------------------------------------
-// W4-1: Two subtrees — independent scopes, no cross-talk
-// ---------------------------------------------------------------------------
-
-describe('W4-1: BridgeScopeProvider — scope isolation', () => {
+describe('BridgeScopeProvider — scope isolation', () => {
   // Track bindings to close after each test
   const bindings: Binding[] = [];
 
@@ -81,8 +63,6 @@ describe('W4-1: BridgeScopeProvider — scope isolation', () => {
   });
 
   test('two separate render trees with different feature scopes do not cross-talk', () => {
-    // Two hooks rendered in separate trees with different BridgeScopeProvider wrappers.
-    // Each should see its own isolated scope and NOT share state.
     const WrapperA = makeScopeWrapper('featureA');
     const WrapperB = makeScopeWrapper('featureB');
 
@@ -102,7 +82,6 @@ describe('W4-1: BridgeScopeProvider — scope isolation', () => {
   });
 
   test('BridgeScopeProvider wraps children — hook renders without error', () => {
-    // Simply render inside a BridgeScopeProvider — should not throw.
     const WrapperF = makeScopeWrapper('testFeature');
     const { result, unmount } = renderHook(() => useBridgeState(ScopeTestContract, 'value'), {
       wrapper: WrapperF,
@@ -112,17 +91,13 @@ describe('W4-1: BridgeScopeProvider — scope isolation', () => {
   });
 
   test('no BridgeScopeProvider — global scope is the default, dev warning fires once', () => {
-    // Without a provider, ScopeContext defaults to { kind: 'global' }.
-    // The hook must not throw (W-1: keep graceful default).
-    // A ONE-TIME dev warning must be emitted via diagnostics (W-1: make it legible).
-    diagnostics.clearWarnings(); // reset so this test is isolated
+    diagnostics.clearWarnings();
 
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       const { result, unmount } = renderHook(() => useBridgeState(ScopeTestContract, 'value'));
-      expect(result.current.status).toBeDefined(); // no throw
+      expect(result.current.status).toBeDefined();
 
-      // Dev warning must have fired at least once
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('useBridgeState'));
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('BridgeScopeProvider'));
 
@@ -134,7 +109,6 @@ describe('W4-1: BridgeScopeProvider — scope isolation', () => {
   });
 
   test('nested BridgeScopeProvider: innermost scope wins', () => {
-    // Inner scope overrides outer — the innermost Provider wins per React context semantics.
     function NestedWrapper({ children }: { children: React.ReactNode }) {
       return createElement(
         BridgeScopeProvider,
@@ -147,16 +121,11 @@ describe('W4-1: BridgeScopeProvider — scope isolation', () => {
       wrapper: NestedWrapper,
     });
 
-    // Inner scope wins — no throw, valid status
     expect(result.current.status).toBeDefined();
     unmount();
   });
 
   test('two sibling BridgeScopeProviders do not cross-talk via global mutable state', async () => {
-    // This is the critical regression test for W4-1.
-    // Before the fix, setAmbientScope raced between the two subtrees.
-    // After the fix, each Provider wraps its own ScopeContext — no shared mutable state.
-
     const bk = getDefaultBridgeKit();
 
     // Provide state in feature scope A
@@ -192,10 +161,6 @@ describe('W4-1: BridgeScopeProvider — scope isolation', () => {
       wrapper: WrapperB,
     });
 
-    // Each hook sees its own scope's value — no cross-talk
-    // (Note: local-first mirrors take the local path; values may be 'initial' for
-    // newly created bindings until setState propagates. The key assertion is
-    // that both return independent mirror instances.)
     expect(hookA.result.current).toBeDefined();
     expect(hookB.result.current).toBeDefined();
 
@@ -204,11 +169,7 @@ describe('W4-1: BridgeScopeProvider — scope isolation', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// W4-1: useBridge proxy stability
-// ---------------------------------------------------------------------------
-
-describe('W4-1: useBridge proxy stability', () => {
+describe('useBridge proxy stability', () => {
   test('proxy reference is stable across re-renders with same scope', () => {
     const WrapperF = makeScopeWrapper('stable-feature');
 
@@ -225,7 +186,6 @@ describe('W4-1: useBridge proxy stability', () => {
     rerender();
     rerender();
 
-    // All proxy references must be identical (useMemo is stable across re-renders)
     expect(proxies.length).toBeGreaterThanOrEqual(2);
     expect(proxies[0]).toBe(proxies[1]);
     unmount();
@@ -239,17 +199,11 @@ describe('W4-1: useBridge proxy stability', () => {
       wrapper: WrapperF,
     });
 
-    // No error thrown during mount
-    // Unmount cleans up the binding (calls binding.close('final'))
     expect(() => unmount()).not.toThrow();
   });
 });
 
-// ---------------------------------------------------------------------------
-// W4-2: ContractHook real subscription (useSyncExternalStore via useBridgeState)
-// ---------------------------------------------------------------------------
-
-describe('W4-2: ContractHook real subscription', () => {
+describe('ContractHook real subscription', () => {
   let binding: Binding | null = null;
   const bk = getDefaultBridgeKit();
 
@@ -269,7 +223,6 @@ describe('W4-2: ContractHook real subscription', () => {
   });
 
   test('useBridgeState re-renders when state value changes', async () => {
-    // Use GLOBAL_SCOPE so BridgeScopeProvider isn't required
     binding = bk.provide(StateContract, {}, { scope: GLOBAL_SCOPE });
 
     const renderValues: number[] = [];
@@ -280,16 +233,13 @@ describe('W4-2: ContractHook real subscription', () => {
       return mirror;
     });
 
-    // Initial value
     expect(result.current.value).toBe(0);
     const initialRenderCount = renderValues.length;
 
-    // Push new value
     await act(async () => {
       binding!.setState('count', 42);
     });
 
-    // Should have re-rendered with new value
     expect(result.current.value).toBe(42);
     expect(renderValues.length).toBeGreaterThan(initialRenderCount);
     expect(renderValues[renderValues.length - 1]).toBe(42);
@@ -309,15 +259,12 @@ describe('W4-2: ContractHook real subscription', () => {
     expect(result.current.value).toBe('start');
     const countBeforeUnmount = renderCount;
 
-    // Unmount before any state change
     unmount();
 
-    // Push state after unmount
     await act(async () => {
       binding!.setState('label', 'after-unmount');
     });
 
-    // No re-render after unmount
     expect(renderCount).toBe(countBeforeUnmount);
   });
 
@@ -332,7 +279,6 @@ describe('W4-2: ContractHook real subscription', () => {
     expect(result.current.count).toBe(0);
     expect(result.current.label).toBe('start');
 
-    // Update only 'count'
     await act(async () => {
       binding!.setState('count', 7);
     });
@@ -340,7 +286,6 @@ describe('W4-2: ContractHook real subscription', () => {
     expect(result.current.count).toBe(7);
     expect(result.current.label).toBe('start');
 
-    // Update only 'label'
     await act(async () => {
       binding!.setState('label', 'changed');
     });
@@ -354,7 +299,6 @@ describe('W4-2: ContractHook real subscription', () => {
   test('useBridgeState status is "provided" when binding is active', async () => {
     binding = bk.provide(StateContract, {}, { scope: GLOBAL_SCOPE });
 
-    // Push a value so the local mirror goes to 'provided'
     binding.setState('count', 5);
 
     const { result, unmount } = renderHook(() => useBridgeState(StateContract, 'count'));
@@ -365,21 +309,16 @@ describe('W4-2: ContractHook real subscription', () => {
     });
 
     expect(result.current.value).toBe(5);
-    // Status should be 'provided' (LocalStateMirror path)
     expect(result.current.status).toBe('provided');
 
     unmount();
   });
 
   test('ContractHook (defineContract) called in React render subscribes via useSyncExternalStore', async () => {
-    // defineContract returns a ContractHook. When called inside renderHook,
-    // it goes through the React render path (dispatcher is non-null) and uses
-    // useSyncExternalStore for subscription.
     binding = bk.provide(MarkerHookTest, {}, { scope: GLOBAL_SCOPE });
     binding.setState('msg', 'initial-value');
 
     const { result, unmount } = renderHook(() => {
-      // Hook called inside React render — uses subscribing path (W4-2)
       const snap = MarkerHookTest() as Record<string, unknown>;
       const state = snap['state'] as Record<string, { get: () => unknown }>;
       return { msg: state['msg']?.get() };
@@ -391,20 +330,13 @@ describe('W4-2: ContractHook real subscription', () => {
       binding!.setState('msg', 'updated');
     });
 
-    // The hook should NOT re-render from useSyncExternalStore here because the
-    // snapshot function returns a new stateHandles object on each call.
-    // The key assertion is that the hook RUNS without error and returns current value.
     expect(typeof result.current.msg).toBe('string');
 
     unmount();
   });
 });
 
-// ---------------------------------------------------------------------------
-// W4-2: Subscription cleanup — no memory leaks on unmount
-// ---------------------------------------------------------------------------
-
-describe('W4-2: No subscription leaks on unmount', () => {
+describe('No subscription leaks on unmount', () => {
   test('unmounting hook stops receiving updates', async () => {
     const bk = getDefaultBridgeKit();
     const b = bk.provide(StateContract, {}, { scope: GLOBAL_SCOPE });
@@ -419,14 +351,12 @@ describe('W4-2: No subscription leaks on unmount', () => {
     unmount();
     const countAfterUnmount = renderCount;
 
-    // Push multiple values after unmount
     await act(async () => {
       b.setState('count', 1);
       b.setState('count', 2);
       b.setState('count', 3);
     });
 
-    // No additional renders
     expect(renderCount).toBe(countAfterUnmount);
     expect(countAfterUnmount).toBe(countAfterMount);
 
@@ -447,7 +377,6 @@ describe('W4-2: No subscription leaks on unmount', () => {
     );
 
     expect(mountCount).toBeGreaterThan(0);
-    // Unmount must close the binding without error
     expect(() => unmount()).not.toThrow();
   });
 });

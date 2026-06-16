@@ -1,16 +1,11 @@
 // BridgeValueTests.swift
-// XCTest — RED-first for BridgeValue, BridgeKitDecodeError, Scope, and paramsHash.
-//
-// Task 1.2–1.5: covers INV-6 (exactly 4 BridgeValue cases), INV-10 (error struct),
-// INV-12 (Scope wire strings), INV-9 (paramsHash FNV-1a parity).
-// These tests MUST compile only after the BridgeKit pod is installed (L4).
+// XCTest for BridgeValue, BridgeKitDecodeError, Scope, and paramsHash.
+// These tests compile only after the BridgeKit pod is installed.
 
 import XCTest
 @testable import BridgeKit
 
-// =============================================================================
 // MARK: - BridgeKitDecodeError
-// =============================================================================
 
 final class BridgeKitDecodeErrorTests: XCTestCase {
 
@@ -22,7 +17,6 @@ final class BridgeKitDecodeErrorTests: XCTestCase {
 
     func test_decodeError_conformsToError() {
         let err = BridgeKitDecodeError(field: "x", expectedType: "Int64")
-        // Verify it can be used as Swift Error (checked at compile time by the cast)
         let asError: Error = err
         XCTAssertNotNil(asError)
     }
@@ -34,9 +28,7 @@ final class BridgeKitDecodeErrorTests: XCTestCase {
     }
 }
 
-// =============================================================================
-// MARK: - BridgeValue — INV-6: exactly 4 cases, no 5th case
-// =============================================================================
+// MARK: - BridgeValue
 
 final class BridgeValueTests: XCTestCase {
 
@@ -70,8 +62,7 @@ final class BridgeValueTests: XCTestCase {
         XCTAssertNil(bv.valueOrNil())
     }
 
-    // INV-6: verify exhaustive switch coverage — if a 5th case is added the
-    // compiler will warn that this switch is no longer exhaustive.
+    // Verify exhaustive switch coverage — a 5th case triggers a compiler warning.
     func test_exactlyFourCases_exhaustiveSwitch() {
         func label<T>(_ bv: BridgeValue<T>) -> String {
             switch bv {
@@ -88,9 +79,7 @@ final class BridgeValueTests: XCTestCase {
     }
 }
 
-// =============================================================================
-// MARK: - Scope — INV-12: wire strings MUST match Kotlin byte-for-byte
-// =============================================================================
+// MARK: - Scope
 
 final class ScopeTests: XCTestCase {
 
@@ -142,7 +131,7 @@ final class ScopeTests: XCTestCase {
     }
 
     func test_fromEnvelopeMap_instance() {
-        // PORT NOTE: envelope uses "instance" key for the tag (mirrors Kotlin Router.scopeToEnvMap)
+        // envelope uses "instance" key for the tag — matches wire format
         let map: [String: Any?] = ["kind": "instance", "feature": "cart", "instance": "main"]
         XCTAssertEqual(Scope.from(envelopeMap: map), .instance(feature: "cart", tag: "main"))
     }
@@ -164,9 +153,7 @@ final class ScopeTests: XCTestCase {
     }
 }
 
-// =============================================================================
-// MARK: - paramsHash — INV-9: FNV-1a 32-bit, must match Kotlin byte-for-byte
-// =============================================================================
+// MARK: - paramsHash
 
 final class ParamsHashTests: XCTestCase {
 
@@ -179,16 +166,7 @@ final class ParamsHashTests: XCTestCase {
         XCTAssertEqual(paramsHash([:]), 0)
     }
 
-    // Known FNV-1a values — verified by running Kotlin side manually.
-    // GOLDEN VALUES: these must be computed from the Kotlin implementation
-    // at L8 simulator proof time and back-filled here. The test structure is
-    // correct; the expected Int64 values below are PLACEHOLDER until L8 parity
-    // is confirmed on-device.
-    //
-    // PORT NOTE: Golden values require running the Kotlin paramsHash with the
-    // same inputs on Android and recording the Long output, then asserting
-    // identical output here. This is the parity gate for INV-9.
-    // TODO(L8): back-fill golden values from Android round-trip proof run.
+    // TODO: back-fill golden values from Android round-trip proof run.
 
     func test_singleStringValue_deterministicHash() {
         let h1 = paramsHash(["key": "value"])
@@ -211,16 +189,12 @@ final class ParamsHashTests: XCTestCase {
     }
 
     func test_nilValue_renderedAsKotlinNull() {
-        // A nil value in the map must render as "null" (Kotlin "$v" of null),
-        // not "nil" (Swift default). If this returns same hash as "key=nil", parity is broken.
+        // nil must render as "null" (Kotlin) not "nil" (Swift default).
         let hNull = paramsHash(["key": nil])
-        // The hash of "key=null" (FNV-1a over that string) must be stable.
-        // We test it is non-zero and deterministic.
         XCTAssertNotEqual(hNull, 0)
         XCTAssertEqual(hNull, paramsHash(["key": nil]))
     }
 
-    // PORT NOTE: hash result fits in UInt32 range (mask 0xFFFFFFFF).
     func test_hashFitsInUInt32Range() {
         let h = paramsHash(["contractId": "example", "member": "doSomething"])
         XCTAssertGreaterThanOrEqual(h, 0)

@@ -1,6 +1,4 @@
-// ---------------------------------------------------------------------------
-// Method / stream / state descriptors + defineContract
-// ---------------------------------------------------------------------------
+// Method / stream / state descriptors + defineContract.
 
 import { validate } from './codec';
 import { stableHash } from './hash';
@@ -63,9 +61,6 @@ export interface QuerySyncWithParamsDescriptor<
   readonly result: R;
 }
 
-// FireWithParamsDescriptor, QueryWithParamsDescriptor, QuerySyncWithParamsDescriptor
-// are all structural subtypes of their base interfaces, so they are already included
-// in the union via structural subtyping — no need to add them explicitly.
 export type MethodDescriptor = FireDescriptor | QueryDescriptor | QuerySyncDescriptor;
 
 // ---- stream descriptor ----------------------------------------------------
@@ -116,15 +111,8 @@ export interface ContractDescriptor {
   readonly state: Record<string, StateDescriptor>;
 }
 
-// ---- generated runtime schema artifact (keystone, design Decision 1) -------
-
 /**
- * Resolved schema nodes emitted by the CLI per contract into a `*.bridge.ts`
- * artifact. The app imports it and passes it to
- * `defineContract(id, shape, generatedSchemas)` so the marker descriptor carries
- * the SAME `AnySchema` nodes the CLI hashes — giving hash parity and codec
- * symmetry on the marker path.
- *
+ * Resolved schema nodes emitted by the CLI per contract.
  * Shape mirrors the descriptor: per-member `params`/`result`/`value` schemas
  * keyed by member name within `methods` / `streams` / `state`.
  */
@@ -138,7 +126,6 @@ export interface GeneratedSchemas {
 
 /**
  * Typed stream handle returned by proxy stream accessors.
- * Runtime implementation is provided by Slice B.
  */
 export interface BridgeStreamSource<T> {
   subscribe(cb: (v: T) => void): () => void;
@@ -147,10 +134,9 @@ export interface BridgeStreamSource<T> {
 
 // ---- ContractShape (type-level) ------------------------------------------
 
-// MethodShape: maps a MethodDescriptor to its TypeScript call signature.
-// Uses named typed sub-interfaces for narrowing to preserve concrete field types
-// and avoid TS2589 "Type instantiation is excessively deep" from Infer<AnySchema> evaluation.
-// Evaluation order: most specific sub-interface first (WithParams before Typed before base).
+// Maps a MethodDescriptor to its TypeScript call signature.
+// Uses named typed sub-interfaces to avoid TS2589 ("Type instantiation is excessively deep").
+// Evaluation order: most specific sub-interface first (WithParams → Typed → base).
 type MethodShape<D extends MethodDescriptor> =
   // Fire
   D extends FireWithParamsDescriptor<infer P>
@@ -180,8 +166,7 @@ type MethodShape<D extends MethodDescriptor> =
                   ? () => unknown
                   : never;
 
-// StreamShape uses named sub-interfaces to infer concrete V/P, avoiding Infer<AnySchema>
-// (which distributes across 12 union branches and causes TS2589 instantiation depth errors).
+// Uses named sub-interfaces to avoid TS2589 instantiation depth errors.
 type StreamShape<D extends StreamDescriptor> =
   D extends StreamWithParamsDescriptor<infer V, infer P>
     ? (params: Infer<P>) => BridgeStreamSource<Infer<V>>
@@ -189,7 +174,7 @@ type StreamShape<D extends StreamDescriptor> =
       ? () => BridgeStreamSource<Infer<V>>
       : () => BridgeStreamSource<unknown>;
 
-// ---- ContractShape, type utilities ----------------------------------------
+// ---- Type utilities -------------------------------------------------------
 
 export type ContractShape<C> = C extends BridgeContract<infer TShape> ? TShape : never;
 
@@ -218,9 +203,7 @@ export type StateValue<C, K extends string> =
       : never
     : never;
 
-// Internal: derive TShape from contract shape definition.
-// Uses concrete typed sub-interfaces (WithParams / Typed) to avoid Infer<AnySchema>
-// recursion that causes TS2589.
+// Derives TShape from shape definition; concrete sub-interfaces avoid TS2589.
 type ContractTShape<
   TMethods extends Record<string, MethodDescriptor>,
   TStreams extends Record<string, StreamDescriptor>,
@@ -254,8 +237,7 @@ export interface ContractShape_Input {
 // ---- Marker descriptor detection ------------------------------------------
 
 /**
- * Returns true when a member descriptor is a marker (has `kind` but no
- * `result`/`value`/`params` schema fields that are AnySchema nodes).
+ * Returns true when a member descriptor is a marker (no `result`/`value`/`params` schema).
  * Used to branch between the t.* codec path and the schema-less marker path.
  */
 export function isMarkerDescriptor(d: Record<string, unknown>): boolean {
@@ -331,7 +313,6 @@ export function defineContract(
   const streams = shape.streams ?? {};
   const state = shape.state ?? {};
 
-  // Validate initial values against their schemas
   for (const [key, stateDescriptor] of Object.entries(state)) {
     const result = validate(stateDescriptor.value, stateDescriptor.initial);
     if (!result.ok) {
@@ -358,13 +339,10 @@ export function defineContract(
   return _wrapWithHook(contract);
 }
 
-// ---- _wrapWithHook --------------------------------------------------------
 // Wraps a BridgeContract with the ContractHook callable interface.
 // Lazy: does not import runtime at module eval time.
-
 function _wrapWithHook(contract: BridgeContract<unknown>): BridgeContract<unknown> {
-  // Dynamically import buildContractHook to avoid circular at module load time.
-  // This is safe because the import is deferred to first call.
+  // Dynamically import to avoid circular dep at module load time.
   let _cachedHook: ReturnType<typeof import('./contractHook')['buildContractHook']> | null = null;
 
   const getHook = () => {
@@ -374,14 +352,12 @@ function _wrapWithHook(contract: BridgeContract<unknown>): BridgeContract<unknow
     return _cachedHook;
   };
 
-  // Create a callable that also carries BridgeContract statics
   const hook = ((selector?: (c: unknown) => unknown): unknown => {
     const h = getHook();
     const fn = h as (...args: never[]) => unknown;
     return selector !== undefined ? fn(selector as never) : fn();
   }) as unknown as BridgeContract<unknown>;
 
-  // Copy BridgeContract properties onto the callable
   Object.defineProperty(hook, 'descriptor', {
     get: () => contract.descriptor,
     enumerable: true,
@@ -398,7 +374,6 @@ function _wrapWithHook(contract: BridgeContract<unknown>): BridgeContract<unknow
     configurable: false,
   });
 
-  // Delegate all ContractHook statics/methods to the lazy hook
   for (const prop of [
     'getState',
     'scoped',
@@ -419,15 +394,10 @@ function _wrapWithHook(contract: BridgeContract<unknown>): BridgeContract<unknow
     });
   }
 
-  // Freeze to satisfy the existing contract that defineContract returns a frozen token.
-  // Functions can be frozen; property access still works via getters on the frozen object.
   return Object.freeze(hook);
 }
 
 // ---- Descriptor builders (attached to t namespace) ------------------------
-
-// We re-export these as part of the `t` object pattern expected by consumers.
-// They are functions, not schema nodes, so they live here (not in schema.ts).
 
 /** Fire-and-forget method: no return value. Failures are counted internally. */
 function fire(): FireDescriptor;
@@ -506,8 +476,6 @@ function state<V extends AnySchema>(value: V, initial: unknown): StateTypedDescr
   return { kind: 'state', value, initial };
 }
 
-// Extend the `t` object with descriptor builders.
-// We cast because the base `t` const is `as const` and doesn't include these.
 type TWithDescriptors = typeof t & {
   fire: typeof fire;
   query: typeof query;

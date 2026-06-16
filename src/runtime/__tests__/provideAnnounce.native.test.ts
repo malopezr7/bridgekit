@@ -1,14 +1,6 @@
-// ---------------------------------------------------------------------------
-// ADR-5b: stateless JS-provided contracts — explicit provide announcement
-//
-// JS runtime must call transport.announceProvided() at provide()-time for ALL
-// contracts (stateful or stateless) so native always knows a contract is
-// available even if it has no State markers. Announcement travels through the
-// existing BridgeState.write Nitro channel as {op:'provide'} — no new Nitro
-// spec method required.
-//
-// Tests MUST be RED before implementation and GREEN after.
-// ---------------------------------------------------------------------------
+// Stateless JS-provided contracts send an explicit provide announcement.
+// transport.announceProvided() is called at provide()-time for ALL contracts
+// so native always knows a contract is available even if it has no state keys.
 
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { defineContract } from '../../contract/contract';
@@ -17,9 +9,6 @@ import type { CallEnvelope, ResultEnvelope } from '../../contract/protocol';
 import { t } from '../../contract/schema';
 import { BridgeKitJs } from '../bridgekit';
 import type { BridgeTransport, ConnectResult, JsDispatcher } from '../transport';
-
-// ---- mock Nitro-style transport -----------------------------------------------
-// Captures all calls to state.write so we can assert on the op field.
 
 function makeMockNitroTransport(): BridgeTransport & {
   _writeEnvelopes: CallEnvelope[];
@@ -96,9 +85,6 @@ function makeMockNitroTransport(): BridgeTransport & {
       t.stateWrite(env);
     },
 
-    // These are the methods under test — they must exist after implementation.
-    // Before implementation they will be absent; we check their behaviour, not their existence.
-    // They are declared here so TypeScript is happy once they are added to BridgeTransport.
     announceProvided(contractId: string, scope: import('../transport').BridgeScope): void {
       announceProvidedCalls.push({ contractId, scope });
       // Simulate what NitroBridgeTransport will do: send {op:'provide'} through state.write.
@@ -130,8 +116,6 @@ function makeMockNitroTransport(): BridgeTransport & {
   return t;
 }
 
-// ---- A stateless contract (no State markers) ------------------------------------
-
 const StatelessContract = defineContract('test.stateless', {
   methods: {
     greet: Async(t.object({ name: t.string() }), t.string()),
@@ -141,12 +125,7 @@ const StatelessContract = defineContract('test.stateless', {
   state: {},
 });
 
-// ---- A stateful contract (has State) -------------------------------------------
-// Used to ensure existing behaviour is unbroken.
-
-// ---- Tests ----------------------------------------------------------------------
-
-describe("ADR-5b: NitroBridgeTransport.announceProvided sends {op:'provide'} envelope", () => {
+describe("NitroBridgeTransport.announceProvided sends {op:'provide'} envelope", () => {
   it("announceProvided sends a stateWrite envelope with op='provide'", () => {
     const transport = makeMockNitroTransport();
     transport.announceProvided('test.stateless', { kind: 'global' });
@@ -167,7 +146,7 @@ describe("ADR-5b: NitroBridgeTransport.announceProvided sends {op:'provide'} env
   });
 });
 
-describe('ADR-5b: bridgekit.provide() calls announceProvided for stateless contract', () => {
+describe('bridgekit.provide() calls announceProvided for stateless contract', () => {
   let transport: ReturnType<typeof makeMockNitroTransport>;
   let bk: BridgeKitJs;
 
@@ -178,7 +157,6 @@ describe('ADR-5b: bridgekit.provide() calls announceProvided for stateless contr
   });
 
   it('provide() calls transport.announceProvided exactly once for a stateless contract', () => {
-    // Reset tracking after connect (which may call things internally)
     transport._announceProvidedCalls.length = 0;
 
     bk.provide(StatelessContract as import('../../contract/contract').BridgeContract<unknown>, {
@@ -192,7 +170,6 @@ describe('ADR-5b: bridgekit.provide() calls announceProvided for stateless contr
   });
 
   it("provide() sends {op:'provide'} through state.write for stateless contract (real path)", () => {
-    // Clear previous write envelopes
     transport._writeEnvelopes.length = 0;
 
     bk.provide(StatelessContract as import('../../contract/contract').BridgeContract<unknown>, {});
@@ -210,8 +187,6 @@ describe('ADR-5b: bridgekit.provide() calls announceProvided for stateless contr
 
     bk.provide(StatelessContract as import('../../contract/contract').BridgeContract<unknown>, {});
 
-    // Only the 'provide' envelope must be present — no 'stateWrite' for state keys
-    // (because there are none), and no spurious writes.
     const stateWriteEnvelopes = transport._writeEnvelopes.filter((e) => e.op === 'stateWrite');
     expect(stateWriteEnvelopes).toHaveLength(0);
   });
@@ -232,7 +207,7 @@ describe('ADR-5b: bridgekit.provide() calls announceProvided for stateless contr
   });
 });
 
-describe('ADR-5b: LoopbackTransport announce is a no-op (isProvided via registry)', () => {
+describe('LoopbackTransport announce is a no-op (isProvided via registry)', () => {
   it('loopback announce does not throw and isProvided still works locally', () => {
     const { LoopbackTransport } =
       require('../loopbackTransport') as typeof import('../loopbackTransport');

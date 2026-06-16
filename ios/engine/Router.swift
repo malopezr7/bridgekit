@@ -1,23 +1,15 @@
 // Router.swift
 // BridgeKit iOS engine — routing engine implementing BridgeKitNativeDelegate.
 //
-// Port of io/github/malopezr7/bridgekit/core/Router.kt
-//
-// CONCURRENCY MODEL (Design Decision 1 — HYBRID):
-//   ONE shared NSRecursiveLock (engineLock) runs ALL sync-returning paths
-//   synchronously — 1:1 with Kotlin `synchronized(lock)`.
-//   Tasks (async) ONLY for: invoke, stream pumps, OutboundCaller calls, grace timer.
-//   Do NOT make Router an actor (deadlocks the sync specs on the JS thread).
-//
-// ALL 12 INVARIANTS implemented; each site annotated // INV-N.
+// CONCURRENCY MODEL: ONE shared NSRecursiveLock runs all sync-returning paths.
+// Async Tasks only for: invoke, stream pumps, OutboundCaller calls, grace timer.
+// Do NOT make Router an actor — it deadlocks sync specs on the JS thread.
 
 import Foundation
 
-// ---- JsDispatcherCallbacks -------------------------------------------------
+// MARK: - JsDispatcherCallbacks
 
 /// Callbacks that the dispatcher passes back to JS.
-///
-/// Port: `class JsDispatcherCallbacks` (Kotlin).
 public final class JsDispatcherCallbacks {
     public let onInvoke: (
         _ env: [String: Any?],
@@ -44,7 +36,7 @@ public final class JsDispatcherCallbacks {
     }
 }
 
-// ---- JS stream channel types -----------------------------------------------
+// MARK: - JS stream channel types
 
 /// Bidirectional async pipe for one JS→native stream.
 typealias JsStreamChannel = (
@@ -52,47 +44,42 @@ typealias JsStreamChannel = (
     continuation: AsyncStream<[String: Any?]>.Continuation
 )
 
-// ---- Router ----------------------------------------------------------------
+// MARK: - Router
 
 internal final class Router {
 
-    // ---- Engine lock -----------------------------------------------------------
+    // MARK: Engine lock
 
-    /// Shared NSRecursiveLock — all sync paths run fully inside this lock.
-    /// PORT NOTE: Kotlin `synchronized(lock)` → Swift `lock.lock() / lock.unlock()`.
-    /// Never hold this lock across an `await` (would deadlock on re-entry from Nitro).
+    /// All sync paths run fully inside this lock. Never hold it across an `await`.
     internal let lock = NSRecursiveLock()
 
-    // ---- Configuration ---------------------------------------------------------
+    // MARK: Configuration
 
     internal let readinessTimeoutMs: UInt64
     internal let callTimeoutMs: UInt64
     internal let strictHashCheck: Bool
 
-    // ---- Binding registry ------------------------------------------------------
+    // MARK: Binding registry
 
-    // (contractId, scopeKey) → BindingEntry
-    // Guarded by lock.
+    // (contractId, scopeKey) → BindingEntry — guarded by lock.
     private var bindings: [String: BindingEntry] = [:]
 
     private func bindingKey(contractId: String, scope: Scope) -> String {
         "\(contractId)|\(scope.serialized())"
     }
 
-    // ---- Epoch -----------------------------------------------------------------
+    // MARK: Epoch
 
-    // PORT NOTE: Kotlin `AtomicLong` → Swift Int64 guarded by engineLock.
-    // epochCounter is only incremented inside connectDispatcher (under lock).
+    // Incremented only inside connectDispatcher (under lock).
     private var epochCounter: Int64 = 0
     internal func currentEpoch() -> Int64 {
         lock.lock(); defer { lock.unlock() }
         return epochCounter
     }
 
-    // ---- JS dispatcher ---------------------------------------------------------
+    // MARK: JS dispatcher
 
-    // PORT NOTE: Kotlin `@Volatile var jsCallbacks`. Swift: plain optional guarded by
-    // engineLock (all reads under lock; write in connectDispatcher under lock).
+    // All reads under lock; written in connectDispatcher under lock.
     private var jsCallbacks: JsDispatcherCallbacks? = nil
 
     internal func getJsCallbacks() -> JsDispatcherCallbacks? {
@@ -100,39 +87,34 @@ internal final class Router {
         return jsCallbacks
     }
 
-    // ---- JS-consume stream tracking (native consumes JS-provided streams) ------
+    // MARK: JS-consume stream tracking
 
-    // PORT NOTE: Kotlin `ConcurrentHashMap<String, Channel<...>>`.
-    // Swift: Dictionary guarded by engineLock.
     // Value is (AsyncStream, its continuation) so emitFromJs can push values.
     internal var jsStreamChannels: [String: JsStreamChannel] = [:]
     internal var jsStreamEndContinuations: [String: AsyncStream<[String: Any?]>.Continuation] = [:]
 
-    // ---- Native→JS stream pump tracking ----------------------------------------
+    // MARK: Native→JS stream pump tracking
 
     // streamId → (epoch, task)
     private var streamPumpJobs: [String: (Int64, Task<Void, Never>)] = [:]
 
-    // ---- StreamHub (W3-3 multiplexing) -----------------------------------------
+    // MARK: StreamHub
 
     private var streamHub: StreamHub
 
-    // ---- JS-provided contract set ----------------------------------------------
+    // MARK: JS-provided contract set (guarded by lock)
 
-    // Guarded by lock.
     private var jsProvidedContracts: Set<String> = []
 
-    // ---- StateStore (internal access) ------------------------------------------
+    // MARK: StateStore
 
     internal let stateStore: StateStore
 
-    // ---- ParkBuffer ------------------------------------------------------------
+    // MARK: ParkBuffer
 
     private let parkBuffer: ParkBuffer
 
-    // -------------------------------------------------------------------------
-    // Init
-    // -------------------------------------------------------------------------
+    // MARK: - Init
 
     internal init(
         readinessTimeoutMs: UInt64 = 5_000,
@@ -147,17 +129,14 @@ internal final class Router {
         self.streamHub = StreamHub(lock: lock)
     }
 
-    // =========================================================================
-    // BridgeKitNativeDelegate surface
-    // (All methods below are the 1:1 port of Router.kt's BridgeKitNativeDelegate impl)
-    // =========================================================================
+    // MARK: - BridgeKitNativeDelegate
 
-    // ---- invoke (async) -------------------------------------------------------
+    // MARK: invoke (async)
 
     /// Async invoke. Calls `complete` exactly once.
     ///
-    /// INV-1 (epoch guard): reject stale ops BEFORE side-effects.
-    /// epochEnv == 0 = pre-connection sentinel; do NOT reject.
+    /// Epoch guard: reject stale ops before side-effects. epochEnv == 0 is the
+    /// pre-connection sentinel and is never rejected.
     func invoke(env: [String: Any?], complete: @escaping ([String: Any?]) -> Void) {
         guard let contractId = env["contractId"] as? String else {
             return complete(Self.errEnv("CONTRACT_NOT_PROVIDED", "Missing contractId"))
@@ -175,7 +154,7 @@ internal final class Router {
         lock.unlock()
 
         Task {
-            // INV-1: epoch guard.
+            // Epoch guard.
             if epochEnv != 0 && epochEnv < currentEpoch {
                 complete(Self.errEnv(
                     "BRIDGE_NOT_READY",
@@ -192,9 +171,8 @@ internal final class Router {
         }
     }
 
-    // ---- invokeSync -----------------------------------------------------------
+    // MARK: invokeSync
 
-    /// Synchronous invoke. Runs synchronously inside the engine lock.
     func invokeSync(env: [String: Any?]) -> [String: Any?] {
         lock.lock()
         defer { lock.unlock() }
@@ -221,13 +199,9 @@ internal final class Router {
         }
 
         do {
-            // invokeSync is sync; adapter must not block.
-            // PORT NOTE: Swift does not have `runBlocking`; we call synchronously.
-            // The adapter's invokeSync is a plain throws func (not async).
             let result = try binding.adapter.invokeSync(member: member, payload: payload)
             return Self.okEnv(result)
         } catch let e as BridgeKitDecodeError {
-            // INV-10: BridgeKitDecodeError → VALIDATION_FAILED.
             return Self.errEnv("VALIDATION_FAILED", "Decode failed for '\(member)' on '\(contractId)': \(e.description)", contractId, member, scope)
         } catch let e as BridgeKitError where e.code == "METHOD_NOT_FOUND" {
             return Self.errEnv("METHOD_NOT_FOUND", "No sync method '\(member)' in contract '\(contractId)': \(e.message)", contractId, member, scope)
@@ -236,25 +210,21 @@ internal final class Router {
         }
     }
 
-    // ---- connectDispatcher ----------------------------------------------------
+    // MARK: connectDispatcher
 
     /// Register the JS dispatcher for a new runtime epoch.
     /// Returns { epoch: Number, snapshot: [...] }.
     ///
-    /// INV-1 (epoch guard on subsequent calls): epoch increment done here.
-    /// INV-2 (H-8): closes + clears jsStreamChannels/jsStreamEndContinuations ATOMIC
-    ///               with epoch increment.
+    /// Epoch increment and stream channel teardown are atomic (both under lock).
     func connectDispatcher(
         epochInfo: [String: Any?],
         callbacks: JsDispatcherCallbacks
     ) -> [String: Any?] {
         lock.lock()
 
-        // Increment epoch atomically with stream channel teardown — INV-2 (H-8).
         epochCounter += 1
         let newEpoch = epochCounter
 
-        // Cancel prior-epoch stream pump tasks.
         // Collect stale IDs first, then cancel (avoid mutating while iterating).
         let staleStreamIds = streamPumpJobs.compactMap { sid, pair -> String? in
             pair.0 < newEpoch ? sid : nil
@@ -267,38 +237,28 @@ internal final class Router {
         streamHub.cancelAll()
         streamHub = StreamHub(lock: lock)
 
-        // INV-2 (H-8): close all JS→native stream channels + end signals with BRIDGE_NOT_READY.
-        // This is ATOMIC with the epoch increment (both inside lock).
+        // Close all JS→native stream channels (atomic with epoch increment, both inside lock).
         for (_, channel) in jsStreamChannels {
             channel.continuation.finish()
         }
         jsStreamChannels.removeAll()
         for (_, endCont) in jsStreamEndContinuations {
-            // INV-2 (H-8): Deliver BRIDGE_NOT_READY end signal then finish.
             endCont.yield(["ok": false, "code": "BRIDGE_NOT_READY", "message": "Epoch swap: prior stream invalidated"])
             endCont.finish()
         }
         jsStreamEndContinuations.removeAll()
 
-        // Fail in-flight native→JS calls (park buffer).
         parkBuffer.failAllPending()
 
-        // Mark all JS-provided contracts unprovided + clear state.
-        // Returns immediate-notification snapshots to fire OUTSIDE the lock.
         let goneSnapshots = stateStore.markJsContractsUnprovided(jsProvidedContracts)
-
-        // Remove stale observers for previous epoch.
         stateStore.clearObserversForEpoch(newEpoch - 1)
-
-        // Install new dispatcher.
         jsCallbacks = callbacks
 
         lock.unlock()
 
-        // INV-6 (H-13): notify observers OUTSIDE lock.
+        // Notify observers OUTSIDE lock.
         stateStore.notifyGoneSnapshots(goneSnapshots)
 
-        // Build state snapshot of native-provided entries (outside lock — reads are safe).
         let snapshot = buildNativeStateSnapshot()
 
         return [
@@ -307,12 +267,9 @@ internal final class Router {
         ]
     }
 
-    // ---- openStream -----------------------------------------------------------
+    // MARK: openStream
 
     /// Open a native→JS stream. Returns the stream id.
-    ///
-    /// INV-1 (epoch guard): reject stale openStream BEFORE side-effects.
-    /// INV-5 (H-7): recheck isLive after streamJobs insert.
     func openStream(
         env: [String: Any?],
         onNext: @escaping ([String: Any?]) -> Void,
@@ -333,7 +290,7 @@ internal final class Router {
         let currentEpochAtOpen = epochCounter
         let streamEpoch = (env["epoch"] as? NSNumber)?.int64Value ?? currentEpochAtOpen
 
-        // INV-1: epoch guard.
+        // Epoch guard.
         if streamEpoch != 0 && streamEpoch < currentEpochAtOpen {
             lock.unlock()
             onEnd(Self.errEnv(
@@ -356,11 +313,9 @@ internal final class Router {
             return ""
         }
 
-        // INV-9: paramsHash for StreamHub keying.
         let pHash = paramsHash(payload)
         let streamId = "\(contractId)_\(member)_\(pHash)_\(mach_absolute_time())"
 
-        // Capture adapter for the closure (lock held during attach).
         let adapter = binding.adapter
 
         let consumerTask = streamHub.attach(
@@ -380,16 +335,15 @@ internal final class Router {
 
         streamPumpJobs[streamId] = (streamEpoch, consumerTask)
 
-        // INV-5 (H-7): register job in binding, then recheck isLive.
+        // registerStreamJob rechecks isLive after insert; if the binding died in the
+        // window between the check above and here, the job is cancelled immediately.
         binding.registerStreamJob(streamId, job: consumerTask)
-        // H-7: if binding died between openStream's check and here, the job was already
-        // cancelled in registerStreamJob. Nothing more to do — onEnd will fire via cancel.
 
         lock.unlock()
         return streamId
     }
 
-    // ---- closeStream ----------------------------------------------------------
+    // MARK: closeStream
 
     func closeStream(streamId: String) {
         lock.lock()
@@ -398,18 +352,17 @@ internal final class Router {
         entry?.1.cancel()
     }
 
-    // ---- emitFromJs -----------------------------------------------------------
+    // MARK: emitFromJs
 
     func emitFromJs(streamId: String, value: [String: Any?]) {
         lock.lock()
         let channel = jsStreamChannels[streamId]
         lock.unlock()
-        // PORT NOTE: Kotlin `channel.trySend(value)` — AsyncStream yields non-blocking.
-        // If the consumer has cancelled, the continuation is finished; yield is a no-op.
+        // AsyncStream yields are non-blocking; if the consumer cancelled, this is a no-op.
         channel?.continuation.yield(value)
     }
 
-    // ---- endFromJs ------------------------------------------------------------
+    // MARK: endFromJs
 
     func endFromJs(streamId: String, end: [String: Any?]) {
         lock.lock()
@@ -419,7 +372,7 @@ internal final class Router {
         endCont?.finish()
     }
 
-    // ---- stateRead ------------------------------------------------------------
+    // MARK: stateRead
 
     func stateRead(env: [String: Any?]) -> [String: Any?] {
         lock.lock()
@@ -435,7 +388,7 @@ internal final class Router {
         return Self.okEnv(["v": value.valueOrNil()])
     }
 
-    // ---- stateObserve ---------------------------------------------------------
+    // MARK: stateObserve
 
     func stateObserve(env: [String: Any?], onChange: @escaping ([String: Any?]) -> Void) -> String {
         lock.lock()
@@ -449,7 +402,7 @@ internal final class Router {
         )
     }
 
-    // ---- stateUnobserve -------------------------------------------------------
+    // MARK: stateUnobserve
 
     func stateUnobserve(obsId: String) {
         lock.lock()
@@ -457,11 +410,9 @@ internal final class Router {
         stateStore.unobserve(obsId)
     }
 
-    // ---- stateWrite -----------------------------------------------------------
+    // MARK: stateWrite
 
     /// Provider-side state write from JS.
-    ///
-    /// INV-1 (epoch guard): applied to stateWrite including provide/unprovide ops.
     func stateWrite(env: [String: Any?]) -> [String: Any?] {
         lock.lock()
 
@@ -472,7 +423,6 @@ internal final class Router {
         let scope = parseScopeEnv(env)
         let op = env["op"] as? String
 
-        // INV-1: epoch guard — applies to stateWrite (including provide/unprovide).
         let epochEnv = (env["epoch"] as? NSNumber)?.int64Value ?? 0
         if epochEnv != 0 && epochEnv < epochCounter {
             lock.unlock()
@@ -480,7 +430,6 @@ internal final class Router {
                 "Stale epoch: request epoch=\(epochEnv) current=\(epochCounter)", contractId)
         }
 
-        // ADR-5b: provide / unprovide ops branch BEFORE touching the state store.
         if op == "provide" {
             let nativeOwns = resolveBinding(contractId: contractId, scope: scope) != nil
             if !nativeOwns {
@@ -495,7 +444,7 @@ internal final class Router {
             jsProvidedContracts.remove(contractId)
             let goneSnapshots = stateStore.markJsContractsUnprovided([contractId])
             lock.unlock()
-            // INV-6 (H-13): notify outside lock.
+            // Notify outside lock.
             stateStore.notifyGoneSnapshots(goneSnapshots)
             return Self.okEnv(nil)
         }
@@ -521,9 +470,7 @@ internal final class Router {
         return result
     }
 
-    // =========================================================================
-    // Internal API (used by BridgeKit)
-    // =========================================================================
+    // MARK: - Internal API
 
     /// Register a native provider binding.
     /// If a binding already exists, it is closed with .replacing and replaced.
@@ -543,11 +490,10 @@ internal final class Router {
         }
         lock.unlock()
 
-        // Subscribe to each provider state stream for change propagation.
-        // PORT NOTE: Kotlin `entry.adapter.stateFlows().collect { ... }` inside engineScope.
-        // Swift: Task per state stream; stored in binding so they cancel on binding.close().
-        // LOCK DISCIPLINE: acquire lock to write state + snapshot observers, then release BEFORE
-        // calling observer callbacks (avoids holding engine lock across JS Nitro callbacks).
+        // Subscribe to each provider state stream. One Task per stream, stored in the
+        // binding so they cancel on binding.close(). Acquire the lock to write state and
+        // snapshot observers, then release BEFORE calling callbacks (avoids holding the
+        // engine lock across JS/Nitro callbacks).
         for (stateKey, stateStream) in entry.adapter.stateStreams() {
             let contractId = entry.contractId
             let scope = entry.scope
@@ -558,7 +504,7 @@ internal final class Router {
                     self.stateStore.setNativeValueUnderLock(contractId: contractId, scope: scope, stateKey: stateKey, value: value)
                     let snapshot = self.stateStore.snapshotObserversInternal(contractId: contractId, stateKey: stateKey, scope: scope)
                     self.lock.unlock()
-                    // Notify OUTSIDE lock (avoids holding engine lock across JS/Nitro callbacks).
+                    // Notify OUTSIDE lock.
                     for cb in snapshot { cb(["v": value]) }
                 }
             }
@@ -572,9 +518,8 @@ internal final class Router {
         lock.unlock()
     }
 
-    /// Resolve binding with instance→feature→global fallback.
+    /// Resolve binding with instance→feature→global fallback. Called under lock.
     internal func resolveBinding(contractId: String, scope: Scope) -> BindingEntry? {
-        // Called under lock (from sync paths) or under lock (from async paths that hold lock).
         if case .instance(let feature, _) = scope {
             if let b = bindings[bindingKey(contractId: contractId, scope: scope)] { return b }
             if let b = bindings[bindingKey(contractId: contractId, scope: .feature(feature))] { return b }
@@ -589,11 +534,10 @@ internal final class Router {
         lock.lock()
         let key = bindingKey(contractId: entry.contractId, scope: entry.scope)
         if bindings[key] === entry { bindings.removeValue(forKey: key) }
-        // INV-6 (H-13): markUnprovided returns snapshots; notify outside lock.
         let goneSnapshots = stateStore.markUnprovided(contractId: entry.contractId, scope: entry.scope)
         entry.cancelAllStreamJobs()
         lock.unlock()
-        // Notify observers OUTSIDE engine lock.
+        // Notify observers OUTSIDE lock.
         stateStore.notifyGoneSnapshots(goneSnapshots)
     }
 
@@ -635,9 +579,7 @@ internal final class Router {
         jsProvidedContracts.insert(contractId)
     }
 
-    // =========================================================================
-    // Private helpers
-    // =========================================================================
+    // MARK: - Private helpers
 
     private func invokeWithReadiness(
         contractId: String,
@@ -680,13 +622,11 @@ internal final class Router {
         }
 
         do {
-            // INV-10: BridgeKitDecodeError → VALIDATION_FAILED.
             let result = try await withBridgeTimeout(nanoseconds: callTimeoutMs * 1_000_000) {
                 try await b.adapter.invoke(member: member, payload: payload)
             }
             return Self.okEnv(result)
         } catch let e as BridgeKitDecodeError {
-            // INV-10.
             return Self.errEnv("VALIDATION_FAILED", "Decode failed for '\(member)' on '\(contractId)': \(e.description)", contractId, member, scope)
         } catch let e as BridgeKitError where e.code == "TIMEOUT" {
             return Self.errEnv("TIMEOUT", "Call to '\(member)' on '\(contractId)' timed out after \(callTimeoutMs)ms", contractId, member, scope)
@@ -742,9 +682,7 @@ internal final class Router {
         ]
     }
 
-    // =========================================================================
-    // Envelope helpers
-    // =========================================================================
+    // MARK: - Envelope helpers
 
     private func parseScopeEnv(_ env: [String: Any?]) -> Scope {
         guard let scopeObj = env["scope"] as? [String: Any?] else { return .global }
@@ -784,9 +722,7 @@ internal final class Router {
         }
     }
 
-    // =========================================================================
-    // Dump
-    // =========================================================================
+    // MARK: - Dump
 
     internal func dump() -> String {
         lock.lock()

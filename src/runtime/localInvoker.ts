@@ -1,27 +1,12 @@
-// ---------------------------------------------------------------------------
 // localInvoker — per-kind local invocation for JS-local providers.
+// Resolves calls against a registry binding WITHOUT crossing to the native transport.
 //
-// Used by BridgeKitJs consumer proxy to resolve calls against a local JS
-// registry binding WITHOUT crossing to the native transport.
-//
-// Resolution order (enforced by the caller):
-//   1. Check Registry.resolve(contractId, scope)
-//   2. If found → use localInvoker for the call (this file)
-//   3. If not found → fall through to the native transport (unchanged)
-//
-// Footgun / shadow note:
-//   A JS-local provider at any scope level SHADOWS a native provider in the
-//   same or broader scope. This is INTENTIONAL — it enables pure-JS hosts
-//   (web target, standalone, tests) to override native providers. If you have
-//   a native-provided contract and unexpectedly shadow it with a JS provider,
-//   the JS one wins. Remove the JS provide() call to restore native routing.
-// ---------------------------------------------------------------------------
+// A JS-local provider SHADOWS a native provider in the same or broader scope — intentional
+// for web/standalone/test hosts. Remove the JS provide() call to restore native routing.
 
 import type { BridgeStreamSource } from '../contract/contract';
 import { createBridgeError } from '../contract/protocol';
 import { diagnostics } from './diagnostics';
-
-// ---- invokeLocalSync -------------------------------------------------------
 
 /**
  * Call a querySync method on a local JS impl synchronously.
@@ -60,8 +45,6 @@ export function invokeLocalSync(
   }
 }
 
-// ---- invokeLocalAsync ------------------------------------------------------
-
 /**
  * Call a query method on a local JS impl asynchronously.
  * Applies timeoutMs and AbortSignal the same way the transport path does.
@@ -87,7 +70,6 @@ export function invokeLocalAsync(
     );
   }
 
-  // Check AbortSignal before even calling impl
   if (opts?.signal?.aborted) {
     return Promise.reject(
       createBridgeError('CANCELLED', '[bridgekit] local CANCELLED: AbortSignal already aborted'),
@@ -111,7 +93,6 @@ export function invokeLocalAsync(
     );
   }
 
-  // Map impl rejections to PROVIDER_ERROR
   invocation = invocation.catch((err) => {
     diagnostics.incrementErrors();
     throw createBridgeError(
@@ -121,14 +102,11 @@ export function invokeLocalAsync(
     );
   });
 
-  // H-9: track cleanup resources that must be released on any settlement.
-  // Mirror the .finally() pattern from bridgekit.ts so timer + listener are
-  // always cleaned regardless of which branch (impl, timeout, abort) wins.
+  // Track cleanup resources (timer + abort listener) released in .finally().
   let timerId: ReturnType<typeof setTimeout> | undefined;
   let abortHandler: (() => void) | undefined;
   let abortSignal: AbortSignal | undefined;
 
-  // Apply timeoutMs
   const { timeoutMs } = opts ?? {};
   if (timeoutMs !== undefined && timeoutMs !== null) {
     invocation = Promise.race([
@@ -148,7 +126,6 @@ export function invokeLocalAsync(
     ]);
   }
 
-  // Apply AbortSignal
   if (opts?.signal) {
     const signal = opts.signal;
     abortSignal = signal;
@@ -164,7 +141,6 @@ export function invokeLocalAsync(
     ]);
   }
 
-  // H-9: .finally() cleans both timer AND listener on any settlement branch.
   return invocation.finally(() => {
     if (timerId !== undefined) clearTimeout(timerId);
     if (abortSignal !== undefined && abortHandler !== undefined) {
@@ -172,8 +148,6 @@ export function invokeLocalAsync(
     }
   });
 }
-
-// ---- invokeLocalFire -------------------------------------------------------
 
 /**
  * Call a fire method on a local JS impl.
@@ -196,7 +170,6 @@ export function invokeLocalFire(
   try {
     const result =
       params !== undefined ? (fn as (p: unknown) => unknown)(params) : (fn as () => unknown)();
-    // If result is a promise, swallow rejection silently
     if (result && typeof (result as Promise<unknown>).catch === 'function') {
       (result as Promise<unknown>).catch(() => {
         diagnostics.incrementFiresDropped();
@@ -206,8 +179,6 @@ export function invokeLocalFire(
     diagnostics.incrementFiresDropped();
   }
 }
-
-// ---- openLocalStream -------------------------------------------------------
 
 /**
  * Wire a local stream provider impl to a BridgeStreamSource-style consumer.
@@ -230,8 +201,7 @@ export function openLocalStream(
     // Return a stream that immediately errors
     return {
       subscribe(cb: (v: unknown) => void): () => void {
-        void cb; // unused but keeps signature
-        // No values, no teardown needed
+        void cb;
         return () => {};
       },
       [Symbol.asyncIterator](): AsyncIterator<unknown> {

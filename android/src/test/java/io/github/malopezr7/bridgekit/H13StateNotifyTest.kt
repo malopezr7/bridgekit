@@ -12,7 +12,7 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * H-13 regression: native state gone-transitions (markUnprovided, Replacing, grace-expiry)
+ * Native state gone-transitions (markUnprovided, Replacing, grace-expiry)
  * MUST notify JS observers with a "gone" signal (map without "v" key).
  * ADDITIVE only — no new BridgeValue sealed branch introduced.
  */
@@ -43,7 +43,7 @@ class H13StateNotifyTest {
 
         received.clear()
 
-        // Now mark unprovided — H-13: must notify with gone signal (no "v" key)
+        // markUnprovided must notify with gone signal (no "v" key)
         stateStore.markUnprovided("c1", Scope.Global)
 
         assertEquals("markUnprovided must notify observer exactly once", 1, received.size)
@@ -85,7 +85,7 @@ class H13StateNotifyTest {
         // Trigger epoch swap → Replacing
         store.markJsContractsUnprovided(setOf("js.c"))
 
-        // H-13: Replacing transition must notify observer with gone signal
+        // Replacing transition must notify observer with gone signal
         assertEquals("Replacing transition must notify observer", 1, received.size)
         assertFalse("gone notification must NOT carry 'v' key", received[0].containsKey("v"))
         assertEquals("gone", received[0]["status"])
@@ -110,7 +110,7 @@ class H13StateNotifyTest {
         // Advance past grace window
         testScope.advanceTimeBy(300L)
 
-        // H-13: grace-expiry → Unprovided must also notify observer with gone signal
+        // grace-expiry → Unprovided must also notify observer with gone signal
         assertEquals("grace-expiry must notify observer", 1, received.size)
         assertFalse("grace-expiry gone notification must NOT carry 'v' key", received[0].containsKey("v"))
         assertEquals("gone", received[0]["status"])
@@ -146,9 +146,8 @@ class H13StateNotifyTest {
 
     @Test
     fun `BridgeValue has exactly 4 sealed subtypes - no new branch added`() {
-        // This test enforces the H-13 constraint: ADDITIVE notifyObservers only.
-        // If a new sealed branch is added, the exhaustive when in BridgekitDemoInitializer
-        // and other consumers will fail to compile. This test acts as a canary.
+        // If a new sealed branch is added, exhaustive when expressions across consumers
+        // will fail to compile. This test acts as a canary.
         val available: BridgeValue<String> = BridgeValue.Available("a")
         val initial: BridgeValue<String> = BridgeValue.Initial("b")
         val replacing: BridgeValue<String> = BridgeValue.Replacing("c")

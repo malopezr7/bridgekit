@@ -1,7 +1,4 @@
-// ---------------------------------------------------------------------------
-// React layer — hooks for consuming and providing bridge contracts.
-// react-no-use-effect: external-system sync uses dedicated mount-effect pattern.
-// ---------------------------------------------------------------------------
+// React hooks for consuming and providing bridge contracts.
 
 import type { ReactNode } from 'react';
 import {
@@ -23,7 +20,7 @@ import { diagnostics } from '../runtime/diagnostics';
 import type { MirrorValue } from '../runtime/stateMirror';
 import { DEFAULT_SCOPE, ScopeContext } from './ScopeContext';
 
-// ---- No-provider warning helper -----------------------------------------------
+// ---- No-provider warning helper -------------------------------------------
 
 /**
  * Emits a ONE-TIME dev-only warning when a scoped hook runs without a
@@ -42,7 +39,6 @@ function useWarnIfNoProvider(
   hookName: string,
 ): void {
   const isDefault = contextScope === DEFAULT_SCOPE;
-  // Stable key per hook+call-site: use the hook name; a ref ensures one warn per mount.
   const warnedRef = useRef(false);
   if (!warnedRef.current && isDefault && !hasExplicitScope) {
     warnedRef.current = true;
@@ -76,15 +72,12 @@ interface BridgeScopeProviderProps {
  * Any useBridge / useProvideBridge / useBridgeState calls below inherit this scope.
  *
  * Nested providers are fully isolated — no cross-talk between sibling subtrees.
- * react-no-use-effect: scope flows through context (derived during render, no effect).
  */
 export function BridgeScopeProvider({
   feature,
   instance,
   children,
 }: BridgeScopeProviderProps): ReactNode {
-  // Memoize the scope object so Provider value reference is stable across renders
-  // when feature/instance strings haven't changed.
   const scope: BridgeScope = useMemo(
     () =>
       instance
@@ -95,7 +88,6 @@ export function BridgeScopeProvider({
     [feature, instance],
   );
 
-  // Wrap children in both contexts: ScopeContext (scope) + BridgeKitContext (bk instance).
   return createElement(
     ScopeContext.Provider,
     { value: scope },
@@ -118,7 +110,6 @@ export function useBridge<TShape>(
   const scope = opts?.scope ?? contextScope;
   useWarnIfNoProvider(contextScope, opts?.scope !== undefined, 'useBridge');
 
-  // Stable proxy — recreated only if bk/contract/scope identity changes
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — scope fields are the stable deps
   return useMemo(
     () => bk.bridge(contract, { scope }),
@@ -133,10 +124,9 @@ export function useBridge<TShape>(
  * StrictMode-safe: double-mount supersedes the first registration harmlessly.
  * Impl captured latest via ref — re-renders don't re-register.
  *
- * H-11: effect is keyed by scope identity so switching scope closes the old
- * registration and opens a new one, matching the H-12 pattern for useBridgeReady.
- * The impl ref is snapshotted at effect time (post-commit) before the provide call
- * to avoid exposing an uncommitted concurrent-render impl to bridge callers.
+ * Effect is keyed by scope identity so switching scope closes the old registration
+ * and opens a new one. The impl ref is snapshotted at effect time (post-commit)
+ * to avoid exposing a speculative concurrent-render value to bridge callers.
  */
 export function useProvideBridge<TShape>(
   contract: BridgeContract<TShape>,
@@ -150,24 +140,21 @@ export function useProvideBridge<TShape>(
 
   const implRef = useRef<Partial<TShape>>(impl);
 
-  // S-2 fix (react-no-use-effect): update ref during render, not in a bare useEffect.
-  // The ref always holds the latest impl; the Proxy in the effect delegates to it.
-  // Updating a ref during render is safe — it is synchronous, has no observable side
-  // effects on other components, and avoids the extra render cycle of a no-deps effect.
+  // Update ref during render so it always holds the latest impl.
+  // Updating a ref during render is safe — synchronous, no side effects on other
+  // components, and avoids the extra render cycle of a no-deps effect.
   implRef.current = impl;
 
   const scopeKind = scope.kind;
   const scopeFeature = (scope as { feature?: string }).feature;
   const scopeInstance = (scope as { instance?: string }).instance;
 
-  // H-11: keyed by scope identity so a scope change triggers close+re-register.
-  // This is external-system sync — useEffect is correct here per react-no-use-effect:
-  // provider registration IS a side effect of mounting into the bridge runtime.
+  // Keyed by scope identity so a scope change triggers close+re-register.
+  // Provider registration is an external-system side effect — useEffect is correct here.
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — scope fields are the stable deps
   useEffect(() => {
-    // Snapshot implRef.current at effect time (after commit) so the Proxy used
-    // during registration delegates to the committed impl, not a concurrent-render
-    // speculative value that may have been written to implRef during an aborted render.
+    // Snapshot implRef.current at effect time (post-commit) so the Proxy delegates
+    // to the committed impl, not a speculative value from an aborted render.
     const registrationRef = implRef;
 
     const proxyImpl = new Proxy({} as Partial<TShape>, {
@@ -217,9 +204,7 @@ export function useBridgeState<TShape, K extends string>(
 
 /**
  * Reactive boolean: true when the contract is provided in the given scope.
- *
- * H-12: re-evaluates when scope changes by keying the effect on scope identity fields.
- * Initial state is derived at render time per the CURRENT scope (not captured at mount).
+ * Re-evaluates when scope changes; initial state is derived at render time.
  */
 export function useBridgeReady<TShape>(
   contract: BridgeContract<TShape>,
@@ -229,9 +214,8 @@ export function useBridgeReady<TShape>(
   const contextScope = useContext(ScopeContext);
   const scope = opts?.scope ?? contextScope;
 
-  // H-12: derive initial readiness per current scope at render time.
-  // We need to re-derive when scope changes; useState lazy init only runs once,
-  // so we read synchronously during render and update via the effect when scope changes.
+  // useState lazy init only runs once, so we read synchronously during render
+  // and update via the effect when scope changes.
   const contractId = contract.descriptor.id;
   const scopeKind = scope.kind;
   const scopeFeature = (scope as { feature?: string }).feature;
@@ -239,15 +223,12 @@ export function useBridgeReady<TShape>(
 
   const [ready, setReady] = useState(() => bk.registry.isProvided(contractId, scope));
 
-  // H-12: effect re-runs on scope identity change, re-deriving readiness for the new scope.
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — scope fields are the stable deps
   useEffect(() => {
     let cancelled = false;
 
-    // Immediately snapshot current readiness for new scope
     setReady(bk.registry.isProvided(contractId, scope));
 
-    // Wait for provision if not yet ready
     if (!bk.registry.isProvided(contractId, scope)) {
       bk.registry
         .whenProvided(contractId, { scope })

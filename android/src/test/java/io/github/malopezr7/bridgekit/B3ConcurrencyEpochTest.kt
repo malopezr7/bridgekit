@@ -24,17 +24,11 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * B3 — Android Concurrency + Epoch (WU-4)
+ * Android Concurrency + Epoch tests.
  *
- * Covers H-5, H-6, H-7, H-8, epoch validation (D1), and ParkBuffer timeout waiter cleanup.
- *
- * Test strategy per design:
- *  - H-5: terminated flag + stored terminal in HubEntry, late subscriber replays terminal.
- *  - H-6: hubs.remove(key, entry) value-aware at both upstream-completion and detach sites.
- *  - H-7: BindingEntry.streamJobs as ConcurrentHashMap + recheck _isLive before put (defensive).
- *  - H-8: connectDispatcher closes+clears jsStreamChannels/jsStreamEnds on reconnect.
- *  - Epoch guard: invoke/openStream/stateWrite with stale epoch rejected BEFORE side-effects.
- *  - ParkBuffer: individual timed-out waiters removed from list; 65th park() after 64 timeouts accepted.
+ * Covers: late-consumer terminal replay (StreamHub), value-aware hub entry removal,
+ * ConcurrentHashMap safety in BindingEntry, JS→native channel cleanup on reconnect,
+ * epoch guard (stale invoke/openStream/stateWrite rejection), and ParkBuffer timeout cleanup.
  */
 class B3ConcurrencyEpochTest {
 
@@ -55,16 +49,13 @@ class B3ConcurrencyEpochTest {
     }
 
     // =========================================================================
-    // H-5: StreamHub terminal replay for late consumers
+    // StreamHub terminal replay for late consumers
     // =========================================================================
 
     /**
-     * H-5a — late consumer after upstream completes normally:
-     * Stream completes before any consumer attaches. When a consumer subscribes after
-     * completion it MUST receive the terminal immediately; it MUST NOT hang.
-     *
-     * With replay=0 and no terminated flag this will hang — the consumer never receives
-     * HUB_TERMINAL_OK and the test times out.
+     * Late consumer after upstream completes normally: stream completes before any
+     * consumer attaches. When a consumer subscribes after completion it MUST receive
+     * the terminal immediately and MUST NOT hang.
      */
     @Test(timeout = 10_000)
     fun `H-5a late consumer receives complete terminal after upstream already finished`() {
@@ -107,7 +98,7 @@ class B3ConcurrencyEpochTest {
         )
 
         assertTrue(
-            "H-5: late consumer MUST receive terminal after upstream already completed (no hang)",
+            "Late consumer MUST receive terminal after upstream already completed (no hang)",
             lateTerminalLatch.await(6, TimeUnit.SECONDS),
         )
         assertEquals("Late consumer must receive exactly one terminal", 1, lateTerminals.size)
@@ -115,8 +106,8 @@ class B3ConcurrencyEpochTest {
     }
 
     /**
-     * H-5b — late consumer after upstream errors:
-     * Stream errors before any consumer attaches. Late consumer MUST receive error terminal.
+     * Late consumer after upstream errors: stream errors before any consumer attaches.
+     * Late consumer MUST receive an error terminal.
      */
     @Test(timeout = 10_000)
     fun `H-5b late consumer receives error terminal after upstream already errored`() {
@@ -153,34 +144,32 @@ class B3ConcurrencyEpochTest {
         )
 
         assertTrue(
-            "H-5: late consumer MUST receive error terminal after upstream already errored",
+            "Late consumer MUST receive error terminal after upstream already errored",
             lateLatch.await(6, TimeUnit.SECONDS),
         )
         assertEquals("Late consumer must receive exactly one terminal", 1, lateTerminals.size)
         assertFalse(
-            "H-5: late consumer after error must receive ok=false terminal",
+            "Late consumer after error must receive ok=false terminal",
             lateTerminals[0]["ok"] as Boolean,
         )
         assertEquals("PROVIDER_ERROR", lateTerminals[0]["code"])
     }
 
     // =========================================================================
-    // H-6: StreamHub remove is value-aware
+    // StreamHub remove is value-aware
     // =========================================================================
 
     /**
-     * H-6a — value-aware remove at upstream completion does not evict live replacement entry.
+     * Value-aware remove at upstream completion does not evict a live replacement entry.
      *
      * Sequence under test:
      * 1. C1 attaches for key K with a completing upstream → upstream runs and completes.
-     * 2. Old entry removed from hubs via hubs.remove(key, oldEntry) in the upstream finally.
+     * 2. Old entry removed via value-aware hubs.remove(key, oldEntry) in the finally block.
      * 3. C2 attaches for key K with a live, non-completing upstream.
      * 4. C2's getOrPut creates a NEW entry (old one already removed → no conflict).
      * 5. C2's upstream starts; item emitted on liveSource → C2 receives it.
      *
-     * Bug without fix: hubs.remove(key) (value-blind) in the finally of C3's upstream
-     * (triggered by a THIRD consumer on the same key) would evict C2's live entry.
-     * Fix: hubs.remove(key, entry) is value-aware.
+     * A value-blind remove(key) in C3's upstream finally would evict C2's live entry.
      */
     @Test(timeout = 10_000)
     fun `H-6a value-aware remove does not evict live replacement entry`() {
@@ -190,7 +179,7 @@ class B3ConcurrencyEpochTest {
         val contractId = "h6.replace.test"
         val member = "stream"
 
-        // Latch for when the old entry's upstream finally block fires (value-blind would remove the new entry here).
+        // Latch for when the old entry's upstream finally block fires.
         val oldEntryRemovedLatch = CountDownLatch(1)
 
         val completingAdapter = object : InboundContractAdapter {
@@ -262,11 +251,11 @@ class B3ConcurrencyEpochTest {
         runBlocking { liveSource.emit("live-value") }
 
         assertTrue(
-            "H-6a: live replacement entry items must be received — value-blind remove must not evict it",
+            "Live replacement entry items must be received — value-blind remove must not evict it",
             liveItemLatch.await(3, TimeUnit.SECONDS),
         )
         assertTrue(
-            "H-6a: received items must contain 'live-value'",
+            "Received items must contain 'live-value'",
             receivedItems.any { it["v"] == "live-value" },
         )
 
@@ -274,12 +263,9 @@ class B3ConcurrencyEpochTest {
     }
 
     /**
-     * H-6b — value-aware remove in detach does not evict live replacement:
-     * When a consumer detaches from an old entry (by cancelling the job), the
-     * detach path must use remove(key, oldEntry) so a new entry for the same key
-     * is not evicted. Here we use a completing stream for c1 so the first entry
-     * is cleanly removed before c2 attaches — verifying that c2 gets a fresh entry
-     * and can receive items from source2 normally.
+     * Value-aware remove in detach does not evict a live replacement entry.
+     * Uses a completing stream for c1 so the first entry is cleanly removed before
+     * c2 attaches — verifying that c2 gets a fresh entry and receives items normally.
      */
     @Test(timeout = 5_000)
     fun `H-6b value-aware detach does not evict live replacement entry`() {
@@ -358,7 +344,7 @@ class B3ConcurrencyEpochTest {
         runBlocking { source2.emit("from-source2") }
 
         assertTrue(
-            "H-6b: consumer 2 on replacement entry must receive items — prior entry must not be evicted",
+            "Consumer 2 on replacement entry must receive items — prior entry must not be evicted",
             c2Latch.await(2, TimeUnit.SECONDS),
         )
         assertEquals("from-source2", c2Items[0])
@@ -367,17 +353,16 @@ class B3ConcurrencyEpochTest {
     }
 
     // =========================================================================
-    // H-7: BindingEntry.streamJobs thread safety (ConcurrentHashMap)
+    // BindingEntry.streamJobs thread safety (ConcurrentHashMap)
     // =========================================================================
 
     /**
-     * H-7 — registerStreamJob concurrent with cancelAllStreamJobs must not CME:
-     * With HashMap this is a ConcurrentModificationException. With ConcurrentHashMap it is safe.
+     * registerStreamJob concurrent with cancelAllStreamJobs must not CME.
+     * With HashMap this is a ConcurrentModificationException; ConcurrentHashMap is safe.
      * Also validates that _isLive is rechecked before put so a job added after close is
-     * immediately cancelled (defensive guard).
+     * immediately cancelled.
      *
      * Note: CME may not reproduce deterministically — this is a regression gate.
-     * Even if no CME fires today, ConcurrentHashMap must be in place.
      */
     @Test(timeout = 5_000)
     fun `H-7 concurrent registerStreamJob and cancelAllStreamJobs does not throw CME`() {
@@ -424,15 +409,15 @@ class B3ConcurrencyEpochTest {
         executor.shutdown()
 
         assertTrue(
-            "H-7: no ConcurrentModificationException or other error must occur. Got: ${errors.firstOrNull()?.javaClass?.simpleName}",
+            "No ConcurrentModificationException or other error must occur. Got: ${errors.firstOrNull()?.javaClass?.simpleName}",
             errors.isEmpty(),
         )
     }
 
     /**
-     * H-7b — registerStreamJob after binding closed: job added AFTER close must not stay live.
-     * With _isLive recheck: if binding is already closed when registerStreamJob is called,
-     * the job should be cancelled immediately (defensive).
+     * registerStreamJob after binding closed: job added after close must not stay live.
+     * If binding is already closed when registerStreamJob is called, the job is
+     * cancelled immediately via the _isLive recheck.
      */
     @Test
     fun `H-7b registerStreamJob after binding closed is immediately cancelled`() {
@@ -448,27 +433,24 @@ class B3ConcurrencyEpochTest {
         val job = SupervisorJob()
         entry.registerStreamJob("late-stream", job)
 
-        // After the fix: job added to a dead entry must be cancelled by the time
-        // cancelAllStreamJobs is called (or immediately on registerStreamJob).
+        // Job added to a dead entry must be cancelled by the time cancelAllStreamJobs is called.
         entry.cancelAllStreamJobs()
         // If job was added and cancelled, it is completed. If it was never added, also fine.
         jobCancelledOrNotAdded = job.isCancelled || !job.isActive
         assertTrue(
-            "H-7b: stream job registered after binding close must not remain active",
+            "Stream job registered after binding close must not remain active",
             jobCancelledOrNotAdded,
         )
     }
 
     // =========================================================================
-    // H-8: JS-to-native stream channels cleared on reconnect
+    // JS-to-native stream channels cleared on reconnect
     // =========================================================================
 
     /**
-     * H-8 — connectDispatcher must close and clear jsStreamChannels on reconnect:
-     * After an epoch swap, the prior-epoch jsStreamChannels and jsStreamEnds must be
+     * connectDispatcher must close and clear jsStreamChannels on reconnect.
+     * After an epoch swap, prior-epoch jsStreamChannels and jsStreamEnds must be
      * invalidated. Emitting on a prior-epoch channel must fail (channel closed).
-     *
-     * Mirrors loopbackTransport.ts:264 simulateReconnect behavior.
      */
     @Test(timeout = 5_000)
     fun `H-8 reconnect closes prior-epoch jsStreamChannels and jsStreamEnds`() {
@@ -488,25 +470,25 @@ class B3ConcurrencyEpochTest {
         val epoch2 = router.currentEpoch()
         assertEquals(2L, epoch2)
 
-        // H-8: after reconnect, jsStreamChannels and jsStreamEnds must be cleared.
+        // After reconnect, jsStreamChannels and jsStreamEnds must be cleared.
         assertFalse(
-            "H-8: jsStreamChannels must be cleared on reconnect — prior-epoch channel must not remain",
+            "jsStreamChannels must be cleared on reconnect — prior-epoch channel must not remain",
             router.jsStreamChannels.containsKey("js-stream-epoch1"),
         )
         assertFalse(
-            "H-8: jsStreamEnds must be cleared on reconnect — prior-epoch end deferred must not remain",
+            "jsStreamEnds must be cleared on reconnect — prior-epoch end deferred must not remain",
             router.jsStreamEnds.containsKey("js-stream-epoch1"),
         )
 
-        // H-8: the channel itself must be closed (tryConsume / trySend must fail)
+        // The channel itself must be closed (trySend must fail).
         assertTrue(
-            "H-8: prior-epoch channel must be closed after reconnect",
+            "Prior-epoch channel must be closed after reconnect",
             channel.isClosedForSend,
         )
     }
 
     /**
-     * H-8b — new epoch streams opened after reconnect are unaffected by prior cleanup.
+     * Streams registered after reconnect are not cleared by the prior-epoch cleanup.
      */
     @Test(timeout = 3_000)
     fun `H-8b streams registered after reconnect are not cleared by prior-epoch cleanup`() {
@@ -524,20 +506,18 @@ class B3ConcurrencyEpochTest {
         router.connectDispatcher(emptyMap(), fakeCallbacks()) // epoch 3
 
         assertFalse(
-            "H-8b: all jsStreamChannels must be cleared on every connectDispatcher call",
+            "All jsStreamChannels must be cleared on every connectDispatcher call",
             router.jsStreamChannels.containsKey("js-stream-epoch2"),
         )
     }
 
     // =========================================================================
-    // Epoch validation (D1): stale-epoch ops rejected before side-effects
+    // Epoch validation: stale-epoch ops rejected before side-effects
     // =========================================================================
 
     /**
-     * Epoch guard — stale invoke returns BRIDGE_NOT_READY:
-     * After connectDispatcher (epoch=1), an invoke with epochEnv=0 (prior epoch, non-zero
-     * epoch guard applies when epochEnv!=0 && epochEnv < current_epoch) should be accepted
-     * (epochEnv=0 means "pre-epoch" / JS hasn't connected yet, do not reject).
+     * Stale invoke returns BRIDGE_NOT_READY.
+     * epochEnv=0 is accepted (pre-connection sentinel, no guard).
      * An invoke with epochEnv=1 on epoch=2 MUST be rejected.
      */
     @Test(timeout = 5_000)
@@ -582,7 +562,7 @@ class B3ConcurrencyEpochTest {
     }
 
     /**
-     * Epoch guard — invoke with epochEnv=0 is NOT rejected (zero = pre-connection, no guard).
+     * epochEnv=0 is NOT rejected (pre-connection sentinel, no guard).
      */
     @Test(timeout = 5_000)
     fun `epoch guard - epochEnv=0 is NOT rejected (pre-connection or no epoch in envelope)`() {
@@ -615,8 +595,8 @@ class B3ConcurrencyEpochTest {
     }
 
     /**
-     * Epoch guard — stale stateWrite with epochEnv < current rejected, no state mutation.
-     * Must check epoch BEFORE side-effect (provide/unprovide ops and plain stateWrite).
+     * Stale stateWrite returns BRIDGE_NOT_READY with no state mutation.
+     * Epoch is checked BEFORE any side-effect.
      */
     @Test
     fun `epoch guard - stale stateWrite with epochEnv lt current epoch returns BRIDGE_NOT_READY`() {
@@ -653,7 +633,7 @@ class B3ConcurrencyEpochTest {
     }
 
     /**
-     * Epoch guard — stale provide op with epochEnv < current rejected before marking provided.
+     * Stale provide op is rejected before marking the contract as provided.
      */
     @Test
     fun `epoch guard - stale provide op with epochEnv lt current epoch returns BRIDGE_NOT_READY`() {
@@ -679,7 +659,7 @@ class B3ConcurrencyEpochTest {
     }
 
     /**
-     * Epoch guard — stale unprovide op with epochEnv < current rejected, jsProvidedContracts intact.
+     * Stale unprovide op is rejected; jsProvidedContracts must remain intact.
      */
     @Test
     fun `epoch guard - stale unprovide op does not corrupt jsProvidedContracts`() {
@@ -725,7 +705,7 @@ class B3ConcurrencyEpochTest {
     }
 
     /**
-     * Epoch guard — openStream with stale epochEnv < current epoch: onEnd called with BRIDGE_NOT_READY.
+     * openStream with stale epoch calls onEnd with BRIDGE_NOT_READY.
      */
     @Test(timeout = 3_000)
     fun `epoch guard - stale openStream with epochEnv lt current epoch calls onEnd with BRIDGE_NOT_READY`() {
@@ -764,30 +744,24 @@ class B3ConcurrencyEpochTest {
     // =========================================================================
 
     /**
-     * ParkBuffer — 64 successive timed-out waiters must not exhaust capacity:
-     * Today only unpark/failAll clear the list. 64 parked waiters all timing out
-     * leaves the list full, blocking the 65th. Fix: remove individual waiters on timeout.
-     *
-     * We simulate timeout by completing the deferred with false AFTER parking, then
-     * verifying a 65th park() still succeeds (returns non-null).
+     * 64 successive timed-out waiters must not exhaust capacity.
+     * Timed-out entries must be pruned individually so a 65th park() succeeds.
      */
     @Test
     fun `ParkBuffer 65th park accepted after 64 timed-out waiters are removed`() {
         val pb = ParkBuffer()
 
-        // Park 64 waiters for the same (contractId, scope) and complete them with false
-        // (simulating timeout) WITHOUT calling failAll (which would clear the whole list).
+        // Park 64 waiters and complete them with false (simulating timeout)
+        // WITHOUT calling failAll (which would clear the whole list).
         val deferreds = (1..64).map {
             val d = pb.park("timeout.contract", Scope.Global)!!
             d.complete(false) // simulate timeout
             d
         }
 
-        // Before fix: list still has 64 "dead" entries → 65th park() returns null.
-        // After fix: timed-out entries are pruned → 65th park() returns non-null.
         val sixtyfifth = pb.park("timeout.contract", Scope.Global)
         assertNotNull(
-            "ParkBuffer: 65th park() MUST succeed after 64 timed-out waiters are individually removed from the list",
+            "ParkBuffer: 65th park() MUST succeed after 64 timed-out waiters are individually removed",
             sixtyfifth,
         )
     }
@@ -809,7 +783,7 @@ class B3ConcurrencyEpochTest {
         // Should still be able to park
         val extra = pb.park("cap.contract", Scope.Global)
         assertNotNull(
-            "ParkBuffer: after ${ParkBuffer.MAX_PARKED} timed-out waiters, next park() must not return null",
+            "After ${ParkBuffer.MAX_PARKED} timed-out waiters, next park() must not return null",
             extra,
         )
     }

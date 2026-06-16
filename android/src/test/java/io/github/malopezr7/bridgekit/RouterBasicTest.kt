@@ -183,9 +183,9 @@ class RouterBasicTest {
         assertFalse(router.isProvided("no.contract", Scope.Global))
     }
 
-    // QW-5: isProvided must return true for JS-provided contracts after markJsProvided is called.
-    // Before the fix, markJsProvided() only tracked the ID for epoch cleanup but isProvided()
-    // only checked native bindings — so it always returned false for JS-provided contracts.
+    // isProvided must return true for JS-provided contracts after markJsProvided is called.
+    // Before the fix, isProvided() only checked native bindings, so it always returned false
+    // for JS-provided contracts.
     @Test
     fun `QW-5 isProvided returns true after markJsProvided for global scope`() {
         // No native binding registered — JS is the provider.
@@ -212,12 +212,10 @@ class RouterBasicTest {
         )
     }
 
-    // ---- ADR-5: isProvided via REAL JS-provide path (stateWrite) ----------------
+    // ---- isProvided via REAL JS-provide path (stateWrite) ----------------
 
-    // ADR-5: markJsProvided must be called by Router.stateWrite for contracts not
-    // owned by native. This test drives the REAL provide path — it does NOT call
-    // markJsProvided directly. A stateWrite envelope simulates what JS runtime sends
-    // when bk.provide() pushes initial state for a JS-provided contract.
+    // markJsProvided must be called by Router.stateWrite for contracts not owned by native.
+    // These tests drive the REAL provide path — they do NOT call markJsProvided directly.
     @Test
     fun `ADR-5 isProvided true after JS stateWrite for non-native-owned contract`() {
         val contractId = "test.js-provided"
@@ -241,7 +239,7 @@ class RouterBasicTest {
         // After the stateWrite arrives and there is no native binding, the Router
         // must call markJsProvided internally so isProvided returns true.
         assertTrue(
-            "isProvided must be true after JS stateWrite for a non-native-owned contract (ADR-5)",
+            "isProvided must be true after JS stateWrite for a non-native-owned contract",
             router.isProvided(contractId, Scope.Global)
         )
     }
@@ -263,7 +261,7 @@ class RouterBasicTest {
         // parkBuffer.unpark were called by stateWrite.
         val resolved = router.awaitProvided(contractId, Scope.Global, timeoutMs = 200)
         assertTrue(
-            "awaitProvided must resolve (not time out) after JS stateWrite (ADR-5)",
+            "awaitProvided must resolve (not time out) after JS stateWrite",
             resolved
         )
     }
@@ -292,16 +290,14 @@ class RouterBasicTest {
         )
     }
 
-    // ---- ADR-5b: stateless JS-provided contracts — explicit provide announcement ----
+    // ---- Stateless JS-provided contracts — explicit provide announcement ----
     //
     // A contract with NO state (only methods/streams) never emits stateWrite, so the
-    // old code path (markJsProvided inside stateWrite's !nativeOwns branch) never fired.
-    // The fix: JS sends {op:'provide'} through the stateWrite channel at provide() time.
-    // Router.stateWrite must branch on op and call markJsProvided + parkBuffer.unpark
-    // WITHOUT writing state, then return immediately.
+    // old provide path never fired. The fix: JS sends {op:'provide'} through the stateWrite
+    // channel at provide() time. Router.stateWrite branches on op and calls
+    // markJsProvided + parkBuffer.unpark WITHOUT writing state.
     //
-    // These tests MUST be RED before the Router branch exists and GREEN after.
-    // They drive the REAL announce path — they do NOT call markJsProvided() directly.
+    // These tests drive the REAL announce path — they do NOT call markJsProvided() directly.
 
     @Test
     fun `ADR-5b stateless JS contract provide envelope marks isProvided true`() {
@@ -325,7 +321,7 @@ class RouterBasicTest {
         router.stateWrite(env)
 
         assertTrue(
-            "isProvided must be true after op=provide envelope arrives via stateWrite (ADR-5b)",
+            "isProvided must be true after op=provide envelope arrives via stateWrite",
             router.isProvided(contractId, Scope.Global)
         )
     }
@@ -346,7 +342,7 @@ class RouterBasicTest {
         // awaitProvided must resolve immediately (unparked by the provide envelope).
         val resolved = router.awaitProvided(contractId, Scope.Global, timeoutMs = 200)
         assertTrue(
-            "awaitProvided must resolve after op=provide envelope (ADR-5b)",
+            "awaitProvided must resolve after op=provide envelope",
             resolved
         )
     }
@@ -395,7 +391,7 @@ class RouterBasicTest {
         ))
 
         assertFalse(
-            "isProvided must be false after op=unprovide envelope (ADR-5b)",
+            "isProvided must be false after op=unprovide envelope",
             router.isProvided(contractId, Scope.Global)
         )
     }

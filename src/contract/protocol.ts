@@ -1,6 +1,4 @@
-// ---------------------------------------------------------------------------
 // Wire protocol constants — shared vocabulary for all bridgekit layers.
-// ---------------------------------------------------------------------------
 
 export const ERROR_CODES = [
   'CONTRACT_NOT_PROVIDED',
@@ -47,9 +45,9 @@ export interface CallEnvelope {
   epoch: number;
   /**
    * The caller's contractHash (FNV-1a over the descriptor). Carried on the hot path
-   * so the receiver can detect wire skew (design Decision 2). The receiver caches the
-   * first hash it sees per contract and, in enforce mode, returns INCOMPATIBLE_CONTRACT
-   * when a later hash differs. Optional for backward/loopback compatibility.
+   * so the receiver can detect wire skew. The receiver caches the first hash it sees
+   * per contract and, in enforce mode, returns INCOMPATIBLE_CONTRACT when a later hash
+   * differs. Optional for backward/loopback compatibility.
    */
   contractHash?: string;
 }
@@ -58,7 +56,7 @@ export interface CallEnvelope {
 
 /**
  * Connect-time handshake payload. Carries per-contract hashes so the receiving
- * side learns the caller's contract identities up front (design Decision 2).
+ * side learns the caller's contract identities up front.
  * `memberHashes` rides the handshake (and the INCOMPATIBLE_CONTRACT error) for
  * diffing; the per-call envelope only re-sends `contractHash` for the hot path.
  */

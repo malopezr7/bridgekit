@@ -20,14 +20,14 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * W-2 (verify fix): StreamHub refcount and upstream-cancel tests.
+ * StreamHub refcount and upstream-cancel tests.
  *
  * Tests the StreamHub.detach() mechanism directly — the Router-level openStream/
  * closeStream path cancels consumer jobs, but the upstream termination on
  * last-consumer-unsubscribe is a StreamHub contract tested here at the unit level.
  *
- * W-5 (verify fix): Late subscriber with latestOnly=true receives the last-emitted
- * value immediately on attach (SharedFlow replay=1 semantics).
+ * Also covers: late subscriber with latestOnly=true receives the last-emitted value
+ * immediately on attach (SharedFlow replay=1 semantics).
  */
 class StreamHubTest {
 
@@ -40,10 +40,10 @@ class StreamHubTest {
         hub = StreamHub(engineScope)
     }
 
-    // ---- W-2: Last consumer unsubscribes → upstream provider stops ---------------
+    // ---- Last consumer unsubscribes → upstream provider stops ---------------
 
     /**
-     * W-2: Two consumers share a non-completing upstream (MutableSharedFlow source).
+     * Two consumers share a non-completing upstream (MutableSharedFlow source).
      * When both call StreamHub.detach(), refcount reaches 0 and the upstream Job is
      * cancelled — proven by the finally-block in the provider flow firing.
      *
@@ -131,11 +131,11 @@ class StreamHubTest {
         )
     }
 
-    // ---- W-5: Late subscriber with latestOnly=true receives last-emitted value ----
+    // ---- Late subscriber with latestOnly=true receives last-emitted value ----
 
     /**
-     * W-5: A late subscriber attaching to a latestOnly=true hub receives the last
-     * value already emitted, without waiting for the next upstream emission.
+     * A late subscriber attaching to a latestOnly=true hub receives the last value
+     * already emitted, without waiting for the next upstream emission.
      *
      * Validates the replay=1 path in StreamHub (replay = if (latestOnly || sticky) 1 else 0).
      * Uses a controlled MutableSharedFlow so the upstream does NOT complete before the late
@@ -233,14 +233,11 @@ class StreamHubTest {
         hub.cancelAll()
     }
 
-    // ---- ADR-6: Error terminal semantics -----------------------------------------
+    // ---- Error terminal semantics -----------------------------------------
 
     /**
-     * ADR-6: When the upstream flow throws, each consumer MUST receive an error terminal
+     * When the upstream flow throws, each consumer MUST receive an error terminal
      * (ok=false, code=PROVIDER_ERROR), NOT a normal OK terminal.
-     *
-     * FAILS TODAY: `.catch {}` in the upstream pump swallows the error, then collect
-     * returns normally, so HUB_TERMINAL_OK is emitted even when the upstream errored.
      */
     @Test
     fun `ADR-6 upstream error causes consumers to receive error terminal not OK`() {
@@ -311,16 +308,10 @@ class StreamHubTest {
     }
 
     /**
-     * ADR-6: After a normal terminal (upstream completes), the consumer Job MUST be
-     * completed (cancelled). In the broken code, `return@collect` does not stop collection
-     * on the hot MutableSharedFlow — the coroutine stays alive and the Job remains Active.
-     *
-     * FAILS TODAY: `return@collect` inside the lambda returns only from the collect lambda,
-     * not from the coroutine. The consumer Job stays Active indefinitely after the terminal,
-     * meaning a subsequent emission would still reach the consumer.
-     *
-     * The fix: call `consumerJob.cancel("terminal-ok")` inside the collect block on terminal.
-     * After fix: Job transitions to Cancelled (isCompleted=true) within a short grace period.
+     * After a normal terminal (upstream completes), the consumer Job MUST be completed.
+     * `return@collect` inside the collect lambda does not stop collection on a hot
+     * MutableSharedFlow — the fix is `consumerJob.cancel("terminal-ok")` on terminal,
+     * after which the Job transitions to Cancelled within a short grace period.
      */
     @Test
     fun `ADR-6 consumer job completes after upstream normal termination`() {
@@ -370,8 +361,7 @@ class StreamHubTest {
         Thread.sleep(200)
 
         assertTrue(
-            "Consumer job must be completed (cancelled) after terminal — it must not stay Active. " +
-            "FAILS TODAY because return@collect does not stop the hot SharedFlow collection.",
+            "Consumer job must be completed (cancelled) after terminal — must not stay Active",
             consumerJob.isCompleted
         )
     }
@@ -379,10 +369,9 @@ class StreamHubTest {
     // ---- Integration: cancelling the returned Job (Router.closeStream) detaches --------
 
     /**
-     * Verify-fix: Router.closeStream cancels the consumer Job returned by attach().
+     * Router.closeStream cancels the consumer Job returned by attach().
      * That cancellation must auto-detach the consumer (via invokeOnCompletion), so the
-     * sole consumer closing releases the upstream provider Flow. This proves the refcount
-     * lifecycle is wired through the Job — not only reachable via the standalone detach().
+     * sole consumer closing releases the upstream provider Flow.
      */
     @Test
     fun `cancelling the returned consumer job releases the upstream (closeStream path)`() {

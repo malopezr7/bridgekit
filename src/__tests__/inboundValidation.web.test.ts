@@ -1,10 +1,6 @@
-// Wave 1 (W1-5): JS inbound validation on decode (design Decision 3).
-//
-// W3 update: schema-first markers carry the result schema directly.
-// No generatedSchemas third-arg is needed — the descriptor already has `result`.
-// The runtime validates inbound native payloads against it. A payload
-// with a missing required field or a wrong-type field MUST be rejected with a
-// VALIDATION_FAILED error, not coerced or silently returned.
+// JS inbound validation on decode.
+// Schema-first markers carry the result schema directly; the runtime validates inbound
+// native payloads and rejects missing/wrong-type fields with VALIDATION_FAILED.
 
 import { describe, expect, test } from '@jest/globals';
 import { defineContract } from '../contract/contract';
@@ -47,7 +43,7 @@ function makeStubTransport(
   };
 }
 
-describe('W1-5 — JS inbound validation on decode', () => {
+describe('JS inbound validation on decode', () => {
   test('valid result passes through unchanged (async)', async () => {
     const transport = makeStubTransport(
       () => ({ ok: true, value: undefined }),

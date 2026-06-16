@@ -1,30 +1,21 @@
 // BridgeKit.swift
-// BridgeKit iOS engine — public entry point for the BridgeKit Swift core.
-//
-// Port of io/github/malopezr7/bridgekit/core/BridgeKit.kt
+// BridgeKit iOS engine — public entry point.
 //
 // Usage:
-//   // Provide a native contract:
 //   let binding = BridgeKit.default.provide(ConnectHostContract) { ConnectHostImpl() }
 //   binding.close()
 //
-//   // Consume a JS-provided contract (proxy returned IMMEDIATELY):
+//   // consume() returns the proxy immediately; readiness is deferred to per-call awaitDispatcher().
 //   let lia = BridgeKit.default.consume(LiaFeatureContract)
 //   let count = try await lia.getUnreadCount()
-//
-// PORT NOTE: `consume()` returns the proxy IMMEDIATELY (no awaitProvided at call site).
-// Readiness is deferred to per-call awaitDispatcher() in OutboundCallerImpl.
-// This matches the Kotlin behaviour after the "multi-second loader fix" in BridgeKit.kt.
 
 import Foundation
 
-// ---- BridgeKitApi protocol -------------------------------------------------
+// MARK: - BridgeKitApi protocol
 
 /// Minimal public API surface of BridgeKit.
-///
-/// Port: `interface BridgeKitApi` (Kotlin).
 public protocol BridgeKitApi: AnyObject {
-    // L7fix2: P/C unconstrained — generated contracts pass protocol existentials
+    // P/C are unconstrained — generated contracts pass protocol existentials
     // (`any FooContract`) which do not satisfy an `AnyObject` generic constraint.
     func provide<P, C>(
         _ definition: BridgeContractDefinition<P, C>,
@@ -43,16 +34,12 @@ public protocol BridgeKitApi: AnyObject {
     ) -> Bool
 }
 
-// ---- BridgeKitRuntime -------------------------------------------------------
+// MARK: - BridgeKitRuntime
 //
-// NOTE: Named BridgeKitRuntime (not BridgeKit) to avoid a C++ namespace
-// collision in the generated Swift/C++ bridge header. When the Swift module is
-// named "BridgeKit" and a Swift class is also named "BridgeKit", the generated
-// header produces `namespace BridgeKit { class BridgeKit }` which causes
-// ambiguous `_impl` lookups in the Nitro C++ bridge. Renaming the class to
-// BridgeKitRuntime resolves this with no semantic change.
-//
-// Port of io/github/malopezr7/bridgekit/core/BridgeKit.kt (Kotlin class BridgeKit).
+// Named BridgeKitRuntime (not BridgeKit) to avoid a C++ namespace collision in
+// the generated Swift/C++ bridge header: a Swift class named "BridgeKit" inside
+// a module named "BridgeKit" produces `namespace BridgeKit { class BridgeKit }`,
+// causing ambiguous `_impl` lookups in the Nitro C++ bridge.
 
 public final class BridgeKitRuntime: BridgeKitApi {
 
@@ -79,17 +66,13 @@ public final class BridgeKitRuntime: BridgeKitApi {
         BridgeKitNative.shared.delegate = router
     }
 
-    // ---- provide -----------------------------------------------------------
+    // MARK: - provide
 
     /// Register a native provider for [definition] in [scope].
     ///
     /// Returns a Binding handle; call binding.close() to de-register.
     /// If a binding already exists for (contract, scope), it is closed with
     /// .replacing and replaced.
-    ///
-    /// PORT NOTE: Kotlin has `eager: Boolean` param. Swift uses a trailing closure;
-    /// factory is called immediately (eager=true is the only sane default for Swift
-    /// since lazy involves threading concerns managed by the caller).
     public func provide<P, C>(
         _ definition: BridgeContractDefinition<P, C>,
         scope: Scope = .global,
@@ -98,24 +81,19 @@ public final class BridgeKitRuntime: BridgeKitApi {
         let impl = factory()
         let adapter = definition.inbound(impl)
 
-        // Type-erase the definition for BindingEntry storage.
         let anyDef = definition as AnyBridgeContractDefinition
         let entry = BindingEntry(definition: anyDef, scope: scope, adapter: adapter)
         router.registerBinding(entry)
 
-        // Return a Binding handle that proxies close() to the engine.
         let handle = BindingHandle(entry: entry, router: router)
         return handle
     }
 
-    // ---- consume -----------------------------------------------------------
+    // MARK: - consume
 
     /// Obtain a typed consumer proxy for [definition].
     ///
-    /// Returns the proxy IMMEDIATELY — readiness deferred to per-call awaitDispatcher.
-    ///
-    /// PORT NOTE: Kotlin consume() is suspend; Swift does NOT suspend here.
-    /// The JS readiness wait happens inside each OutboundCallerImpl method.
+    /// Returns the proxy immediately — readiness deferred to per-call awaitDispatcher.
     public func consume<P, C>(
         _ definition: BridgeContractDefinition<P, C>,
         scope: Scope = .global
@@ -130,7 +108,7 @@ public final class BridgeKitRuntime: BridgeKitApi {
         return definition.outbound(caller)
     }
 
-    // ---- isProvided --------------------------------------------------------
+    // MARK: - isProvided
 
     public func isProvided<P, C>(
         _ definition: BridgeContractDefinition<P, C>,
@@ -148,12 +126,12 @@ public final class BridgeKitRuntime: BridgeKitApi {
         await router.awaitProvided(contractId: definition.id, scope: scope, timeoutMs: timeoutMs)
     }
 
-    // ---- dump --------------------------------------------------------------
+    // MARK: - dump
 
     public func dump() -> String { router.dump() }
 }
 
-// ---- BindingHandle (concrete Binding impl) ---------------------------------
+// MARK: - BindingHandle
 
 private final class BindingHandle: Binding {
     private let entry: BindingEntry
@@ -175,7 +153,6 @@ private final class BindingHandle: Binding {
     }
 }
 
-// ---- Router: BridgeKitNativeDelegate conformance ---------------------------
+// MARK: - Router: BridgeKitNativeDelegate conformance
 
-// Wire Router as the delegate implementation so BridgeKitNative.shared.delegate = router.
 extension Router: BridgeKitNativeDelegate {}

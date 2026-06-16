@@ -1,13 +1,7 @@
-// ---------------------------------------------------------------------------
-// Regression H-11: useProvideBridge must re-register when scope changes.
-//
-// Scenarios:
-//   H11-A: opts.scope changes (alpha -> beta) — scopeA provider closed, scopeB registered.
-//   H11-B: ancestor BridgeScopeProvider switches feature — re-registers in new scope.
-//   H11-C: impl-ref capture — impl captured at registration time; concurrent render
-//           that mutates implRef.current before provide() runs cannot expose the
-//           uncommitted impl to callers.
-// ---------------------------------------------------------------------------
+// Regression: useProvideBridge must re-register when scope changes.
+// A: opts.scope change (alpha→beta) — old provider closed, new one registered.
+// B: ancestor BridgeScopeProvider switches feature — re-registers in new scope.
+// C: impl captured at effect time; concurrent render cannot expose uncommitted impl.
 
 import { afterEach, describe, expect, test } from '@jest/globals';
 import { act, cleanup, renderHook } from '@testing-library/react';
@@ -18,27 +12,15 @@ import type { BridgeScope } from '../contract/protocol';
 import { BridgeScopeProvider, useProvideBridge } from '../react/hooks';
 import { getDefaultBridgeKit } from '../runtime/defaultInstance';
 
-// ---------------------------------------------------------------------------
-// Contracts
-// ---------------------------------------------------------------------------
-
 const C = defineContract('hooks.provide.scope.change.h11', {
   methods: { ping: Async(t.string()) },
 });
-
-// ---------------------------------------------------------------------------
-// Cleanup
-// ---------------------------------------------------------------------------
 
 afterEach(() => {
   cleanup();
 });
 
-// ---------------------------------------------------------------------------
-// H11-A: opts.scope prop change (alpha -> beta)
-// ---------------------------------------------------------------------------
-
-describe('H-11-A: useProvideBridge — scope prop change re-registers', () => {
+describe('useProvideBridge — scope prop change re-registers', () => {
   test('switching opts.scope from alpha to beta closes alpha, opens beta', async () => {
     const bk = getDefaultBridgeKit();
     const scopeAlpha: BridgeScope = { kind: 'feature', feature: 'h11-alpha' };
@@ -51,16 +33,13 @@ describe('H-11-A: useProvideBridge — scope prop change re-registers', () => {
       { initialProps: { scope: scopeAlpha } },
     );
 
-    // After mount: alpha scope should be provided
     expect(bk.registry.isProvided(C.descriptor.id, scopeAlpha)).toBe(true);
     expect(bk.registry.isProvided(C.descriptor.id, scopeBeta)).toBe(false);
 
-    // Change scope to beta
     await act(async () => {
       rerender({ scope: scopeBeta });
     });
 
-    // After scope change: alpha closed, beta open
     expect(bk.registry.isProvided(C.descriptor.id, scopeAlpha)).toBe(false);
     expect(bk.registry.isProvided(C.descriptor.id, scopeBeta)).toBe(true);
 
@@ -68,11 +47,7 @@ describe('H-11-A: useProvideBridge — scope prop change re-registers', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// H11-B: ancestor BridgeScopeProvider switches feature
-// ---------------------------------------------------------------------------
-
-describe('H-11-B: useProvideBridge — ancestor scope change re-registers', () => {
+describe('useProvideBridge — ancestor scope change re-registers', () => {
   test('parent BridgeScopeProvider feature change re-registers in new scope', async () => {
     const bk = getDefaultBridgeKit();
     const scopeA: BridgeScope = { kind: 'feature', feature: 'h11-parent-a' };
@@ -121,21 +96,13 @@ describe('H-11-B: useProvideBridge — ancestor scope change re-registers', () =
   });
 });
 
-// ---------------------------------------------------------------------------
-// H11-C: impl-ref capture — registration sees committed impl
-// ---------------------------------------------------------------------------
-
-describe('H-11-C: impl-ref capture at registration time', () => {
+describe('impl-ref capture at registration time', () => {
   test('impl used during registration is the one provided at that render, not a future render', async () => {
     const bk = getDefaultBridgeKit();
 
-    // Two different impls to distinguish which one was registered
     const implV1 = { ping: async () => 'v1' };
     const implV2 = { ping: async () => 'v2' };
 
-    // We'll capture which impl was visible to ping() calls after scope changes
-    // The key: when scope changes, the NEWLY registered impl must be the one
-    // that was provided at the render that triggered the scope change.
     const scopeX: BridgeScope = { kind: 'feature', feature: 'h11-impl-x' };
     const scopeY: BridgeScope = { kind: 'feature', feature: 'h11-impl-y' };
 
@@ -145,20 +112,16 @@ describe('H-11-C: impl-ref capture at registration time', () => {
       { initialProps: { scope: scopeX, impl: implV1 } },
     );
 
-    // v1 registered in scopeX
     const entryX = bk.registry.resolve(C.descriptor.id, scopeX);
     expect(entryX?.binding.isLive).toBe(true);
 
-    // Change scope AND impl simultaneously — simulates concurrent render
     await act(async () => {
       rerender({ scope: scopeY, impl: implV2 });
     });
 
-    // scopeX closed, scopeY open with v2
     expect(bk.registry.isProvided(C.descriptor.id, scopeX)).toBe(false);
     expect(bk.registry.isProvided(C.descriptor.id, scopeY)).toBe(true);
 
-    // The proxy for scopeY must delegate to the current impl (v2 at this point)
     const bridge = bk.bridge(C, { scope: scopeY });
     const result = await bridge.ping();
     expect(result).toBe('v2');

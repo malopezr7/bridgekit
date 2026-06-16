@@ -11,15 +11,14 @@ import org.junit.Assert.assertNotNull
 import org.junit.Test
 
 /**
- * W1-4: wire hash exchange + INCOMPATIBLE_CONTRACT skew detection (design Decision 2).
+ * Wire hash exchange + INCOMPATIBLE_CONTRACT skew detection.
  *
  * The caller's contractHash rides every call envelope. When a native binding exists,
  * the Router compares its generated contractHash against the envelope hash.
  *
- * Three-stage rollout: the enforcement is gated behind `strictHashCheck` (default
- * false = observe mode) so the live demo never hard-breaks before device verification.
- * These tests drive the enforce path explicitly (strictHashCheck = true) to prove the
- * INCOMPATIBLE_CONTRACT path exists and is correct, and prove observe mode never rejects.
+ * Enforcement is gated behind `strictHashCheck` (default false = observe mode).
+ * These tests drive the enforce path explicitly (strictHashCheck = true) to prove
+ * the INCOMPATIBLE_CONTRACT path exists and is correct, and that observe mode never rejects.
  */
 class HashSkewTest {
 

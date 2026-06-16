@@ -1,16 +1,5 @@
 // BridgeValue.swift
-// Swift port of io/github/malopezr7/bridgekit/runtime/BridgeValue.kt
-//
 // Availability wrapper for BridgeKit state values and consume proxies.
-// Invariant INV-6: EXACTLY 4 cases — no 5th case permitted (H-13 sends
-// {"status":"gone"} WITHOUT "v" key via existing Replacing/Unprovided paths;
-// a 5th case would break the JS-side stale branch).
-//
-// PORT NOTE: Kotlin uses `sealed class` with `data class` sub-types and `out T`
-// covariant generics. Swift enums with associated values are the idiomatic
-// equivalent. Swift does not support declaration-site covariance on generic
-// enums, but call-site usage is identical for the consumer patterns used here
-// (read-only extraction via valueOrNil()). No behavioral difference for L1 scope.
 
 /// Availability wrapper for BridgeKit state values and consume proxies.
 ///
@@ -22,8 +11,6 @@
 ///   arrives, or to ``unprovided`` after the grace window expires.
 /// - ``unprovided(_:)``: Provider existed but was closed/disconnected; `lastKnown`
 ///   carries the last observed value for graceful degradation.
-///
-/// Port: ``BridgeValue<T>`` (Kotlin sealed class) → ``BridgeValue<T>`` (Swift enum).
 public enum BridgeValue<T> {
     /// A live provider is present.
     case available(T)
@@ -36,8 +23,6 @@ public enum BridgeValue<T> {
 
     /// Unwrap the value regardless of availability status.
     /// Returns `nil` for ``replacing(_:)`` / ``unprovided(_:)`` when no prior value exists.
-    ///
-    /// Port: ``valueOrNull()`` (Kotlin) → ``valueOrNil()`` (Swift naming convention).
     public func valueOrNil() -> T? {
         switch self {
         case .available(let value):   return value

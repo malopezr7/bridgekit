@@ -1,28 +1,15 @@
 // BridgeContractDefinition.swift
 // BridgeKit iOS runtime — generated contract definition base type.
 //
-// Port of io/github/malopezr7/bridgekit/runtime/BridgeContractDefinition.kt
-//
-// This file lives in the runtime ring so generated code (`import BridgeKit`) can
-// reference it without depending on engine internals.
-//
-// PORT NOTE: Kotlin uses an abstract class with generics and a sealed companion.
-// Swift uses an open class. Generics are erased to AnyObject at the engine boundary;
+// Lives in the runtime ring so generated code can reference it without depending
+// on engine internals. Generics are erased to AnyObject at the engine boundary;
 // generated subclasses re-specialize.
 
 import Foundation
 
-// ---- Marker annotation (Swift equivalent) ----------------------------------
-
-// Kotlin: `@BridgeKitGeneratedApiV1` — Swift has no equivalent runtime annotation,
-// but we document the freeze contract in comments. Generated code references this
-// class by name in the `import BridgeKit` surface.
-
-// ---- OutboundCaller protocol -----------------------------------------------
+// MARK: - OutboundCaller protocol
 
 /// Injected by the engine into the generated outbound proxy.
-///
-/// Port: `interface OutboundCaller` (Kotlin).
 public protocol OutboundCaller: AnyObject {
     /// Async call into a JS-provided contract method.
     func invoke(member: String, payload: [String: Any?]?) async throws -> Any?
@@ -40,22 +27,16 @@ public protocol OutboundCaller: AnyObject {
     func state(member: String) -> AsyncStream<BridgeValue<Any?>>
 }
 
-// ---- BridgeContractDefinition ----------------------------------------------
+// MARK: - BridgeContractDefinition
 
 /// Base class for generated contract definitions.
 ///
 /// [P] — provider type (native-side implementation).
 /// [C] — consumer type (typed proxy returned to callers).
 ///
-/// Port: `abstract class BridgeContractDefinition<P, C>` (Kotlin).
-///
-/// L7fix2: P/C are UNCONSTRAINED (matching the Kotlin reference `<P, C>`). They
-/// were briefly `<P: AnyObject, C: AnyObject>`, but generated contracts use
-/// class-bound *protocol existentials* (`any BridgekitDemoHost`) as P/C, and a
-/// Swift existential does not satisfy an `AnyObject` generic constraint even when
-/// the protocol itself is `: AnyObject`. The engine never relies on P/C being a
-/// class (it type-erases via AnyBridgeContractDefinition), so the constraint was
-/// purely over-restrictive and blocked the generated contracts from compiling.
+/// P/C are unconstrained: generated contracts pass protocol existentials (`any BridgekitDemoHost`)
+/// which do not satisfy an `AnyObject` constraint even when the protocol is `: AnyObject`.
+/// The engine type-erases via AnyBridgeContractDefinition and never needs P/C to be a class.
 open class BridgeContractDefinition<P, C> {
 
     /// Stable reverse-DNS contract identifier.
@@ -86,13 +67,9 @@ open class BridgeContractDefinition<P, C> {
     }
 }
 
-// ---- Type-erased bridge for engine internals --------------------------------
+// MARK: - AnyBridgeContractDefinition
 
-/// Engine-internal wrapper that erases P/C generics for storage.
-///
-/// PORT NOTE: Kotlin BindingEntry holds `BridgeContractDefinition<*, *>` (star projection).
-/// Swift cannot directly erase open class generics at the variable site; we use a
-/// protocol wrapper instead so BindingEntry doesn't need to know P/C.
+/// Engine-internal protocol that erases P/C generics for storage.
 public protocol AnyBridgeContractDefinition: AnyObject {
     var id: String { get }
     var contractHash: String { get }
@@ -100,7 +77,3 @@ public protocol AnyBridgeContractDefinition: AnyObject {
 }
 
 extension BridgeContractDefinition: AnyBridgeContractDefinition {}
-
-// Convenience typealiases used by BindingEntry (engine-internal).
-// PORT NOTE: In Kotlin BindingEntry held `BridgeContractDefinition<Any, Any>`.
-// Swift requires concrete type args; we wrap via the protocol above.

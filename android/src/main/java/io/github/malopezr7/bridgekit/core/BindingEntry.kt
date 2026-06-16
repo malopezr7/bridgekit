@@ -27,7 +27,7 @@ internal class BindingEntry(
     private var _isLive = true
     override val isLive: Boolean get() = _isLive
 
-    // H-7: ConcurrentHashMap — safe for concurrent put (JS/Nitro thread) vs
+    // ConcurrentHashMap — safe for concurrent put (JS/Nitro thread) vs
     // cancelAllStreamJobs (engine thread). Prevents ConcurrentModificationException.
     private val streamJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
 
@@ -38,7 +38,7 @@ internal class BindingEntry(
     }
 
     fun registerStreamJob(streamId: String, job: Job) {
-        // H-7: recheck _isLive after acquiring the slot. If the binding was closed between
+        // Recheck _isLive after acquiring the slot. If the binding was closed between
         // the caller's check and this put, cancel the job immediately so it doesn't linger.
         streamJobs[streamId] = job
         if (!_isLive) {

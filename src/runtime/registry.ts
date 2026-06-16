@@ -1,13 +1,11 @@
-// ---------------------------------------------------------------------------
 // Registry — bindings keyed by (contractId, scopeKey).
 // Resolution walks instance → feature → global.
-// ---------------------------------------------------------------------------
 
 import type { BridgeContract } from '../contract/contract';
 import type { BridgeScope } from '../contract/protocol';
 import { diagnostics } from './diagnostics';
 
-// ---- __DEV__ guard ----------------------------------------------------------
+// ---- __DEV__ guard --------------------------------------------------------
 
 function isDev(): boolean {
   try {
@@ -18,7 +16,7 @@ function isDev(): boolean {
   return process.env.NODE_ENV !== 'production';
 }
 
-// ---- scope serialization ---------------------------------------------------
+// ---- scope serialization --------------------------------------------------
 
 export function serializeScope(scope: BridgeScope): string {
   switch (scope.kind) {
@@ -76,16 +74,13 @@ const DEFAULT_GRACE_WINDOW_MS = 1500;
 export class Registry {
   private readonly _entries = new Map<string, RegistryEntry>();
   private readonly _readinessWaiters = new Map<string, ReadinessWaiter[]>();
-  // H-10: registry-level state listeners keyed contractId|scopeKey|stateKey.
-  // Surviving across provider swaps — never cleared by an entry close.
+  // Registry-level state listeners survive provider swaps — never cleared by an entry close.
   private readonly _stateListeners = new Map<string, Set<(value: unknown) => void>>();
 
-  /** Composite key for a (contractId, scopeKey) pair */
   private _key(contractId: string, scopeKey: string): string {
     return `${contractId}|${scopeKey}`;
   }
 
-  /** H-10: composite key for a registry-level state listener */
   private _stateKey(contractId: string, scopeKey: string, key: string): string {
     return `${contractId}|${scopeKey}|${key}`;
   }
@@ -111,10 +106,8 @@ export class Registry {
           `[bridgekit] provide(${contractId}, ${scopeKey}): superseding existing binding.`,
         );
       }
-      // Close the old one silently (replacing — its handle becomes no-op)
       existing.binding.isLive = false;
       existing.graceTimer !== null && clearTimeout(existing.graceTimer);
-      // Resolve pending callers so they retry against new binding
       const pending = existing.pendingCallers.splice(0);
       for (const w of pending) {
         w.resolve();
@@ -142,7 +135,6 @@ export class Registry {
       setState: (key: string, value: unknown) => {
         if (!binding.isLive) return;
         entry.state.set(key, value);
-        // H-10: notify registry-level listeners (survive provider swap)
         const sk = this._stateKey(contractId, scopeKey, key);
         const listeners = this._stateListeners.get(sk);
         if (listeners) {
@@ -157,18 +149,14 @@ export class Registry {
         this._entries.delete(entryKey);
 
         if (reason === 'replacing') {
-          // Grace window: pendingCallers is never populated before this fires
-          // (no callers can arrive during the synchronous close() call), so
-          // the loop below is intentionally a no-op — kept for safety.
           const graceEntry = entry;
           const graceTimer = setTimeout(() => {
-            // pendingCallers is always empty here (dead code path — kept for safety).
             const pending = graceEntry.pendingCallers.splice(0);
             for (const w of pending) {
               w.reject(new Error('CONTRACT_NOT_PROVIDED'));
             }
           }, DEFAULT_GRACE_WINDOW_MS);
-          // 5.8: unref so the timer does not prevent Node.js process exit / test runner from terminating.
+          // unref so the timer does not block Node.js process exit / test runner.
           (graceTimer as unknown as { unref?: () => void }).unref?.();
           entry.graceTimer = graceTimer;
         } else {
@@ -177,11 +165,10 @@ export class Registry {
           for (const w of pending) {
             w.reject(new Error('CONTRACT_NOT_PROVIDED'));
           }
-          // H-10: notify registry-level state listeners of unprovided
           for (const [sk, listeners] of this._stateListeners) {
             if (sk.startsWith(`${contractId}|${scopeKey}|`)) {
               for (const cb of listeners) {
-                cb(undefined); // undefined signals unprovided
+                cb(undefined);
               }
             }
           }
@@ -285,8 +272,7 @@ export class Registry {
   }
 
   /** Subscribe to state changes for a (contractId, scope, key). Returns unsubscribe.
-   * H-10: listeners are stored at registry level (keyed contractId|scopeKey|key) so
-   * they survive provider swaps — a new provider binding notifies the same listener set.
+   * Listeners are stored at registry level so they survive provider swaps.
    */
   subscribeState(
     contractId: string,
@@ -317,7 +303,6 @@ export class Registry {
     for (const [k, entry] of this._entries) {
       if (k === this._key(contractId, scopeKey)) {
         entry.state.set(key, value);
-        // H-10: notify registry-level listeners
         const sk = this._stateKey(contractId, scopeKey, key);
         const listeners = this._stateListeners.get(sk);
         if (listeners) {
@@ -361,8 +346,6 @@ export class Registry {
   }
 }
 
-// ---- BridgeStreamSource helpers -------------------------------------------
-
 import type { BridgeStreamSource } from '../contract/contract';
 
 /**
@@ -394,7 +377,6 @@ export function streamSource<T>(
   return {
     subscribe(cb: (v: T) => void): () => void {
       allValueListeners.add(cb);
-      // Start the factory on first subscriber
       if (teardown === null && allValueListeners.size === 1) {
         teardown = factory(emitValue, emitEnd);
       }
@@ -449,7 +431,6 @@ export function streamSource<T>(
           done = true;
           allValueListeners.delete(valueCb);
           allEndListeners.delete(endCb);
-          // Call teardown if this was the last listener (mirrors subscribe() cleanup)
           if (allValueListeners.size === 0 && teardown) {
             teardown();
             teardown = null;

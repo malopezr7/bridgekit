@@ -1,30 +1,9 @@
 // StreamHub.swift
 // BridgeKit iOS engine — multiplexes one provider AsyncStream across N consumers.
-//
-// Port of io/github/malopezr7/bridgekit/core/StreamHub.kt
-//
-// DESIGN (Decision 2): AsyncStream is single-consumer; Kotlin MutableSharedFlow is
-// multi-consumer. Port = hand-written multicast: HubEntry holds a dictionary of
-// consumer continuations (UUID → onNext closure) guarded by the engine lock.
-// One upstream Task runs `for try await v in upstream` and fans out to all consumers.
-//
-// H-5: terminalResult stored BEFORE fan-out. A late consumer that finds terminalResult
-// non-nil delivers the terminal INLINE (not via replay) — Swift delivers synchronously
-// without needing an UNDISPATCHED watcher.
-//
-// H-6: identity-checked remove: `if hubs[key] === entry { removeValue }`.
-//
-// H-7 lives in Router.openStream (recheck isLive after streamJobs insert).
-//
-// INV-3 (H-5), INV-4 (H-6) implemented here.
-//
-// PORT NOTE: Kotlin uses MutableSharedFlow for fan-out + CompletableDeferred for
-// terminal. Swift equivalent: per-consumer closures dictionary + terminalResult?
-// stored under the engine lock. No additional concurrency primitives needed.
 
 import Foundation
 
-// ---- Hub sentinels ---------------------------------------------------------
+// MARK: - Hub sentinels
 
 /// Sentinel: upstream completed normally.
 internal final class HubTerminalOK {}
@@ -41,7 +20,7 @@ internal enum HubTerminal {
     case error(String)
 }
 
-// ---- StreamHub -------------------------------------------------------------
+// MARK: - StreamHub
 
 internal final class StreamHub {
 
@@ -62,7 +41,7 @@ internal final class StreamHub {
 
         var upstreamTask: Task<Void, Never>? = nil
 
-        /// INV-3 (H-5): set BEFORE fan-out. Late consumer checks this under the lock.
+        /// Set BEFORE fan-out. Late consumer checks this under the lock.
         var terminalResult: HubTerminal? = nil
 
         var replayLatest: Any?? = nil  // nil = no replay; .some(nil) = last was nil
@@ -70,25 +49,17 @@ internal final class StreamHub {
     }
 
     // All hub state is guarded by the engine NSRecursiveLock passed at init.
-    // PORT NOTE: Kotlin used ConcurrentHashMap — in Swift the engine lock replaces it.
     private var hubs: [HubKey: HubEntry] = [:]
 
-    /// Weak reference to the engine lock. StreamHub borrows the engine lock for all
-    /// mutations so the lock hierarchy is: engineLock → streamHub state.
-    /// This is safe because StreamHub is only ever accessed from within the engine lock
-    /// on sync paths, and the upstream Task fans out OUTSIDE the lock.
+    /// Borrows the engine lock for all mutations (lock hierarchy: engineLock → streamHub state).
+    /// Upstream Tasks fan out OUTSIDE the lock.
     private unowned(unsafe) let lock: NSRecursiveLock
 
-    // PORT NOTE: Kotlin used `CoroutineScope(engineScope)`. Swift uses unstructured
-    // Tasks that inherit no scope. Tasks are stored in HubEntry.upstreamTask and
-    // cancelled explicitly on cancelAll() / last-consumer-detach.
     internal init(lock: NSRecursiveLock) {
         self.lock = lock
     }
 
-    // -------------------------------------------------------------------------
-    // attach
-    // -------------------------------------------------------------------------
+    // MARK: - attach
 
     /// Attach a consumer to the shared stream for (contractId, member, scope, paramsHash).
     ///
@@ -130,7 +101,6 @@ internal final class StreamHub {
         // Register consumer before starting upstream to avoid missing early emissions.
         entry.consumers[consumerID] = { [weak entry] value in
             // Called OUTSIDE the engine lock by the upstream Task.
-            // Check if terminal already fired for this consumer (atomic gate via entry state).
             guard let entry = entry else { return }
             onNext(["v": value])
             // Store replay if needed
@@ -141,18 +111,13 @@ internal final class StreamHub {
         }
         entry.onEndCallbacks[consumerID] = onEnd
 
-        // INV-3 (H-5): if upstream already terminated, deliver terminal inline to this
-        // late consumer — no replay needed; terminal stored in terminalResult.
+        // If upstream already terminated, deliver the terminal inline to this late consumer.
+        // Schedule as an async Task to avoid reentrancy (caller holds the lock).
         if let terminal = entry.terminalResult {
             entry.terminalFiredFor.insert(consumerID)
-            // Deliver inline (caller is under lock; we schedule a Task to call onEnd
-            // off-lock to avoid reentrancy).
-            // PORT NOTE: Kotlin UNDISPATCHED watcher — Swift equivalent: async Task that
-            // starts immediately. We release the lock by scheduling as async Task.
             let terminalEnv = Self.terminalEnv(terminal, contractId: contractId, member: member, scope: scope)
             entry.consumers.removeValue(forKey: consumerID)
             entry.onEndCallbacks.removeValue(forKey: consumerID)
-            // Return a task that immediately fires onEnd.
             return Task {
                 onEnd(terminalEnv)
             }
@@ -191,8 +156,7 @@ internal final class StreamHub {
                             cb(value)
                         }
                     }
-                    // Normal completion.
-                    // INV-3 (H-5): set terminalResult BEFORE fan-out.
+                    // Normal completion — set terminalResult BEFORE fan-out.
                     self.lock.lock()
                     if let e = self.hubs[capturedKey] {
                         e.terminalResult = .ok
@@ -208,27 +172,24 @@ internal final class StreamHub {
                         endSnapshot = []
                         firedSnapshot = []
                     }
-                    // INV-4 (H-6): identity-checked remove.
+                    // Identity-checked remove.
                     if let e = self.hubs[capturedKey], self.hubs[capturedKey] === e {
                         self.hubs.removeValue(forKey: capturedKey)
                     }
                     self.lock.unlock()
-                    // Fan out terminal OUTSIDE lock.
                     let termEnv: [String: Any?] = ["ok": true, "value": nil]
                     for (id, cb) in endSnapshot where !firedSnapshot.contains(id) {
                         cb(termEnv)
                     }
                 } catch is CancellationError {
-                    // Cooperative cancel — no terminal emitted. Just clean up.
+                    // Cooperative cancel — no terminal emitted.
                     self.lock.lock()
-                    // INV-4 (H-6): identity-checked remove.
                     if let e = self.hubs[capturedKey], self.hubs[capturedKey] === e {
                         self.hubs.removeValue(forKey: capturedKey)
                     }
                     self.lock.unlock()
                 } catch {
-                    // Upstream error.
-                    // INV-3 (H-5): set terminalResult BEFORE fan-out.
+                    // Upstream error — set terminalResult BEFORE fan-out.
                     let msg = error.localizedDescription
                     self.lock.lock()
                     if let e = self.hubs[capturedKey] {
@@ -245,7 +206,7 @@ internal final class StreamHub {
                         endSnapshot = []
                         firedSnapshot = []
                     }
-                    // INV-4 (H-6): identity-checked remove.
+                    // Identity-checked remove.
                     if let e = self.hubs[capturedKey], self.hubs[capturedKey] === e {
                         self.hubs.removeValue(forKey: capturedKey)
                     }
@@ -270,20 +231,14 @@ internal final class StreamHub {
         let capturedKey = key
         let consumerTask = Task<Void, Never> {
             await withTaskCancellationHandler {
-                // Body: suspend until cancelled. The real work happens via the
-                // upstream Task's fan-out into the onNext closure registered above.
-                // PORT NOTE: Kotlin consumerJob.invokeOnCompletion { detach() }.
-                // Swift: use withTaskCancellationHandler to detach on cancel.
                 try? await Task.sleep(nanoseconds: .max)
             } onCancel: {
                 self.lock.lock()
                 if let e = self.hubs[capturedKey] {
                     e.consumers.removeValue(forKey: consumerID)
                     e.onEndCallbacks.removeValue(forKey: consumerID)
-                    // If last consumer, cancel upstream.
                     if e.consumers.isEmpty {
                         e.upstreamTask?.cancel()
-                        // INV-4 (H-6): identity-checked remove.
                         if self.hubs[capturedKey] === e {
                             self.hubs.removeValue(forKey: capturedKey)
                         }
@@ -296,12 +251,9 @@ internal final class StreamHub {
         return consumerTask
     }
 
-    // -------------------------------------------------------------------------
-    // detach (explicit, for Hub-internal use)
-    // -------------------------------------------------------------------------
+    // MARK: - detach
 
-    /// Decrement refcount and cancel upstream when the last consumer leaves.
-    /// Called from consumerTask.onCancel handler above.
+    /// Cancel upstream when the last consumer leaves.
     internal func detach(contractId: String, member: String, scope: Scope, paramsHash: Int64, consumerID: UUID) {
         let key = HubKey(
             contractId: contractId,
@@ -314,16 +266,13 @@ internal final class StreamHub {
         entry.onEndCallbacks.removeValue(forKey: consumerID)
         if entry.consumers.isEmpty {
             entry.upstreamTask?.cancel()
-            // INV-4 (H-6): identity-checked remove.
             if hubs[key] === entry { hubs.removeValue(forKey: key) }
         }
     }
 
-    // -------------------------------------------------------------------------
-    // cancelAll (epoch swap)
-    // -------------------------------------------------------------------------
+    // MARK: - cancelAll
 
-    /// Cancel all active hub entries — called on epoch swap (INV-2 companion).
+    /// Cancel all active hub entries — called on epoch swap.
     internal func cancelAll() {
         for (_, entry) in hubs {
             entry.upstreamTask?.cancel()
@@ -331,9 +280,7 @@ internal final class StreamHub {
         hubs.removeAll()
     }
 
-    // -------------------------------------------------------------------------
-    // Helpers
-    // -------------------------------------------------------------------------
+    // MARK: - Helpers
 
     private static func terminalEnv(
         _ terminal: HubTerminal,
@@ -357,12 +304,10 @@ internal final class StreamHub {
     }
 }
 
-// ---- AsyncStream.map extension (INV-9 support for L5 generated outbound) ---
+// MARK: - AsyncStream.map extension
 
-// PORT NOTE: The L5 generated Swift outbound client calls `.map { }` on AsyncStream
-// values. `AsyncStream.map` is NOT in the Swift stdlib. This extension provides it.
-// Placed here (engine layer) so the runtime and generated code can use it without
-// importing NitroModules.
+// `AsyncStream.map` is not in the Swift stdlib. Placed here so the engine and
+// generated code can use it without importing NitroModules.
 extension AsyncStream {
     /// Returns a new AsyncStream whose elements are the results of applying the
     /// given transform to each element of this stream.
