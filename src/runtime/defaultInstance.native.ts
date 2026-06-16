@@ -4,7 +4,6 @@
 // Metro resolves this file instead of defaultInstance.ts for RN bundles.
 // ---------------------------------------------------------------------------
 
-import { Platform } from 'react-native';
 import { BridgeKitJs } from './bridgekit';
 import { NitroBridgeTransport } from './nitroTransport';
 
@@ -47,10 +46,6 @@ export function getDefaultBridgeKit(): BridgeKitJs {
     }
     _default = existing.instance;
     return _default;
-  }
-
-  if (Platform.OS === 'ios') {
-    throw new Error('BridgeKit: iOS is not yet implemented. Android-only for now.');
   }
 
   const transport = new NitroBridgeTransport();

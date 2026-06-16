@@ -48,7 +48,15 @@ public protocol OutboundCaller: AnyObject {
 /// [C] — consumer type (typed proxy returned to callers).
 ///
 /// Port: `abstract class BridgeContractDefinition<P, C>` (Kotlin).
-open class BridgeContractDefinition<P: AnyObject, C: AnyObject> {
+///
+/// L7fix2: P/C are UNCONSTRAINED (matching the Kotlin reference `<P, C>`). They
+/// were briefly `<P: AnyObject, C: AnyObject>`, but generated contracts use
+/// class-bound *protocol existentials* (`any BridgekitDemoHost`) as P/C, and a
+/// Swift existential does not satisfy an `AnyObject` generic constraint even when
+/// the protocol itself is `: AnyObject`. The engine never relies on P/C being a
+/// class (it type-erases via AnyBridgeContractDefinition), so the constraint was
+/// purely over-restrictive and blocked the generated contracts from compiling.
+open class BridgeContractDefinition<P, C> {
 
     /// Stable reverse-DNS contract identifier.
     public let id: String

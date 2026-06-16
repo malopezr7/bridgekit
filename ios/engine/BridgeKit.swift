@@ -24,18 +24,20 @@ import Foundation
 ///
 /// Port: `interface BridgeKitApi` (Kotlin).
 public protocol BridgeKitApi: AnyObject {
-    func provide<P: AnyObject, C: AnyObject>(
+    // L7fix2: P/C unconstrained — generated contracts pass protocol existentials
+    // (`any FooContract`) which do not satisfy an `AnyObject` generic constraint.
+    func provide<P, C>(
         _ definition: BridgeContractDefinition<P, C>,
         scope: Scope,
         factory: () -> P
     ) -> Binding
 
-    func consume<P: AnyObject, C: AnyObject>(
+    func consume<P, C>(
         _ definition: BridgeContractDefinition<P, C>,
         scope: Scope
     ) -> C
 
-    func isProvided<P: AnyObject, C: AnyObject>(
+    func isProvided<P, C>(
         _ definition: BridgeContractDefinition<P, C>,
         scope: Scope
     ) -> Bool
@@ -88,7 +90,7 @@ public final class BridgeKitRuntime: BridgeKitApi {
     /// PORT NOTE: Kotlin has `eager: Boolean` param. Swift uses a trailing closure;
     /// factory is called immediately (eager=true is the only sane default for Swift
     /// since lazy involves threading concerns managed by the caller).
-    public func provide<P: AnyObject, C: AnyObject>(
+    public func provide<P, C>(
         _ definition: BridgeContractDefinition<P, C>,
         scope: Scope = .global,
         factory: () -> P
@@ -114,7 +116,7 @@ public final class BridgeKitRuntime: BridgeKitApi {
     ///
     /// PORT NOTE: Kotlin consume() is suspend; Swift does NOT suspend here.
     /// The JS readiness wait happens inside each OutboundCallerImpl method.
-    public func consume<P: AnyObject, C: AnyObject>(
+    public func consume<P, C>(
         _ definition: BridgeContractDefinition<P, C>,
         scope: Scope = .global
     ) -> C {
@@ -130,7 +132,7 @@ public final class BridgeKitRuntime: BridgeKitApi {
 
     // ---- isProvided --------------------------------------------------------
 
-    public func isProvided<P: AnyObject, C: AnyObject>(
+    public func isProvided<P, C>(
         _ definition: BridgeContractDefinition<P, C>,
         scope: Scope = .global
     ) -> Bool {
@@ -138,7 +140,7 @@ public final class BridgeKitRuntime: BridgeKitApi {
     }
 
     /// Await until a contract is provided, with explicit timeout.
-    public func awaitProvided<P: AnyObject, C: AnyObject>(
+    public func awaitProvided<P, C>(
         _ definition: BridgeContractDefinition<P, C>,
         scope: Scope = .global,
         timeoutMs: UInt64 = 30_000

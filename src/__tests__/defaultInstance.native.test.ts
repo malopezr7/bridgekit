@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
-// QW-6: iOS guard in getDefaultBridgeKit
-// Ensures the function throws a legible error on iOS instead of constructing
-// a dead NitroBridgeTransport.
+// QW-6: native getDefaultBridgeKit platform support
+// Ensures the native singleton constructs the Nitro transport on both iOS and
+// Android. Metro resolves this file only for React Native bundles.
 // ---------------------------------------------------------------------------
 
 import { beforeEach, describe, expect, jest, test } from '@jest/globals';
@@ -32,13 +32,14 @@ jest.mock('react-native', () => ({
   Platform: mockPlatform,
 }));
 
-describe('QW-6: getDefaultBridgeKit iOS guard', () => {
+describe('QW-6: getDefaultBridgeKit native platform support', () => {
   beforeEach(() => {
     // Reset modules so the _default singleton is cleared between tests.
     jest.resetModules();
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for('io.github.malopezr7.bridgekit.registry')];
   });
 
-  test('throws a legible error when Platform.OS is ios', () => {
+  test('does not throw when Platform.OS is ios', () => {
     mockPlatform.OS = 'ios';
 
     let getDefaultBridgeKit: () => unknown;
@@ -48,9 +49,7 @@ describe('QW-6: getDefaultBridgeKit iOS guard', () => {
     });
 
     // @ts-ignore — assigned synchronously inside isolateModules
-    expect(() => getDefaultBridgeKit()).toThrow(/iOS/i);
-    // @ts-ignore
-    expect(() => getDefaultBridgeKit()).toThrow(/not yet implemented|not implemented/i);
+    expect(() => getDefaultBridgeKit()).not.toThrow();
   });
 
   test('does not throw when Platform.OS is android', () => {

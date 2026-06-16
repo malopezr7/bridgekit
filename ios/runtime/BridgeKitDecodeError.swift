@@ -32,3 +32,18 @@ public struct BridgeKitDecodeError: Error, CustomStringConvertible {
         "Missing or wrong-typed required field '\(field)' (expected \(expectedType))"
     }
 }
+
+/// Throws a ``BridgeKitDecodeError`` from an expression position.
+///
+/// Swift requires every throwing call to be marked `try`. The generated codecs use
+/// the `?? (try bridgeKitThrow(...))` pattern so the `try` keyword sits on a
+/// genuine call to a `throws` function rather than on a non-throwing closure literal.
+///
+/// - Parameters:
+///   - field: The field name that failed decoding.
+///   - expectedType: Human-readable description of the expected type.
+/// - Returns: Never returns — always throws.
+@inline(__always)
+public func bridgeKitThrow<T>(field: String, expectedType: String) throws -> T {
+    throw BridgeKitDecodeError(field: field, expectedType: expectedType)
+}

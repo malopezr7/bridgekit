@@ -46,4 +46,21 @@ public enum BridgeValue<T> {
         case .unprovided(let last):   return last
         }
     }
+
+    /// Re-type the carried value via `transform`, preserving availability state.
+    ///
+    /// Used by generated outbound State getters to convert the runtime's
+    /// `BridgeValue<Any?>` stream into the contract's concrete `BridgeValue<U>`
+    /// without an invariant `as!` cast on the whole `AsyncStream`.
+    ///
+    /// `.available`/`.initial` degrade to `.unprovided(nil)` when `transform`
+    /// returns `nil` (decode failure), so a malformed value never traps.
+    public func remap<U>(_ transform: (T) -> U?) -> BridgeValue<U> {
+        switch self {
+        case .available(let value):   return transform(value).map(BridgeValue<U>.available) ?? .unprovided(nil)
+        case .initial(let value):     return transform(value).map(BridgeValue<U>.initial) ?? .unprovided(nil)
+        case .replacing(let last):    return .replacing(last.flatMap(transform))
+        case .unprovided(let last):   return .unprovided(last.flatMap(transform))
+        }
+    }
 }
