@@ -9,10 +9,6 @@ hero:
       link: /start/introduction/
       icon: right-arrow
       variant: primary
-    - text: Where we came from
-      link: /start/where-we-came-from/
-      icon: open-book
-      variant: minimal
 ---
 
 import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
@@ -78,7 +74,6 @@ export const ConnectHost = defineContract('connect.host', {
 
 <CardGrid>
 	<LinkCard title="What is BridgeKit" href="/start/introduction/" description="The problem it solves and the shape of the solution." />
-	<LinkCard title="Where we came from" href="/start/where-we-came-from/" description="feature-actions, NativeEventEmitter, connectGet* — and why they hurt." />
 	<LinkCard title="Core concepts" href="/start/concepts/" description="Contract, provider, consumer, scope, binding, state, stream, epoch." />
 	<LinkCard title="Quick start" href="/start/quickstart/" description="From an empty contract to a live round trip in five steps." />
 </CardGrid>
@@ -86,6 +81,6 @@ export const ConnectHost = defineContract('connect.host', {
 :::note[Status]
 BridgeKit is **production-validated on Android (Kotlin) and iOS (Swift)**. Typed
 bidirectional contracts — async, fire, streams and state — are proven on-device on **both**
-platforms at parity, and Connect / the host app runs on BridgeKit over pure SPM. The
+platforms at parity, and the host app runs on BridgeKit over pure SPM. The
 remaining deferred target is the **web transport**; see [Limitations](/reference/limitations/).
 :::

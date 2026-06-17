@@ -73,5 +73,4 @@ streams, observers and in-flight calls are tied to an epoch and cleanly rewired 
 ## Where to go next
 
 - New to the ideas? Read **[Core concepts](/start/concepts/)**.
-- Want the historical motivation? **[Where we came from](/start/where-we-came-from/)**.
 - Ready to build? Jump to the **[Quick start](/start/quickstart/)**.
