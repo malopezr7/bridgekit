@@ -63,7 +63,7 @@ Provide a contract **from JS** (the reverse direction). Auto-unregisters on unmo
 StrictMode-safe — a double mount supersedes harmlessly.
 
 ```tsx
-useProvideBridge(LiaFeature, {
+useProvideBridge(InboxFeature, {
   getUnreadCount: () => store.unread,
 });
 ```
@@ -76,7 +76,7 @@ Outside React (services, entry points, tests), use the imperative forms:
 const connect = bridge(ConnectHost);
 await connect.isLoggedIn();
 
-const binding = provideBridge(LiaFeature, impl);
+const binding = provideBridge(InboxFeature, impl);
 binding.close();
 ```
 

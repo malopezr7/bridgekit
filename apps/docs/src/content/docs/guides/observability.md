@@ -55,7 +55,7 @@ Every error envelope embeds readiness and provision context, so a failure reads 
 diagnosis rather than a riddle:
 
 ```text
-TIMEOUT: dispatcher connected, contract 'connect.host' not provided in scope feature(Connect)
+TIMEOUT: dispatcher connected, contract 'checkout.host' not provided in scope feature(checkout)
 ```
 
 ## Fire-and-forget is not invisible

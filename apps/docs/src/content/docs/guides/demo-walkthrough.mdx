@@ -273,7 +273,7 @@ The iOS demo isolates all Nitro C++ interop in a dedicated `BridgeKitDemoKit` mo
 from the app target through an Objective-C shim (`NSClassFromString` + a selector). That keeps
 C++ headers out of the demo app target. This is a **demo-harness** detail tied to the
 CocoaPods build — the production the host app end-state needs none of it: it is pure SPM with
-Swift-only facades. See [Migrating Connect to BridgeKit](/guides/migration-connect/).
+Swift-only facades. See [Migrating a feature to BridgeKit](/guides/migration/).
 </Aside>
 
 ## What each part proves

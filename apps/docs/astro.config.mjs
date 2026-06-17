@@ -81,7 +81,7 @@ export default defineConfig({
 					label: 'Guides',
 					items: [
 						{ label: 'End-to-end demo walkthrough', slug: 'guides/demo-walkthrough' },
-						{ label: 'Migrating a feature', slug: 'guides/migration-connect' },
+						{ label: 'Migrating a feature', slug: 'guides/migration' },
 						{ label: 'Testing', slug: 'guides/testing' },
 						{ label: 'Observability & debugging', slug: 'guides/observability' },
 					],

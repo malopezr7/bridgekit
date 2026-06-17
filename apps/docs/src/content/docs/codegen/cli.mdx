@@ -75,12 +75,12 @@ bridgekit generate --contracts 'src/**/*.contract.ts' --out-dir android/bridgeki
 bridgekit generate --platform swift --out-dir ios/contracts/generated
 
 # Cross-repo mirror (Kotlin)
-bridgekit generate --into ../Android.Application/features/lia/bridgekit
+bridgekit generate --into ../my-android-app/features/inbox/bridgekit
 
 # Cross-repo mirror (Swift)
 bridgekit generate --platform swift \
   --out-dir ios/contracts/generated \
-  --into ../iOS.Application/lia/contracts
+  --into ../my-ios-app/inbox/contracts
 ```
 
 `--into` makes the cross-repo copy **tool-owned** rather than a manual `cp`. The directory

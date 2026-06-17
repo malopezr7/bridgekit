@@ -28,9 +28,9 @@ Android (Kotlin) and iOS (Swift):
 - **Local-first resolution** for pure-JS providers.
 - The generic **Nitro transport** (the single Nitrogen-built component) on both platforms.
 - The **shared host contract** (`example.host`, owned by `the host package`) and **feature-owned
-  contracts** (e.g. `connect.host`) — both in use after the Connect migration. See
+  contracts** (e.g. `checkout.host`) — both in use after the feature migration. See
   [the host contract](/reference/host-contract/) and
-  [migrating Connect](/guides/migration-connect/).
+  [migrating a feature](/guides/migration/).
 
 ## Still deferred
 
@@ -44,14 +44,14 @@ Part of the design and the API is shaped to accommodate them, but **not** built 
 
 ## In use, not planned
 
-These shipped during the Connect / the host app migration and are no longer roadmap items:
+These shipped during the feature migration and are no longer roadmap items:
 
 - **Shared + feature-owned host contracts.** `example.host` is the shared, globally-provided host
-  contract; `connect.host` is feature-owned and provided at `Scope.Feature("YourApp.Feature")`.
+  contract; `checkout.host` is feature-owned and provided at `Scope.Feature("YourApp.Feature")`.
   The duplication problem the design called out is addressed by this split, in production.
 - **Migration coexistence.** A feature can move actions onto a BridgeKit contract incrementally
-  while leaving the rest on `FeatureActions` — Connect runs exactly this way (17 actions on
-  `connect.host`, two on `example.host`, five intentionally still on `FeatureActions`).
+  while leaving the rest on `FeatureActions` — the Checkout feature runs exactly this way (17 actions on
+  `checkout.host`, two on `example.host`, five intentionally still on `FeatureActions`).
 
 ## Explicit non-goals
 

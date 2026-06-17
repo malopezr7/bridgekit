@@ -7,8 +7,7 @@ sidebar:
 
 The `t` namespace is the schema language. It is the input to both TypeScript inference and
 boundary encoding, and it maps cleanly onto Kotlin and Swift types in generated code. The
-surface was derived from a real action inventory (Connect 19 + LiA 9 + globals 7 +
-badges/widgets), so it is intentionally small.
+surface was derived from a real action inventory (a real app's action inventory — roughly 35 actions across features and globals), so it is intentionally small.
 
 ## Primitives
 

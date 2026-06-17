@@ -53,14 +53,14 @@ Each platform (Kotlin, Swift) has its own lock file in its own output directory.
 ## `--into <path>` — tool-owned cross-repo copy
 
 When the contracts live in one repo and the generated bindings must land in another (e.g.
-`Android.Application/features/lia/bridgekit/`), `--into` makes that copy **tool-owned** rather
+`my-android-app/features/inbox/bridgekit/`), `--into` makes that copy **tool-owned** rather
 than a manual `cp`:
 
 ```bash
 bridgekit generate \
   --contracts 'src/**/*.contract.ts' \
   --out-dir bridgekit/generated \
-  --into ../Android.Application/features/lia/bridgekit
+  --into ../my-android-app/features/inbox/bridgekit
 ```
 
 The same applies to Swift:
@@ -69,7 +69,7 @@ The same applies to Swift:
 bridgekit generate \
   --platform swift \
   --out-dir ios/contracts/generated \
-  --into ../iOS.Application/lia/contracts
+  --into ../my-ios-app/inbox/contracts
 ```
 
 ## Evolution rule: additive only

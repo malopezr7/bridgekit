@@ -35,9 +35,9 @@ of a frozen UI.
 ```kotlin
 // runBlocking around a bridgekit call is documented as forbidden.
 // Use the suspending or explicit alternatives instead:
-val lia = bridgekit.tryConsume(LiaFeatureContract)     // non-suspending
-if (bridgekit.isProvided(LiaFeatureContract)) { /* ... */ }
-bridgekit.awaitProvided(LiaFeatureContract, timeout)   // explicit wait
+val inbox = bridgekit.tryConsume(InboxFeatureContract)     // non-suspending
+if (bridgekit.isProvided(InboxFeatureContract)) { /* ... */ }
+bridgekit.awaitProvided(InboxFeatureContract, timeout)   // explicit wait
 ```
 
 Inbound async `invoke()` runs on `CoroutineScope(SupervisorJob() + Dispatchers.Default)`.

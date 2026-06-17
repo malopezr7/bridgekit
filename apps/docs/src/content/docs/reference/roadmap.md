@@ -1,6 +1,6 @@
 ---
 title: Roadmap
-description: The on-device acceptance matrix that BridgeKit passes today, the Connect pilot that shipped, and the one frontier still open.
+description: The on-device acceptance matrix that BridgeKit passes today, the pilot feature that shipped, and the one frontier still open.
 sidebar:
   order: 3
 ---
@@ -24,23 +24,23 @@ on both Android (Kotlin) and iOS (Swift).
 | 9 | Kotlin consume from the main thread → fast loud failure, **not** an ANR. | Passed |
 | 10 | `dump()` debug screen shows live bindings / streams / state / epoch — on Android and iOS. | Passed |
 
-## Connect / the host app pilot — shipped
+## Pilot feature — shipped
 
 The first real-world adoption is done, not planned:
 
-1. **Adoption & freeze.** `feature-actions` / `connectGet*` / `NativeEventEmitterModule` are
+1. **Adoption & freeze.** The legacy actions API / `appGet*` / raw native event emitters are
    frozen — no new actions or modules.
-2. **First pilot.** Connect's OTP polling moved to an `otpCodes` stream (highest value,
+2. **First pilot.** The OTP polling use case moved to an `otpCodes` stream (highest value,
    smallest surface).
-3. **Feature-owned contract.** Connect owns `connect.host` (17 actions), provided natively at
+3. **Feature-owned contract.** The Checkout feature owns `checkout.host` (17 actions), provided natively at
    `Scope.Feature("YourApp.Feature")`; `getLiteral` / `trackEvent` consume the shared
    `example.host`; five host actions stay on `FeatureActions`. Runtime-proven (`isLoggedIn`
    JS→native returned `true`; `trackEvent` fired end-to-end).
-4. **SPM end-state.** The the host app iOS integration is **pure SPM** — no CocoaPods, no C++
+4. **SPM end-state.** The host app iOS integration is **pure SPM** — no CocoaPods, no C++
    interop in the app target (`@_implementationOnly import BridgeKit`). This is the target
    end-state for all the host app feature integrations.
 
-The full before/after is in [Migrating Connect to BridgeKit](/guides/migration-connect/).
+The full before/after is in [Migrating a feature to BridgeKit](/guides/migration/).
 
 ## Platform expansion
 

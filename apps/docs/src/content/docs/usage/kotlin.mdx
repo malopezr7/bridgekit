@@ -39,17 +39,17 @@ binding.close()
 provided)*, bounded by the readiness timeout:
 
 ```kotlin
-val lia = bridgekit.consume(LiaFeatureContract)   // suspend, readiness-bounded
-val count = lia.getUnreadCount()
-lia.sessionStatus.collect { value -> /* BridgeValue<SessionStatus> */ }
+val inbox = bridgekit.consume(InboxFeatureContract)   // suspend, readiness-bounded
+val count = inbox.getUnreadCount()
+inbox.sessionStatus.collect { value -> /* BridgeValue<SessionStatus> */ }
 ```
 
 Non-suspending and explicit alternatives:
 
 ```kotlin
-val maybe = bridgekit.tryConsume(LiaFeatureContract)        // null if not ready
-if (bridgekit.isProvided(LiaFeatureContract)) { /* ... */ }
-bridgekit.awaitProvided(LiaFeatureContract, timeout)        // explicit wait
+val maybe = bridgekit.tryConsume(InboxFeatureContract)        // null if not ready
+if (bridgekit.isProvided(InboxFeatureContract)) { /* ... */ }
+bridgekit.awaitProvided(InboxFeatureContract, timeout)        // explicit wait
 ```
 
 <Aside type="caution">
@@ -63,7 +63,7 @@ risking an ANR. See [Threading model](/runtime/threading/).
 Consumed state carries availability:
 
 ```kotlin
-lia.sessionStatus.collect { v ->
+inbox.sessionStatus.collect { v ->
   when (v) {
     is BridgeValue.Available -> render(v.value)
     is BridgeValue.Initial   -> render(v.value)         // seeded initial, no provider yet
@@ -80,7 +80,7 @@ passes one (see [Auto-discovery](/usage/discovery/)) — and tests pass a
 `BridgeKit(testTransport)`.
 
 ```kotlin
-class LiaController(private val bridgekit: BridgeKit) {
-  suspend fun unread() = bridgekit.consume(LiaFeatureContract).getUnreadCount()
+class InboxController(private val bridgekit: BridgeKit) {
+  suspend fun unread() = bridgekit.consume(InboxFeatureContract).getUnreadCount()
 }
 ```
