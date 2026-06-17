@@ -153,7 +153,7 @@ class ConnectBridgeModule : BridgeKitModule {
     bridgekit.provide(ConnectHostContract) { ConnectHostProvider(host.locate()) }
   }
 }
-// Register via META-INF/services/io.github.malopezr7.bridgekit.discovery.BridgeKitModule
+// Register via META-INF/services/com.bridgekit.discovery.BridgeKitModule
 ```
 
 ---

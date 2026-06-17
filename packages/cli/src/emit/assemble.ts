@@ -46,7 +46,7 @@ export interface ContractFileParts {
   /** Whether to import java.time.Instant (t.date() type). */
   needsInstantImport: boolean;
   /**
-   * Whether to import io.github.malopezr7.bridgekit.runtime.BridgeKitDecodeException.
+   * Whether to import com.bridgekit.runtime.BridgeKitDecodeException.
    * True when any method result, stream item, or state value resolves to a
    * scalar that hits boundaryDecode's throw path (date, binary, enum, int64),
    * OR when encodeDecodeFns is non-empty (object/union codec path also throws).
@@ -95,15 +95,15 @@ export function assembleContractFile(parts: ContractFileParts): EmitResult {
   lines.push(``);
   lines.push(`package ${kotlinPackage}`);
   lines.push(``);
-  lines.push(`import io.github.malopezr7.bridgekit.runtime.BridgeContractDefinition`);
-  lines.push(`import io.github.malopezr7.bridgekit.runtime.BridgeValue`);
+  lines.push(`import com.bridgekit.runtime.BridgeContractDefinition`);
+  lines.push(`import com.bridgekit.runtime.BridgeValue`);
   // Generated decoders fail-fast on missing/wrong-typed required fields (W1-5).
   // Also needed when any scalar result hits boundaryDecode's throw path (CRITICAL-1).
   if (encodeDecodeFns.length > 0 || needsBridgeKitDecodeException) {
-    lines.push(`import io.github.malopezr7.bridgekit.runtime.BridgeKitDecodeException`);
+    lines.push(`import com.bridgekit.runtime.BridgeKitDecodeException`);
   }
-  lines.push(`import io.github.malopezr7.bridgekit.runtime.InboundContractAdapter`);
-  lines.push(`import io.github.malopezr7.bridgekit.runtime.OutboundCaller`);
+  lines.push(`import com.bridgekit.runtime.InboundContractAdapter`);
+  lines.push(`import com.bridgekit.runtime.OutboundCaller`);
   if (needsInstantImport) {
     lines.push(`import java.time.Instant`);
   }

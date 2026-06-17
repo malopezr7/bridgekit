@@ -352,11 +352,11 @@ export function emitKotlinContract(token: RawContractToken, kotlinPackage: strin
       `    val ${kName}: kotlinx.coroutines.flow.MutableStateFlow<${valueResult.typeName}>`,
     );
     clientMethods.push(
-      `    val ${kName}: kotlinx.coroutines.flow.StateFlow<io.github.malopezr7.bridgekit.runtime.BridgeValue<${valueResult.typeName}>>`,
+      `    val ${kName}: kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<${valueResult.typeName}>>`,
     );
 
     outboundImpls.push(
-      `            override val ${kName}: kotlinx.coroutines.flow.StateFlow<io.github.malopezr7.bridgekit.runtime.BridgeValue<${valueResult.typeName}>>\n                get() = @Suppress("UNCHECKED_CAST") caller.state("${memberName}") as kotlinx.coroutines.flow.StateFlow<io.github.malopezr7.bridgekit.runtime.BridgeValue<${valueResult.typeName}>>`,
+      `            override val ${kName}: kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<${valueResult.typeName}>>\n                get() = @Suppress("UNCHECKED_CAST") caller.state("${memberName}") as kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<${valueResult.typeName}>>`,
     );
   }
 

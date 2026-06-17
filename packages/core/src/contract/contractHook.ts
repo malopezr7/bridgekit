@@ -229,7 +229,7 @@ export function buildContractHook<T extends MarkerContractInput>(
   });
 
   Object.defineProperty(hook, '$contract', {
-    value: 'io.github.malopezr7.bridgekit.contract' as const,
+    value: 'com.bridgekit.contract' as const,
     enumerable: true,
     writable: false,
     configurable: false,

@@ -1,5 +1,12 @@
-android/build/
-dist/
 node_modules/
+**/node_modules/
+**/build/
+**/.gradle/
+**/.cxx/
+**/dist/
 .turbo/
+**/.turbo/
 *.log
+**/local.properties
+.DS_Store
+**/.DS_Store

@@ -243,7 +243,7 @@ export interface ContractHook<T extends MarkerContractInput> {
   readonly hash: string;
   readonly descriptor: import('./contract').ContractDescriptor;
   readonly $descriptor: import('./contract').ContractDescriptor;
-  readonly $contract: 'io.github.malopezr7.bridgekit.contract';
+  readonly $contract: 'com.bridgekit.contract';
 }
 
 // ---- Public type utility ---------------------------------------------------

@@ -36,7 +36,7 @@ describe('QW-6: getDefaultBridgeKit native platform support', () => {
   beforeEach(() => {
     // Reset modules so the _default singleton is cleared between tests.
     jest.resetModules();
-    delete (globalThis as Record<symbol, unknown>)[Symbol.for('io.github.malopezr7.bridgekit.registry')];
+    delete (globalThis as Record<symbol, unknown>)[Symbol.for('com.bridgekit.registry')];
   });
 
   test('does not throw when Platform.OS is ios', () => {

@@ -579,7 +579,7 @@ describe('ContractHook: statics and getState', () => {
   });
 
   test('$contract brand exists', () => {
-    expect((useLiaHost as Record<string, unknown>).$contract).toBe('io.github.malopezr7.bridgekit.contract');
+    expect((useLiaHost as Record<string, unknown>).$contract).toBe('com.bridgekit.contract');
   });
 
   test('hash is a non-empty string', () => {
@@ -589,7 +589,7 @@ describe('ContractHook: statics and getState', () => {
 
   test('descriptor matches BridgeContract shape for codegen', () => {
     const d = useLiaHost.descriptor;
-    expect(d.$type).toBe('io.github.malopezr7.bridgekit.contract');
+    expect(d.$type).toBe('com.bridgekit.contract');
     expect(d.descriptorVersion).toBe(1);
     expect(d.id).toBe('lia.host');
   });

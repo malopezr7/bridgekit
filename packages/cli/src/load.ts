@@ -23,7 +23,7 @@ import { CliError } from './cliError.js';
 
 export interface RawContractToken {
   descriptor: {
-    $type: 'io.github.malopezr7.bridgekit.contract';
+    $type: 'com.bridgekit.contract';
     descriptorVersion: number;
     id: string;
     methods: Record<string, unknown>;
@@ -167,7 +167,7 @@ function isToken(value) {
   if (typeof value.hash !== 'string') return false;
   const d = value.descriptor;
   if (d === null || typeof d !== 'object') return false;
-  return d.$type === 'io.github.malopezr7.bridgekit.contract' && typeof d.id === 'string';
+  return d.$type === 'com.bridgekit.contract' && typeof d.id === 'string';
 }
 
 const tokens = [];
@@ -255,5 +255,5 @@ function isBridgeContractToken(value: unknown): value is RawContractToken {
   const desc = obj.descriptor;
   if (desc === null || typeof desc !== 'object') return false;
   const d = desc as Record<string, unknown>;
-  return d.$type === 'io.github.malopezr7.bridgekit.contract' && typeof d.id === 'string';
+  return d.$type === 'com.bridgekit.contract' && typeof d.id === 'string';
 }

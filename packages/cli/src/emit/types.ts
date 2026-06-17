@@ -90,13 +90,13 @@ export function contractIdToClassName(id: string): string {
 
 export function contractIdToPackage(id: string, override?: string): string {
   if (override) return override;
-  // 'connect.host' → 'io.github.malopezr7.bridgekit.contracts.connect.host'
+  // 'connect.host' → 'com.bridgekit.contracts.connect.host'
   // dashes stripped, dots preserved
   const sanitized = id
     .split('.')
     .map((seg) => seg.replace(/-/g, '').toLowerCase())
     .join('.');
-  return `io.github.malopezr7.bridgekit.contracts.${sanitized}`;
+  return `com.bridgekit.contracts.${sanitized}`;
 }
 
 // Kotlin hard-reserved words — require backtick-escaping as field/param names.

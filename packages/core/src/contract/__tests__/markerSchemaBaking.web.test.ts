@@ -55,7 +55,7 @@ describe('schema-first markers — descriptor byte-identity', () => {
     const contract = makeContract();
 
     const tStarDescriptor = {
-      $type: 'io.github.malopezr7.bridgekit.contract',
+      $type: 'com.bridgekit.contract',
       descriptorVersion: 1,
       id: 'wave1.fixture',
       methods: {

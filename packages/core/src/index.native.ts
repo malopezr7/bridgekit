@@ -51,7 +51,7 @@ export { createTestBridge, mockBridge } from './testing/index';
 import { BridgeKitJs } from './runtime/bridgekit';
 import { NitroBridgeTransport } from './runtime/nitroTransport';
 
-const REGISTRY_SYMBOL = Symbol.for('io.github.malopezr7.bridgekit.registry');
+const REGISTRY_SYMBOL = Symbol.for('com.bridgekit.registry');
 const PACKAGE_VERSION = '83.0.0';
 
 interface GlobalRegistry {

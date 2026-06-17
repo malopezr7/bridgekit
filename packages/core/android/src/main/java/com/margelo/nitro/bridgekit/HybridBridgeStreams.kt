@@ -1,7 +1,7 @@
 package com.margelo.nitro.bridgekit
 
 import androidx.annotation.Keep
-import io.github.malopezr7.bridgekit.runtime.BridgeKitNative
+import com.bridgekit.runtime.BridgeKitNative
 import com.bridgekit.codec.AnyMapCodec
 import com.facebook.proguard.annotations.DoNotStrip
 import com.margelo.nitro.core.AnyMap

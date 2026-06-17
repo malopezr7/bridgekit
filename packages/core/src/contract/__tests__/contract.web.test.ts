@@ -45,7 +45,7 @@ describe('defineContract – returned token', () => {
 
   it('descriptor has correct $type and version', () => {
     const c = defineContract('foo.bar', {});
-    expect(c.descriptor.$type).toBe('io.github.malopezr7.bridgekit.contract');
+    expect(c.descriptor.$type).toBe('com.bridgekit.contract');
     expect(c.descriptor.descriptorVersion).toBe(1);
     expect(c.descriptor.id).toBe('foo.bar');
   });
