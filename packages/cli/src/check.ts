@@ -6,8 +6,8 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node
 import os from 'node:os';
 import path from 'node:path';
 
-import type { EmitResult } from './emit/kotlin';
-import { diffLocks, type LockFile } from './lock';
+import type { EmitResult } from './emit/kotlin.js';
+import { diffLocks, type LockFile } from './lock.js';
 
 export interface CheckDiff {
   file: string;

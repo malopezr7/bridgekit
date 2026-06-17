@@ -5,7 +5,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import type { RawContractToken } from './load';
+import type { RawContractToken } from './load.js';
 
 export interface LockEntry {
   hash: string;

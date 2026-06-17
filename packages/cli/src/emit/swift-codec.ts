@@ -1,8 +1,8 @@
 // emit/swift-codec.ts — Swift codec walker (mirrors CodecWalker from codec.ts).
 // Kept < 500 LOC per D9 split rule.
 
-import { schemaNeedsCodec } from './codec';
-import { escapeSwiftIdentifier, type SwiftTypeEmitter } from './swift-types';
+import { schemaNeedsCodec } from './codec.js';
+import { escapeSwiftIdentifier, type SwiftTypeEmitter } from './swift-types.js';
 import {
   type ArrayNode,
   type NullableNode,
@@ -14,7 +14,7 @@ import {
   type TupleNode,
   toPascalCase,
   type UnionNode,
-} from './types';
+} from './types.js';
 
 // Re-export schemaNeedsCodec — portable, same for Kotlin and Swift.
 export { schemaNeedsCodec };

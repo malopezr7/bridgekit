@@ -6,14 +6,14 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { glob } from 'node:fs/promises';
 import path from 'node:path';
-import { CliError } from './cliError';
-import { dim, ok, warn } from './theme';
-import { checkDrift } from './check';
-import { contractIdToPackage, emitKotlinContract } from './emit/kotlin';
-import { emitSwiftContract } from './emit/swift';
-import type { RawContractToken } from './load';
-import { loadContractsFromFile } from './load';
-import { buildLock, writeLock } from './lock';
+import { CliError } from './cliError.js';
+import { dim, ok, warn } from './theme.js';
+import { checkDrift } from './check.js';
+import { contractIdToPackage, emitKotlinContract } from './emit/kotlin.js';
+import { emitSwiftContract } from './emit/swift.js';
+import type { RawContractToken } from './load.js';
+import { loadContractsFromFile } from './load.js';
+import { buildLock, writeLock } from './lock.js';
 
 // ---- help ------------------------------------------------------------------
 

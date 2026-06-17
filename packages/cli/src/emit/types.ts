@@ -1,6 +1,6 @@
 // emit/types.ts — schema node shapes, identifier helpers, Kotlin type emitter.
 
-import { CliError } from '../cliError';
+import { CliError } from '../cliError.js';
 
 export interface SchemaNode {
   kind: string;

@@ -15,7 +15,7 @@ import {
   type TupleNode,
   toPascalCase,
   type UnionNode,
-} from './types';
+} from './types.js';
 
 export function schemaNeedsCodec(node: SchemaNode): boolean {
   switch (node.kind) {

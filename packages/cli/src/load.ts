@@ -17,7 +17,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
 
-import { CliError } from './cliError';
+import { CliError } from './cliError.js';
 
 // ---- duck-typed contract shape (never import bridgekit classes) -------------
 

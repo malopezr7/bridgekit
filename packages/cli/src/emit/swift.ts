@@ -1,9 +1,9 @@
 // emit/swift.ts — Swift contract file generation from a ContractDescriptor.
 
-import type { RawContractToken } from '../load';
-import type { EmitResult } from './assemble';
-import { SwiftCodecWalker, schemaNeedsCodec } from './swift-codec';
-import { SwiftTypeEmitter, swiftLiteral } from './swift-types';
+import type { RawContractToken } from '../load.js';
+import type { EmitResult } from './assemble.js';
+import { SwiftCodecWalker, schemaNeedsCodec } from './swift-codec.js';
+import { SwiftTypeEmitter, swiftLiteral } from './swift-types.js';
 import {
   type ArrayNode,
   contractIdToClassName,
@@ -17,7 +17,7 @@ import {
   type TupleNode,
   toPascalCase,
   type UnionNode,
-} from './types';
+} from './types.js';
 
 export type { EmitResult };
 

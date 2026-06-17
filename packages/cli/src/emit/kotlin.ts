@@ -1,8 +1,8 @@
 // emit/kotlin.ts — Kotlin code generation from a ContractDescriptor.
 
-import type { RawContractToken } from '../load';
-import { assembleContractFile, type EmitResult } from './assemble';
-import { CodecWalker, schemaNeedsCodec } from './codec';
+import type { RawContractToken } from '../load.js';
+import { assembleContractFile, type EmitResult } from './assemble.js';
+import { CodecWalker, schemaNeedsCodec } from './codec.js';
 import {
   type ArrayNode,
   contractIdToClassName,
@@ -20,7 +20,7 @@ import {
   toKotlinMemberName,
   toPascalCase,
   type UnionNode,
-} from './types';
+} from './types.js';
 
 export type { EmitResult };
 export { contractIdToPackage };

@@ -15,7 +15,7 @@ import {
   type TupleNode,
   toPascalCase,
   type UnionNode,
-} from './types';
+} from './types.js';
 
 // ---- Swift reserved keywords requiring backtick escaping --------------------
 
