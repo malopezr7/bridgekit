@@ -2,7 +2,7 @@
 // Contract: bridgekit.localhost
 // Contract hash: 7d0b554f
 
-package io.github.malopezr7.bridgekit.contracts.bridgekit.localhost
+package com.bridgekit.example.generated
 
 import io.github.malopezr7.bridgekit.runtime.BridgeContractDefinition
 import io.github.malopezr7.bridgekit.runtime.BridgeValue

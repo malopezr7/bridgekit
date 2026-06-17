@@ -1,5 +1,6 @@
 plugins {
-    id("common-android-feature")
+    id("com.android.library")
+    id("org.jetbrains.kotlin.android")
     id("com.facebook.react")
 }
 
@@ -13,12 +14,11 @@ apply(from = "./fix-prefab.gradle")
 
 android {
     namespace = "com.bridgekit"
+    compileSdk = 35
 
     defaultConfig {
+        minSdk = 24
         consumerProguardFiles("consumer-rules.pro")
-    }
-
-    defaultConfig {
         buildConfigField("boolean", "IS_NEW_ARCHITECTURE_ENABLED", "true")
 
         externalNativeBuild {
@@ -41,6 +41,15 @@ android {
                 abiFilters.addAll(reactNativeArchitectures())
             }
         }
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
     }
 
     externalNativeBuild {
@@ -118,8 +127,9 @@ android {
 dependencies {
     implementation(project(":react-native-nitro-modules"))
     // Coroutines — required by the BridgeKit core engine.
-    // Version aligned with the Kotlin version used in the build-logic.
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    // React Native provided by host app — compileOnly to avoid version skew.
+    compileOnly("com.facebook.react:react-android")
 
     // Test dependencies
     testImplementation("junit:junit:4.13.2")

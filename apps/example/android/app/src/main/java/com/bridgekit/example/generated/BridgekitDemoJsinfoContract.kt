@@ -2,7 +2,7 @@
 // Contract: bridgekit.demo-jsinfo
 // Contract hash: 360492b0
 
-package io.github.malopezr7.bridgekit.contracts.bridgekit.demojsinfo
+package com.bridgekit.example.generated
 
 import io.github.malopezr7.bridgekit.runtime.BridgeContractDefinition
 import io.github.malopezr7.bridgekit.runtime.BridgeValue

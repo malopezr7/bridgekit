@@ -2,7 +2,7 @@
 // Contract: bridgekit.demo-host
 // Contract hash: dceb75e0
 
-package io.github.malopezr7.bridgekit.contracts.bridgekit.demohost
+package com.bridgekit.example.generated
 
 import io.github.malopezr7.bridgekit.runtime.BridgeContractDefinition
 import io.github.malopezr7.bridgekit.runtime.BridgeValue

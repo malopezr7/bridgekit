@@ -2,7 +2,7 @@
 // Contract: bridgekit.demo-reverse
 // Contract hash: acb5aa97
 
-package io.github.malopezr7.bridgekit.contracts.bridgekit.demoreverse
+package com.bridgekit.example.generated
 
 import io.github.malopezr7.bridgekit.runtime.BridgeContractDefinition
 import io.github.malopezr7.bridgekit.runtime.BridgeValue

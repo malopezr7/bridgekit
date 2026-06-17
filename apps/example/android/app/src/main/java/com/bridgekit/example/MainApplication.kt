@@ -1,6 +1,8 @@
 package com.bridgekit.example
 
 import android.app.Application
+import com.bridgekit.BridgeKitPackage
+import com.bridgekit.example.bridgekit.BridgekitDemoInitializer
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactHost
@@ -10,6 +12,7 @@ import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.load
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.soloader.SoLoader
+import io.github.malopezr7.bridgekit.discovery.BridgeKitHost
 
 class MainApplication : Application(), ReactApplication {
 
@@ -17,8 +20,7 @@ class MainApplication : Application(), ReactApplication {
         object : DefaultReactNativeHost(this) {
             override fun getPackages(): List<ReactPackage> =
                 PackageList(this).packages.apply {
-                    // Phase 2: add BridgeKit native package here
-                    // add(BridgeKitPackage())
+                    add(BridgeKitPackage())
                 }
 
             override fun getJSMainModuleName(): String = "index"
@@ -34,6 +36,10 @@ class MainApplication : Application(), ReactApplication {
 
     override fun onCreate() {
         super.onCreate()
+
+        // Initialize BridgeKit BEFORE React so the dispatcher is ready when JS loads.
+        BridgekitDemoInitializer.init(BridgeKitHost(applicationContext) { null })
+
         SoLoader.init(this, false)
         if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
             load()
