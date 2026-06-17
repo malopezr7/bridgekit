@@ -1,0 +1,31 @@
+{
+  "name": "bridgekit-example",
+  "version": "0.0.1",
+  "private": true,
+  "description": "BridgeKit example React Native bare app (Android-first)",
+  "scripts": {
+    "start": "react-native start --reset-cache",
+    "android": "react-native run-android",
+    "typecheck": "tsc --noEmit",
+    "generate": "node ../../packages/cli/dist/index.js generate --contracts \"src/demo/contracts/*.contract.ts\" --out-dir android/app/src/main/java/com/bridgekit/example/generated --platform kotlin"
+  },
+  "dependencies": {
+    "@malopezr7/bridgekit": "workspace:*",
+    "react": "19.2.0",
+    "react-native": "0.83.6",
+    "react-native-nitro-modules": "0.35.0"
+  },
+  "devDependencies": {
+    "@babel/core": "7.28.3",
+    "@babel/preset-env": "7.28.3",
+    "@babel/runtime": "7.28.3",
+    "@react-native/babel-preset": "0.83.6",
+    "@react-native/metro-config": "0.83.6",
+    "@react-native/typescript-config": "0.83.6",
+    "@types/react": "^19.0.0",
+    "typescript": "5.9.2"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  }
+}
