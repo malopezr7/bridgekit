@@ -4,11 +4,11 @@
 
 package com.bridgekit.example.generated
 
-import io.github.malopezr7.bridgekit.runtime.BridgeContractDefinition
-import io.github.malopezr7.bridgekit.runtime.BridgeValue
-import io.github.malopezr7.bridgekit.runtime.BridgeKitDecodeException
-import io.github.malopezr7.bridgekit.runtime.InboundContractAdapter
-import io.github.malopezr7.bridgekit.runtime.OutboundCaller
+import com.bridgekit.runtime.BridgeContractDefinition
+import com.bridgekit.runtime.BridgeValue
+import com.bridgekit.runtime.BridgeKitDecodeException
+import com.bridgekit.runtime.InboundContractAdapter
+import com.bridgekit.runtime.OutboundCaller
 
 // ---- Types ----------------------------------------------------------------
 
@@ -31,7 +31,7 @@ interface BridgekitLocalhost {
 interface BridgekitLocalhostClient {
     fun getMotto(): String
     suspend fun greet(params: GreetParams): String
-    val mood: kotlinx.coroutines.flow.StateFlow<io.github.malopezr7.bridgekit.runtime.BridgeValue<String>>
+    val mood: kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<String>>
 }
 
 // ---- Codecs -------------------------------------------------------------------
@@ -113,7 +113,7 @@ object BridgekitLocalhostContract : BridgeContractDefinition<BridgekitLocalhost,
                     @Suppress("UNCHECKED_CAST")
                     return result as? String ?: throw IllegalStateException("Unexpected null result for greet")
                 }
-                override val mood: kotlinx.coroutines.flow.StateFlow<io.github.malopezr7.bridgekit.runtime.BridgeValue<String>>
-                    get() = @Suppress("UNCHECKED_CAST") caller.state("mood") as kotlinx.coroutines.flow.StateFlow<io.github.malopezr7.bridgekit.runtime.BridgeValue<String>>
+                override val mood: kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<String>>
+                    get() = @Suppress("UNCHECKED_CAST") caller.state("mood") as kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<String>>
         }
 }

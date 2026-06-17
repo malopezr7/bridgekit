@@ -4,6 +4,8 @@ apply plugin: "com.facebook.react"
 
 react {
     // Automatic linking — no manual entryFile needed for RN 0.73+
+    // hermesc lives in the pnpm-hoisted hermes-compiler package, not RN's sdks dir
+    hermesCommand = "$rootDir/../../../node_modules/hermes-compiler/hermesc/%OS-BIN%/hermesc"
 }
 
 android {
@@ -45,7 +47,6 @@ dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
     implementation("com.facebook.react:hermes-android")
+    implementation(project(":malopezr7_bridgekit"))
+    implementation(project(":react-native-nitro-modules"))
 }
-
-apply from: file("../../node_modules/@react-native-community/cli-platform-android/native_modules.gradle");
-applyNativeModulesAppBuildGradle(project)

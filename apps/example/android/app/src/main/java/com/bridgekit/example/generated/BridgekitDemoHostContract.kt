@@ -4,11 +4,11 @@
 
 package com.bridgekit.example.generated
 
-import io.github.malopezr7.bridgekit.runtime.BridgeContractDefinition
-import io.github.malopezr7.bridgekit.runtime.BridgeValue
-import io.github.malopezr7.bridgekit.runtime.BridgeKitDecodeException
-import io.github.malopezr7.bridgekit.runtime.InboundContractAdapter
-import io.github.malopezr7.bridgekit.runtime.OutboundCaller
+import com.bridgekit.runtime.BridgeContractDefinition
+import com.bridgekit.runtime.BridgeValue
+import com.bridgekit.runtime.BridgeKitDecodeException
+import com.bridgekit.runtime.InboundContractAdapter
+import com.bridgekit.runtime.OutboundCaller
 
 // ---- Types ----------------------------------------------------------------
 
@@ -46,7 +46,7 @@ interface BridgekitDemoHostClient {
     fun say(params: SayParams)
     fun ticker(): kotlinx.coroutines.flow.Flow<Double>
     fun echoes(): kotlinx.coroutines.flow.Flow<String>
-    val counter: kotlinx.coroutines.flow.StateFlow<io.github.malopezr7.bridgekit.runtime.BridgeValue<Double>>
+    val counter: kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<Double>>
 }
 
 // ---- Codecs -------------------------------------------------------------------
@@ -164,7 +164,7 @@ object BridgekitDemoHostContract : BridgeContractDefinition<BridgekitDemoHost, B
                     @Suppress("UNCHECKED_CAST") caller.stream("ticker", null) as kotlinx.coroutines.flow.Flow<Double>
                 override fun echoes(): kotlinx.coroutines.flow.Flow<String> =
                     @Suppress("UNCHECKED_CAST") caller.stream("echoes", null) as kotlinx.coroutines.flow.Flow<String>
-                override val counter: kotlinx.coroutines.flow.StateFlow<io.github.malopezr7.bridgekit.runtime.BridgeValue<Double>>
-                    get() = @Suppress("UNCHECKED_CAST") caller.state("counter") as kotlinx.coroutines.flow.StateFlow<io.github.malopezr7.bridgekit.runtime.BridgeValue<Double>>
+                override val counter: kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<Double>>
+                    get() = @Suppress("UNCHECKED_CAST") caller.state("counter") as kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<Double>>
         }
 }

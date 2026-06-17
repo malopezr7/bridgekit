@@ -4,11 +4,11 @@
 
 package com.bridgekit.example.generated
 
-import io.github.malopezr7.bridgekit.runtime.BridgeContractDefinition
-import io.github.malopezr7.bridgekit.runtime.BridgeValue
-import io.github.malopezr7.bridgekit.runtime.BridgeKitDecodeException
-import io.github.malopezr7.bridgekit.runtime.InboundContractAdapter
-import io.github.malopezr7.bridgekit.runtime.OutboundCaller
+import com.bridgekit.runtime.BridgeContractDefinition
+import com.bridgekit.runtime.BridgeValue
+import com.bridgekit.runtime.BridgeKitDecodeException
+import com.bridgekit.runtime.InboundContractAdapter
+import com.bridgekit.runtime.OutboundCaller
 
 // ---- Types ----------------------------------------------------------------
 
@@ -38,7 +38,7 @@ interface BridgekitDemoReverseClient {
     suspend fun greetFromJs(params: GreetFromJsParams): String
     fun onNativeEvent(params: OnNativeEventParams)
     fun jsCounter(): kotlinx.coroutines.flow.Flow<Double>
-    val jsStatus: kotlinx.coroutines.flow.StateFlow<io.github.malopezr7.bridgekit.runtime.BridgeValue<String>>
+    val jsStatus: kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<String>>
 }
 
 // ---- Codecs -------------------------------------------------------------------
@@ -133,7 +133,7 @@ object BridgekitDemoReverseContract : BridgeContractDefinition<BridgekitDemoReve
                 }
                 override fun jsCounter(): kotlinx.coroutines.flow.Flow<Double> =
                     @Suppress("UNCHECKED_CAST") caller.stream("jsCounter", null) as kotlinx.coroutines.flow.Flow<Double>
-                override val jsStatus: kotlinx.coroutines.flow.StateFlow<io.github.malopezr7.bridgekit.runtime.BridgeValue<String>>
-                    get() = @Suppress("UNCHECKED_CAST") caller.state("jsStatus") as kotlinx.coroutines.flow.StateFlow<io.github.malopezr7.bridgekit.runtime.BridgeValue<String>>
+                override val jsStatus: kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<String>>
+                    get() = @Suppress("UNCHECKED_CAST") caller.state("jsStatus") as kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<String>>
         }
 }

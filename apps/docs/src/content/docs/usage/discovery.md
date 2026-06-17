@@ -27,7 +27,7 @@ class ConnectBridgeModule : BridgeKitModule {
 Register it as a service:
 
 ```text
-// META-INF/services/io.github.malopezr7.bridgekit.discovery.BridgeKitModule
+// META-INF/services/com.bridgekit.discovery.BridgeKitModule
 com.example.connect.ConnectBridgeModule
 ```
 
@@ -52,8 +52,8 @@ first JS render — guaranteed, not racy.
 BridgeKit's AAR ships consumer rules so discovery survives a minified release build:
 
 ```text
--keep interface io.github.malopezr7.bridgekit.BridgeKitModule
--keep class * implements io.github.malopezr7.bridgekit.BridgeKitModule { <init>(); }
+-keep interface com.bridgekit.BridgeKitModule
+-keep class * implements com.bridgekit.BridgeKitModule { <init>(); }
 ```
 
 Minified-release discovery is one of the on-device acceptance criteria.

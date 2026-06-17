@@ -4,11 +4,11 @@
 
 package com.bridgekit.example.generated
 
-import io.github.malopezr7.bridgekit.runtime.BridgeContractDefinition
-import io.github.malopezr7.bridgekit.runtime.BridgeValue
-import io.github.malopezr7.bridgekit.runtime.BridgeKitDecodeException
-import io.github.malopezr7.bridgekit.runtime.InboundContractAdapter
-import io.github.malopezr7.bridgekit.runtime.OutboundCaller
+import com.bridgekit.runtime.BridgeContractDefinition
+import com.bridgekit.runtime.BridgeValue
+import com.bridgekit.runtime.BridgeKitDecodeException
+import com.bridgekit.runtime.InboundContractAdapter
+import com.bridgekit.runtime.OutboundCaller
 
 // ---- Types ----------------------------------------------------------------
 

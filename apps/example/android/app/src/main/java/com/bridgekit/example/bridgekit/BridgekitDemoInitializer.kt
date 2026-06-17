@@ -7,10 +7,10 @@ import com.bridgekit.example.generated.BridgekitDemoReverseContract
 import com.bridgekit.example.generated.GetGreetingParams
 import com.bridgekit.example.generated.GreetFromJsParams
 import com.bridgekit.example.generated.OnNativeEventParams
-import io.github.malopezr7.bridgekit.core.BridgeKit
-import io.github.malopezr7.bridgekit.core.Scope
-import io.github.malopezr7.bridgekit.discovery.BridgeKitHost
-import io.github.malopezr7.bridgekit.runtime.BridgeValue
+import com.bridgekit.core.BridgeKit
+import com.bridgekit.core.Scope
+import com.bridgekit.discovery.BridgeKitHost
+import com.bridgekit.runtime.BridgeValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob

@@ -11,8 +11,9 @@ import com.facebook.react.ReactPackage
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.load
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
+import com.facebook.react.soloader.OpenSourceMergedSoMapping
 import com.facebook.soloader.SoLoader
-import io.github.malopezr7.bridgekit.discovery.BridgeKitHost
+import com.bridgekit.discovery.BridgeKitHost
 
 class MainApplication : Application(), ReactApplication {
 
@@ -37,12 +38,12 @@ class MainApplication : Application(), ReactApplication {
     override fun onCreate() {
         super.onCreate()
 
-        // Initialize BridgeKit BEFORE React so the dispatcher is ready when JS loads.
-        BridgekitDemoInitializer.init(BridgeKitHost(applicationContext) { null })
-
-        SoLoader.init(this, false)
+        SoLoader.init(this, OpenSourceMergedSoMapping)
         if (BuildConfig.IS_NEW_ARCHITECTURE_ENABLED) {
             load()
         }
+
+        // Initialize BridgeKit after RN native init, before JS loads (so the dispatcher is ready).
+        BridgekitDemoInitializer.init(BridgeKitHost(applicationContext) { null })
     }
 }

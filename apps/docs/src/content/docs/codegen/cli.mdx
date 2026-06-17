@@ -23,7 +23,7 @@ bridgekit generate --contracts 'src/**/*.contract.ts' --out-dir bridgekit/genera
 | `--contracts <glob>` | `**/*.contract.ts` | Glob for contract files (cwd-relative; excludes `node_modules`, `/dist/`). |
 | `--out-dir <path>` | `bridgekit/generated` | Output directory for generated files and `bridgekit.lock`. Created recursively if absent. |
 | `--platform <kotlin\|swift>` | `kotlin` | Target language. Drives the emitter. Any other value is a hard `CliError` at parse. |
-| `--package <pkg>` | derived from id | Kotlin package override (default `io.github.malopezr7.bridgekit.contracts.<id>`). Ignored by the Swift emitter. |
+| `--package <pkg>` | derived from id | Kotlin package override (default `com.bridgekit.contracts.<id>`). Ignored by the Swift emitter. |
 | `--check` | — | Diff against existing output; **exit 1 on drift** (CI mode). Writes nothing. |
 | `--into <path>` | — | After writing to `--out-dir`, `cpSync` every generated file (including the lock) to this path. Must pre-exist. |
 
