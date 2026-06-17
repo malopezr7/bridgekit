@@ -1,6 +1,6 @@
 ---
 title: Migrating a feature to BridgeKit
-description: A real-world BridgeKit migration example — from ad-hoc native getters and NativeEventEmitterModule to a feature-owned contract, consumed with feature scoping and provided natively on pure SPM.
+description: A real-world BridgeKit migration example — from ad-hoc native getters and raw native event emitters to a feature-owned contract, consumed with feature scoping and provided natively on pure SPM.
 sidebar:
   order: 4
 ---
@@ -11,26 +11,26 @@ This is a real-world BridgeKit migration example. Use it as the template for mig
 
 ## The before
 
-Connect's native actions used to reach the host through three uncontracted channels:
+The Checkout feature's native actions used to reach the host through three uncontracted channels:
 
-- **`connectGet*`** functions — ad-hoc native getters.
-- **feature-actions** — a generic `execute({ featureName, actionName, params })` dispatcher.
-- **`NativeEventEmitterModule`** — event streams off a shared emitter.
+- **`appGet*`** functions — ad-hoc native getters.
+- **legacy actions API** — a generic `execute({ featureName, actionName, params })` dispatcher.
+- **raw native event emitters** — event streams off a shared emitter.
 
 None of these is typed end-to-end, none is owned by the feature, and each new action means a
 new native module or a new string action name. That is exactly the duplication the framework
 was built to replace.
 
-## The after: a feature-owned `connect.host` contract
+## The after: a feature-owned `checkout.host` contract
 
-Connect now **owns** a single contract with all 17 native actions it needs. It lives in the
-feature bundle (`src/contracts/connect-host.contract.ts`) and is the single source of truth for
+The Checkout feature now **owns** a single contract with all 17 native actions it needs. It lives in the
+feature bundle (`src/contracts/checkout-host.contract.ts`) and is the single source of truth for
 both sides.
 
 ```ts
 import { Async, defineContract, Sync, t, Void } from '@malopezr7/bridgekit/contract';
 
-export const useConnectHost = defineContract('connect.host', {
+export const useCheckoutHost = defineContract('checkout.host', {
   methods: {
     // Void — fire-and-forget
     closeFeature: Void(),
@@ -58,8 +58,8 @@ export const useConnectHost = defineContract('connect.host', {
 });
 ```
 
-Seventeen actions, owned by Connect. The native side provides this contract at the **feature
-scope** — `ConnectViewController` provides it at `Scope.Feature("YourApp.Feature")`.
+Seventeen actions, owned by the Checkout feature. The native side provides this contract at the **feature
+scope** — `CheckoutViewController` provides it at `Scope.Feature("YourApp.Feature")`.
 
 ## Consuming it in JS with feature scoping
 
@@ -70,7 +70,7 @@ fallback, so a missing provider degrades gracefully instead of throwing into the
 ```ts
 // src/common/data/feature-actions/actions.ts
 import { FEATURE_NAME } from '../config'; // 'YourApp.Feature'
-import { useConnectHost } from '../../../contracts/connect-host.contract';
+import { useCheckoutHost } from '../../../contracts/checkout-host.contract';
 
 export const useNativeActions = () => {
   const {
@@ -79,7 +79,7 @@ export const useNativeActions = () => {
     closeFeature: closeFeatureNative,
     installEsim: installEsimNative,
     // ...all 17
-  } = useConnectHost.scoped({ feature: FEATURE_NAME })(); // scope-bound, then snapshot
+  } = useCheckoutHost.scoped({ feature: FEATURE_NAME })(); // scope-bound, then snapshot
 
   const isLoggedIn = useCallback(
     () => { try { return isLoggedInNative(); } catch { return false; } },
@@ -109,23 +109,23 @@ export const useNativeActions = () => {
 ```
 
 <Aside type="note" title="scoped() then call">
-`useConnectHost.scoped({ feature: FEATURE_NAME })` returns a scope-bound variant of the hook;
+`useCheckoutHost.scoped({ feature: FEATURE_NAME })` returns a scope-bound variant of the hook;
 the trailing `()` builds the consumer snapshot at that scope. This is the idiomatic shape for a
 feature-scoped contract — the resolution walks instance → feature → global and binds to the
-feature-scoped provider `ConnectViewController` installed.
+feature-scoped provider `CheckoutViewController` installed.
 </Aside>
 
 ## The split — three homes for native capability
 
-Not everything belongs on `connect.host`. The migration deliberately split native capability
+Not everything belongs on `checkout.host`. The migration deliberately split native capability
 across three owners:
 
-- **`connect.host` (feature-owned)** — the 17 actions above. Connect owns and ships them.
+- **`checkout.host` (feature-owned)** — the 17 actions above. The Checkout feature owns and ships them.
 - **`example.host` (shared, host-owned)** — `getLiteral` and `trackEvent` come from the
-  globally-provided host contract owned by the host package, not from Connect.
+  globally-provided host contract owned by the host package, not from the feature.
 
   ```ts
-  import { useExampleHost } from 'the host package';
+  import { useExampleHost } from '@your-app/host';
 
   const { getLiteral: getLiteralHost, trackEvent: trackEventHost } = useExampleHost();
   const getLiteral = (key: string) => {
@@ -141,7 +141,7 @@ across three owners:
 
 - **`FeatureActions` (intentionally not migrated)** — five host-provided actions stay on the
   generic dispatcher because they are host concerns, not feature-owned:
-  `copyToClipboard`, `goToConnect`, `callPhone`, `startOtpAutofill`, `showShareSheet`.
+  `copyToClipboard`, `goToCheckout`, `callPhone`, `startOtpAutofill`, `showShareSheet`.
 
   ```ts
   const { execute } = useFeatureActions();
@@ -156,14 +156,14 @@ This coexistence is the point: a feature migrates the actions it owns onto a typ
 On iOS the providers are wired in the host app:
 
 ```swift
-// ConnectViewController provides the feature-owned contract
-bridgeKit.provide(YourFeatureContract(), scope: .feature("YourApp.Feature")) { ConnectHostImpl() }
+// CheckoutViewController provides the feature-owned contract
+bridgeKit.provide(YourFeatureContract(), scope: .feature("YourApp.Feature")) { CheckoutHostImpl() }
 
 // App.swift provides the shared host contract globally
 @_implementationOnly import BridgeKit
 @_implementationOnly import BridgeKitContracts
 
-hostBinding = bridgeKit.provide(ExampleHostContract(), scope: .global) { StandaloneConnectHost() }
+hostBinding = bridgeKit.provide(ExampleHostContract(), scope: .global) { StandaloneCheckoutHost() }
 ```
 
 The integration is **pure SPM** — the app consumes BridgeKit via a local `Package.swift`
@@ -178,7 +178,7 @@ From the device log:
 ```text
 example.host provided at .global
 your-feature.host provided at .feature(YourApp.Feature)
-connect.host.isLoggedIn() -> true     ← Sync JS → native, correct value
+checkout.host.isLoggedIn() -> true     ← Sync JS → native, correct value
 example.host.trackEvent: view_item    ← fired end-to-end
 ```
 

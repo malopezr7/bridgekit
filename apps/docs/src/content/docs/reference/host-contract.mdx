@@ -53,7 +53,7 @@ export const useExampleHost = defineContract('example.host', {
 process-global there is nothing to scope — call it and read the members directly:
 
 ```ts
-import { useExampleHost } from 'the host package';
+import { useExampleHost } from '@your-app/host';
 
 const { getLiteral, trackEvent } = useExampleHost();
 const label = getLiteral({ key: 'some.key' });   // Sync
