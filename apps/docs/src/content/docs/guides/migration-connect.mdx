@@ -1,0 +1,212 @@
+---
+title: Migrating a feature to BridgeKit
+description: A real-world BridgeKit migration example — from ad-hoc native getters and NativeEventEmitterModule to a feature-owned contract, consumed with feature scoping and provided natively on pure SPM.
+sidebar:
+  order: 4
+---
+
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+This is a real-world BridgeKit migration example. Use it as the template for migrating any feature.
+
+## The before
+
+Connect's native actions used to reach the host through three uncontracted channels:
+
+- **`connectGet*`** functions — ad-hoc native getters.
+- **feature-actions** — a generic `execute({ featureName, actionName, params })` dispatcher.
+- **`NativeEventEmitterModule`** — event streams off a shared emitter.
+
+None of these is typed end-to-end, none is owned by the feature, and each new action means a
+new native module or a new string action name. That is exactly the duplication the framework
+was built to replace.
+
+## The after: a feature-owned `connect.host` contract
+
+Connect now **owns** a single contract with all 17 native actions it needs. It lives in the
+feature bundle (`src/contracts/connect-host.contract.ts`) and is the single source of truth for
+both sides.
+
+```ts
+import { Async, defineContract, Sync, t, Void } from '@malopezr7/bridgekit/contract';
+
+export const useConnectHost = defineContract('connect.host', {
+  methods: {
+    // Void — fire-and-forget
+    closeFeature: Void(),
+    showWebpage: Void(t.object({ url: t.string() })),
+    goToStore: Void(),
+    openQRScanner: Void(),
+    goToSettings: Void(),
+
+    // Sync — synchronous reads (native answers in-memory)
+    getAppHeaders: Sync(t.json()),
+    isEsimSupported: Sync(t.string()),
+    getDeepLink: Sync(t.nullable(t.string())),
+    getTimeZone: Sync(t.string()),
+    isLoggedIn: Sync(t.boolean()),
+
+    // Async — round-trips that may show UI or do work
+    showLoginScreen: Async(t.boolean()),
+    getPaymentMethod: Async(t.nullable(t.json())),
+    getUserAgent: Async(t.string()),
+    showDatePicker: Async(t.object({ date: t.nullable(t.string()) }), t.nullable(t.string())),
+    askCameraPermission: Async(t.string()),
+    showBillingInfoScreen: Async(t.object({ url: t.string() }), t.nullable(t.json())),
+    installEsim: Async(t.object({ url: t.string(), iccId: t.string() }), t.string()),
+  },
+});
+```
+
+Seventeen actions, owned by Connect. The native side provides this contract at the **feature
+scope** — `ConnectViewController` provides it at `Scope.Feature("YourApp.Feature")`.
+
+## Consuming it in JS with feature scoping
+
+Because the contract is provided at a feature scope, the JS consumer resolves it at the same
+scope with `.scoped({ feature })`. Each action is wrapped in a `useCallback` with a `try/catch`
+fallback, so a missing provider degrades gracefully instead of throwing into the UI.
+
+```ts
+// src/common/data/feature-actions/actions.ts
+import { FEATURE_NAME } from '../config'; // 'YourApp.Feature'
+import { useConnectHost } from '../../../contracts/connect-host.contract';
+
+export const useNativeActions = () => {
+  const {
+    isLoggedIn: isLoggedInNative,
+    showLoginScreen: showLoginScreenNative,
+    closeFeature: closeFeatureNative,
+    installEsim: installEsimNative,
+    // ...all 17
+  } = useConnectHost.scoped({ feature: FEATURE_NAME })(); // scope-bound, then snapshot
+
+  const isLoggedIn = useCallback(
+    () => { try { return isLoggedInNative(); } catch { return false; } },
+    [isLoggedInNative],
+  ); // Sync
+
+  const showLoginScreen = useCallback(
+    async () => { try { return (await showLoginScreenNative()) ?? false; } catch { return false; } },
+    [showLoginScreenNative],
+  ); // Async
+
+  const closeFeature = useCallback(
+    () => { try { closeFeatureNative(); } catch {} },
+    [closeFeatureNative],
+  ); // Void
+
+  const installEsim = useCallback(
+    async (url: string, iccId: string) => {
+      try { const r = await installEsimNative({ url, iccId }); return isInstallEsimResult(r) ? r : 'error'; }
+      catch { return 'error'; }
+    },
+    [installEsimNative],
+  );
+
+  return { isLoggedIn, showLoginScreen, closeFeature, installEsim /* ... */ };
+};
+```
+
+<Aside type="note" title="scoped() then call">
+`useConnectHost.scoped({ feature: FEATURE_NAME })` returns a scope-bound variant of the hook;
+the trailing `()` builds the consumer snapshot at that scope. This is the idiomatic shape for a
+feature-scoped contract — the resolution walks instance → feature → global and binds to the
+feature-scoped provider `ConnectViewController` installed.
+</Aside>
+
+## The split — three homes for native capability
+
+Not everything belongs on `connect.host`. The migration deliberately split native capability
+across three owners:
+
+- **`connect.host` (feature-owned)** — the 17 actions above. Connect owns and ships them.
+- **`example.host` (shared, host-owned)** — `getLiteral` and `trackEvent` come from the
+  globally-provided host contract owned by the host package, not from Connect.
+
+  ```ts
+  import { useExampleHost } from 'the host package';
+
+  const { getLiteral: getLiteralHost, trackEvent: trackEventHost } = useExampleHost();
+  const getLiteral = (key: string) => {
+    try { const l = getLiteralHost({ key }); return typeof l === 'string' ? l : key; }
+    catch { return key; }
+  };
+  const trackEvent = (event: { name: string; payload?: unknown }) => {
+    try { trackEventHost({ eventName: event.name, eventParams: event.payload }); } catch {}
+  };
+  ```
+
+  See [the host contract](/reference/host-contract/) for the full `example.host` surface.
+
+- **`FeatureActions` (intentionally not migrated)** — five host-provided actions stay on the
+  generic dispatcher because they are host concerns, not feature-owned:
+  `copyToClipboard`, `goToConnect`, `callPhone`, `startOtpAutofill`, `showShareSheet`.
+
+  ```ts
+  const { execute } = useFeatureActions();
+  // execute({ featureName: FEATURE_NAME, actionName, params })
+  ```
+
+This coexistence is the point: a feature migrates the actions it owns onto a typed contract
+**without** a big-bang rewrite, leaving genuinely shared host actions where they belong.
+
+## The native end-state — pure SPM, no C++ in the app target
+
+On iOS the providers are wired in the host app:
+
+```swift
+// ConnectViewController provides the feature-owned contract
+bridgeKit.provide(YourFeatureContract(), scope: .feature("YourApp.Feature")) { ConnectHostImpl() }
+
+// App.swift provides the shared host contract globally
+@_implementationOnly import BridgeKit
+@_implementationOnly import BridgeKitContracts
+
+hostBinding = bridgeKit.provide(ExampleHostContract(), scope: .global) { StandaloneConnectHost() }
+```
+
+The integration is **pure SPM** — the app consumes BridgeKit via a local `Package.swift`
+path, with **no CocoaPods** and **no C++ interop in the app target**. BridgeKit and
+BridgeKitContracts are imported as Swift-only facades through `@_implementationOnly import`, so the
+Nitro C++ seam never leaks into the app's module. (This is the target end-state; the
+standalone demo's `BridgeKitDemoKit`/ObjC-shim isolation is a CocoaPods harness detail you do
+**not** need here — see the [demo walkthrough](/guides/demo-walkthrough).)
+
+From the device log:
+
+```text
+example.host provided at .global
+your-feature.host provided at .feature(YourApp.Feature)
+connect.host.isLoggedIn() -> true     ← Sync JS → native, correct value
+example.host.trackEvent: view_item    ← fired end-to-end
+```
+
+## Migrate your own feature — checklist
+
+<Steps>
+
+1. **Define a feature-owned contract.** One `*.contract.ts` in your bundle with the native
+   actions your feature owns. Pick the marker per direction: `Sync` for in-memory reads, `Async`
+   for round-trips that may do work or show UI, `Void` for fire-and-forget. Keep host-wide
+   capabilities (localisation, analytics) on `example.host` — don't re-declare them.
+
+2. **Generate the native binding.** Run `bridgekit generate --platform swift` (and
+   `--platform kotlin` if you target Android) and commit the output. The contract hash keeps
+   both sides in sync — drift fails `--check` in CI.
+
+3. **Provide it natively at the right scope.** Implement the generated protocol and provide it
+   at `Scope.Feature("<Your.Feature>")` for feature-owned actions, or `.global` for host-owned
+   ones. On iOS, register explicitly at the relevant view-controller / app-init site.
+
+4. **Consume it in JS with the matching scope.** Use `useYourContract.scoped({ feature })()` and
+   wrap each action in a `useCallback` with a `try/catch` fallback so a missing provider
+   degrades instead of throwing.
+
+5. **Leave shared host actions on the host contract.** Move only what your feature owns. Genuinely
+   host-level actions can stay on the generic dispatcher — coexistence is expected, not a smell.
+
+6. **Verify on-device.** Confirm a `Sync` read returns the real value across the bridge and a
+   `Void`/analytics call fires end-to-end before you call the migration done.
+
+</Steps>

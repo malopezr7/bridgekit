@@ -1,0 +1,84 @@
+/* BridgeKit docs theme — slate gray + muted teal accent.
+   Tailwind v4 + Starlight. Restrained, minimalist, low-saturation. */
+@layer base, starlight, theme, components, utilities;
+
+@import '@astrojs/starlight-tailwind';
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+@theme {
+	/* Muted teal accent — evokes a "bridge / signal" without shouting. */
+	--color-accent-50: #f1f7f6;
+	--color-accent-100: #dcebe9;
+	--color-accent-200: #bcd8d3;
+	--color-accent-300: #93beb8;
+	--color-accent-400: #689e98;
+	--color-accent-500: #4d827b;
+	--color-accent-600: #3c6862;
+	--color-accent-700: #335450;
+	--color-accent-800: #2c4442;
+	--color-accent-900: #273a37;
+	--color-accent-950: #11201f;
+
+	/* Cool slate gray scale. */
+	--color-gray-50: #f8fafc;
+	--color-gray-100: #f1f5f9;
+	--color-gray-200: #e2e8f0;
+	--color-gray-300: #cbd5e1;
+	--color-gray-400: #94a3b8;
+	--color-gray-500: #64748b;
+	--color-gray-600: #475569;
+	--color-gray-700: #334155;
+	--color-gray-800: #1e293b;
+	--color-gray-900: #0f172a;
+	--color-gray-950: #020617;
+}
+
+/* Slightly roomier content column + softer headings for a calmer read. */
+:root {
+	--sl-content-width: 50rem;
+	--sl-nav-pad-x: 1.5rem;
+}
+
+/* Tighten heading weight a touch — minimalist, less "shouty". */
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3 {
+	letter-spacing: -0.015em;
+}
+
+/* Hero on the splash page: calm gradient wash, no loud color. */
+.hero {
+	gap: 2rem;
+}
+.hero h1 {
+	letter-spacing: -0.03em;
+}
+
+/* Subtle card grid used across landing + concept pages. */
+.card {
+	border-color: var(--sl-color-gray-5);
+}
+
+/* Inline code: quieter than default. */
+.sl-markdown-content code:not(:where(.expressive-code *)) {
+	background-color: var(--sl-color-gray-6);
+	border: 1px solid var(--sl-color-gray-5);
+	border-radius: 0.3rem;
+	padding: 0.1rem 0.35rem;
+	font-size: 0.85em;
+}
+
+/* A small "direction pill" helper used in directionality pages. */
+.dir-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-size: 0.8rem;
+	font-weight: 600;
+	padding: 0.2rem 0.6rem;
+	border-radius: 999px;
+	border: 1px solid var(--sl-color-accent);
+	color: var(--sl-color-accent-high);
+	background: color-mix(in srgb, var(--sl-color-accent) 10%, transparent);
+}

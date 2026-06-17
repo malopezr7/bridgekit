@@ -1,0 +1,141 @@
+---
+title: Quick start
+description: From an empty contract to a live native↔RN round trip in five steps.
+sidebar:
+  order: 4
+---
+
+import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+This walks the shortest path from nothing to a working round trip: define a contract,
+generate the native bindings, implement it natively (Kotlin or Swift), consume it from
+React Native.
+
+<Steps>
+
+1. **Define a contract** in a `*.contract.ts` file. Import only from the pure
+   `@malopezr7/bridgekit/contract` entrypoint.
+
+   ```ts
+   // connect-host.contract.ts
+   import { defineContract, t } from '@malopezr7/bridgekit/contract';
+
+   export const ConnectHost = defineContract('connect.host', {
+     methods: {
+       isLoggedIn: t.query(t.boolean()),
+       installEsim: t.query(
+         t.object({ url: t.string(), iccId: t.string() }),
+         t.literals('success', 'already-installed', 'cancelled', 'error'),
+         { timeoutMs: null },
+       ),
+     },
+     streams: { otpCodes: t.stream(t.string()) },
+     state: { connectivity: t.state(t.object({ online: t.boolean() }), { online: false }) },
+   });
+   ```
+
+2. **Generate the native bindings** with the BridgeKit CLI. Output is committed, readable code —
+   no hidden directories. Pick the target platform with `--platform`:
+
+   ```bash
+   # Android (default platform is kotlin)
+   bridgekit generate --contracts 'src/**/*.contract.ts' --out-dir bridgekit/generated
+
+   # iOS — same contracts, Swift bindings
+   bridgekit generate --contracts 'src/**/*.contract.ts' --platform swift --out-dir ios/contracts/generated
+   ```
+
+3. **Implement the provider** on the side that owns the capability. Here native owns it —
+   implement the generated interface (Kotlin) or protocol (Swift):
+
+   <Tabs syncKey="native">
+     <TabItem label="Kotlin">
+     ```kotlin
+     class ConnectHostProvider : ConnectHost {
+       override suspend fun isLoggedIn(): Boolean = session.isLoggedIn()
+       override suspend fun installEsim(params: InstallEsimParams): InstallEsimResult = /* ... */
+       override fun otpCodes(): Flow<String> = smsRetriever.codes()
+       override val connectivity = MutableStateFlow(Connectivity(online = true))
+     }
+
+     BridgeKit.default.provide(ConnectHostContract, Scope.Global) { ConnectHostProvider() }
+     ```
+     </TabItem>
+     <TabItem label="Swift">
+     ```swift
+     import BridgeKitContracts
+
+     final class ConnectHostProvider: ConnectHost {
+       func isLoggedIn() throws -> Bool { session.isLoggedIn() }
+       func installEsim(_ params: InstallEsimParams) async throws -> String { /* ... */ }
+       func otpCodes() -> AsyncStream<String> { smsRetriever.codes() }
+       var connectivity: AsyncStream<Connectivity> { /* yield current + updates */ }
+     }
+     ```
+     ```swift
+     import BridgeKit
+
+     _ = BridgeKitRuntime.default.provide(ConnectHostContract(), scope: .global) {
+       ConnectHostProvider()
+     }
+     ```
+     </TabItem>
+   </Tabs>
+
+4. **Consume it from React Native** with a typed proxy and the state/stream hooks.
+
+   ```tsx
+   import { useBridge, useBridgeState } from '@malopezr7/bridgekit';
+
+   function Connect() {
+     const connect = useBridge(ConnectHost);
+     const { value: net } = useBridgeState(ConnectHost, 'connectivity');
+
+     const onInstall = async () => {
+       const result = await connect.installEsim({ url, iccId });
+       // result: 'success' | 'already-installed' | 'cancelled' | 'error'
+     };
+
+     return <Button disabled={!net.online} onPress={onInstall} />;
+   }
+   ```
+
+5. **Subscribe to a stream** — no `useEffect` dance, no event-emitter names.
+
+   ```tsx
+   const codes = connect.otpCodes();
+   const unsubscribe = codes.subscribe((code) => setOtp(code));
+   // …or: for await (const code of codes) { ... }
+   ```
+
+</Steps>
+
+## The other direction in one line
+
+When **RN provides** and native consumes, the shape is identical — only the implementer
+moves:
+
+<Tabs>
+  <TabItem label="React Native (provides)">
+  ```tsx
+  useProvideBridge(ExampleFeature, { getUnreadCount: () => store.unread });
+  ```
+  </TabItem>
+  <TabItem label="Kotlin (consumes)">
+  ```kotlin
+  val feature = bridgekit.consume(ExampleFeatureContract)
+  val count = feature.getUnreadCount()
+  feature.sessionStatus.collect { value -> /* BridgeValue<SessionStatus> */ }
+  ```
+  </TabItem>
+</Tabs>
+
+<Aside type="tip">
+There are **two authoring styles** for contracts — the schema `t.*` DSL shown here, and a
+type-first **marker** API (`Async`, `Void`, `Stream`, `State`). They produce identical
+runtime descriptors. See [Defining a contract](/contracts/defining/).
+</Aside>
+
+Next: wire BridgeKit into a real project in **[Installation](/start/installation/)**,
+understand the building blocks in **[Defining a contract](/contracts/defining/)**, or see a
+complete real app in the **[demo walkthrough](/guides/demo-walkthrough/)**.

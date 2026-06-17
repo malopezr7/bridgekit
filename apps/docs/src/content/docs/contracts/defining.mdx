@@ -1,0 +1,156 @@
+---
+title: Defining a contract
+description: defineContract, the two authoring styles (schema DSL and markers), and the purity rule that keeps contracts importable everywhere.
+sidebar:
+  order: 1
+---
+
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+Every contract is built with `defineContract(id, shape)` from the pure
+`@malopezr7/bridgekit/contract` entrypoint. The id is validated against
+`/^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/` — lowercase, dot-separated, `<owner>.<surface>`.
+
+```ts
+import { defineContract, t } from '@malopezr7/bridgekit/contract';
+
+export const ConnectHost = defineContract('connect.host', {
+  methods: { /* ... */ },
+  streams: { /* ... */ },
+  state:   { /* ... */ },
+});
+```
+
+The returned value is a frozen `BridgeContract` token. It carries a normalized
+**descriptor**, a **hash** (FNV-1a 32-bit over the normalized descriptor), and a phantom
+`_shape` type used only at compile time.
+
+## Two authoring styles
+
+BridgeKit accepts **two** ways to write a contract. They compile to **identical runtime
+descriptors** — pick by taste and by what your codegen path supports.
+
+<Tabs>
+  <TabItem label="Schema DSL (t.*)">
+
+  Runtime, schema-driven. The schema also drives boundary encoding, so the wire format is
+  derived from the same definition. Great when you want named, reusable object schemas.
+
+  ```ts
+  import { defineContract, t } from '@malopezr7/bridgekit/contract';
+
+  export const ConnectHost = defineContract('connect.host', {
+    methods: {
+      showLogin: t.fire(),
+      isLoggedIn: t.query(t.boolean()),
+      installEsim: t.query(
+        t.object({ url: t.string(), iccId: t.string() }),
+        t.literals('success', 'already-installed', 'cancelled', 'error'),
+        { timeoutMs: null },
+      ),
+      getDeviceInfo: t.querySync(t.object({ model: t.string(), osVersion: t.string() })),
+      trackEvent: t.fire(t.object({ name: t.string(), params: t.json() })),
+    },
+    streams: { otpCodes: t.stream(t.string()) },
+    state:   { connectivity: t.state(t.object({ online: t.boolean() }), { online: false }) },
+  });
+  ```
+
+  </TabItem>
+  <TabItem label="Marker API">
+
+  Type-first. Each member is a generic marker whose type parameters carry the params and
+  result. Markers are phantom — the only runtime payload is `{ kind }` (plus `initial` for
+  `State`). This is the style the live demo uses.
+
+  ```ts
+  import { Async, defineContract, State, Stream, Void } from '@malopezr7/bridgekit/contract';
+
+  export const useDemoHost = defineContract('bridgekit.demo-host', {
+    methods: {
+      ping: Async<{ message: string }, { reply: string; epoch: number }>(),
+      increment: Async<number>(),
+      say: Void<{ text: string }>(),
+    },
+    streams: {
+      ticker: Stream<number>(),
+      echoes: Stream<string>(),
+    },
+    state: {
+      counter: State<number>(0),
+    },
+  });
+  ```
+
+  </TabItem>
+</Tabs>
+
+The marker ⇄ DSL mapping is one-to-one:
+
+| Marker | Schema DSL | Kind |
+|---|---|---|
+| `Sync<P, R>()` | `t.querySync(params, result)` | `querySync` |
+| `Async<P, R>()` | `t.query(params, result)` | `query` |
+| `Void<P>()` | `t.fire(params)` | `fire` |
+| `Stream<V, P>()` | `t.stream(value, opts)` | `stream` |
+| `State<V>(initial)` | `t.state(value, initial)` | `state` |
+
+<Aside type="note">
+The marker style and the schema style differ in **how codegen reads them**: marker contracts
+are parsed statically with `ts-morph` (type args are erased at runtime, so they can't be
+imported for their types); schema contracts are imported and their runtime descriptor is
+read directly. Both end up as the same descriptor. See [The BridgeKit CLI](/codegen/cli/).
+</Aside>
+
+## Direction is a matter of who implements
+
+A contract does not encode direction in its definition — direction is decided by **which
+side provides**. The same shape works both ways:
+
+```ts
+// provided by NATIVE, consumed by RN
+export const ConnectHost = defineContract('connect.host', { /* ... */ });
+
+// provided by RN, consumed by NATIVE — same shape, reverse direction
+export const ExampleFeature = defineContract('example.feature', {
+  methods: { getUnreadCount: t.query(t.number()) },
+  state:   { sessionStatus: t.state(t.literals('idle', 'active', 'error'), 'idle') },
+});
+```
+
+## The purity rule (enforced)
+
+`@malopezr7/bridgekit/contract` is a **pure, side-effect-free** entrypoint: `defineContract`,
+the `t` namespace, the markers, and type utilities — nothing else. A contract file may
+import **only** this subpath and other contract files.
+
+```ts
+// ✅ allowed
+import { defineContract, t } from '@malopezr7/bridgekit/contract';
+import { PickedFile } from './shared-schemas.contract';
+
+// ❌ rejected by the CLI with file:line
+import { analytics } from '../analytics';
+```
+
+The CLI walks the import graph before evaluating and **fails with `file:line`** on any
+violation. Why it matters: it lets the generator, Jest, and web builds import contracts
+safely — the transport-connecting side effect lives in the native runtime entry
+(`index.native.ts`), not in the contract module.
+
+## Type utilities
+
+Object schemas can be hoisted, named, and reused across contracts. Inference helpers expose
+the derived TypeScript types:
+
+```ts
+const PickedFile = t.object({ uri: t.string(), mime: t.string() });
+
+type Picked = t.Infer<typeof PickedFile>;
+type Params = MethodParams<typeof ConnectHost, 'installEsim'>;
+type Result = MethodResult<typeof ConnectHost, 'installEsim'>;
+type Net    = StateValue<typeof ConnectHost, 'connectivity'>;
+```
+
+Next: the full **[schema DSL](/contracts/schema/)**, then **[methods, streams &
+state](/contracts/methods-streams-state/)** in depth.

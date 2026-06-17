@@ -1,0 +1,105 @@
+---
+title: Testing
+description: Typed mocks, the in-memory loopback transport for plain Jest, and faking the generated interface on the Kotlin and Swift sides.
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Because contracts are **runtime values**, testing needs no Proxy tricks and no native
+toolchain. Both sides fake cleanly.
+
+## TypeScript: typed mocks
+
+`mockBridge` produces a fully-typed mock from a contract — you implement only the members the
+test touches.
+
+```ts
+import { mockBridge } from '@malopezr7/bridgekit/testing';
+
+const mock = mockBridge(ConnectHost, {
+  isLoggedIn: async () => true,
+});
+```
+
+## TypeScript: the loopback transport
+
+`createTestBridge()` gives you an isolated registry wired to an **in-memory loopback
+transport** — JS provides *and* JS consumes, with no native side. Feature logic, including
+streams and state, runs in plain Jest.
+
+```ts
+import { createTestBridge } from '@malopezr7/bridgekit/testing';
+
+const { bridgekit } = createTestBridge();
+
+bridgekit.provide(ConnectHostContract, { isLoggedIn: async () => true });
+const connect = bridgekit.consume(ConnectHost);
+
+expect(await connect.isLoggedIn()).toBe(true);
+```
+
+<Aside type="tip">
+Local-first resolution means the loopback path is the *same* code path your app uses in
+standalone / web mode — you are testing the real resolution logic, not a parallel stub.
+</Aside>
+
+## Kotlin: fake the generated interface
+
+Generated provider/client interfaces are plain Kotlin interfaces — fake them directly, no
+mocking framework required.
+
+```kotlin
+val fake = object : ConnectHost {
+  override suspend fun isLoggedIn(): Boolean = true
+  override suspend fun installEsim(params: InstallEsimParams) = InstallEsimResult.SUCCESS
+  override fun showLogin() {}
+  override fun otpCodes(): Flow<String> = flowOf("123456")
+  override val connectivity = MutableStateFlow(Connectivity(online = true))
+}
+```
+
+## Kotlin: isolate with a test transport
+
+`BridgeKit(testTransport)` creates an isolated instance. `TestBridgeTransport` drives
+invoke / stream / state **without JSI**, so router and store logic are unit-testable on the
+JVM.
+
+```kotlin
+val bridgekit = BridgeKit(TestBridgeTransport())
+bridgekit.provide(ConnectHostContract) { fake }
+
+val client = bridgekit.consume(ConnectHostContract)
+assertTrue(client.isLoggedIn())
+```
+
+## Swift: fake the generated protocol
+
+The generated Swift provider is a plain `protocol` (`AnyObject`-bound, nothing BridgeKit-specific
+in the signatures). Conform a test double to it and inject that — no runtime, no Nitro, no
+simulator needed for the provider's own logic.
+
+```swift
+final class FakeConnectHost: ConnectHost {
+  func isLoggedIn() throws -> Bool { true }
+  func installEsim(_ params: InstallEsimParams) async throws -> String { "success" }
+  func closeFeature() {}
+  func showWebpage(_ params: ShowWebpageParams) {}
+  // ...implement only the members the test exercises
+}
+
+// Drive the unit under test directly against the fake.
+let host: any ConnectHost = FakeConnectHost()
+XCTAssertTrue(try host.isLoggedIn())
+```
+
+The JS consumer of that same contract is still tested in plain Jest with the loopback transport
+(`createTestBridge` / `mockBridge` above) — so both ends are covered without a device in the loop.
+
+## Why there are no parity tests
+
+You don't need to test that the two sides agree on the wire format. The **single source of
+truth** (one contract) plus the **contract hash** guarantee it — drift surfaces as a build
+failure (`--check`) or a structured runtime warning, not as a class of tests you maintain by
+hand. Codec round-trip tests can be generated alongside the Kotlin.

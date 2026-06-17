@@ -1,0 +1,159 @@
+---
+title: The BridgeKit CLI
+description: bridgekit generate — flags, platforms (Kotlin and Swift), how contracts are loaded, the purity gate, and the artifacts it emits.
+sidebar:
+  order: 1
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+Code generation is a single command. It reads `*.contract.ts` files and emits committed,
+readable Kotlin or Swift — no hidden directories, no Nitrogen for feature code. Generated
+files are **committed to the repo**; there is no Gradle task or Xcode build phase that runs
+the CLI automatically.
+
+```bash
+bridgekit generate --contracts 'src/**/*.contract.ts' --out-dir bridgekit/generated
+```
+
+## Flags
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--contracts <glob>` | `**/*.contract.ts` | Glob for contract files (cwd-relative; excludes `node_modules`, `/dist/`). |
+| `--out-dir <path>` | `bridgekit/generated` | Output directory for generated files and `bridgekit.lock`. Created recursively if absent. |
+| `--platform <kotlin\|swift>` | `kotlin` | Target language. Drives the emitter. Any other value is a hard `CliError` at parse. |
+| `--package <pkg>` | derived from id | Kotlin package override (default `io.github.malopezr7.bridgekit.contracts.<id>`). Ignored by the Swift emitter. |
+| `--check` | — | Diff against existing output; **exit 1 on drift** (CI mode). Writes nothing. |
+| `--into <path>` | — | After writing to `--out-dir`, `cpSync` every generated file (including the lock) to this path. Must pre-exist. |
+
+## What it emits
+
+<Tabs>
+<TabItem label="Kotlin">
+
+Per contract, the generator writes one `<PascalName>Contract.kt` containing:
+
+- Shared object types (`data class`, `sealed class`, `enum class`)
+- `interface <ClassName>` — the provider interface
+- `interface <ClassName>Client` — the consumer/RN-side interface
+- `private object <ClassName>Codecs` — encode/decode to plain `Map<String, Any?>`
+- `object <ClassName>Contract : BridgeContractDefinition<…>` — `id`, `contractHash`, `memberHashes`, `inbound()`, `outbound()`
+
+See [Anatomy of generated Kotlin](/codegen/generated-kotlin/) for a full dissection.
+
+</TabItem>
+<TabItem label="Swift">
+
+Per contract, the generator writes one `<PascalName>Contract.swift` containing:
+
+- Shared object types (`public struct` with memberwise `init`)
+- `public protocol <ClassName>: AnyObject` — the provider protocol
+- `public protocol <ClassName>Client: AnyObject` — the consumer protocol
+- `class <ClassName>Contract: BridgeContractDefinition<any <ClassName>, any <ClassName>Client>` — `id`, `contractHash`, `memberHashes`, `inbound(_:)`, `outbound(_:)`
+
+The committed Swift file is post-processed by `sanitize-ios-public-module.py` to produce the
+clean public facade (explicit public modifiers, synthesized `init`s). See [Anatomy of
+generated Swift](/codegen/generated-swift/).
+
+</TabItem>
+</Tabs>
+
+Both platforms share a single `bridgekit.lock` file. The lock carries a `platform` field
+(`"kotlin"` or `"swift"`) that records which emitter produced it.
+
+## Examples
+
+```bash
+# Default: Kotlin, bridgekit/generated/
+bridgekit generate
+
+# Explicit contract glob + custom output dir
+bridgekit generate --contracts 'src/**/*.contract.ts' --out-dir android/bridgekit
+
+# Swift output
+bridgekit generate --platform swift --out-dir ios/contracts/generated
+
+# Cross-repo mirror (Kotlin)
+bridgekit generate --into ../Android.Application/features/lia/bridgekit
+
+# Cross-repo mirror (Swift)
+bridgekit generate --platform swift \
+  --out-dir ios/contracts/generated \
+  --into ../iOS.Application/lia/contracts
+```
+
+`--into` makes the cross-repo copy **tool-owned** rather than a manual `cp`. The directory
+must pre-exist. See [Drift & cross-repo delivery](/codegen/drift/) for the full workflow.
+
+## Two loading strategies
+
+The CLI detects the authoring style and loads each accordingly — both produce the same
+serializable descriptor (`$type` tag + `descriptorVersion`, duck-typed, never `instanceof`).
+
+#### Schema (`t.*`) contracts — imported
+
+The CLI spawns a child ESM subprocess (`--experimental-strip-types`), imports the `.ts` file
+via a worker, duck-types the exports for `{ descriptor, hash }`, and serializes to JSON.
+
+#### Marker contracts — statically parsed
+
+Marker type parameters are **erased at runtime**, so they cannot be read by importing. Marker
+contracts are detected by a regex for `Sync<`, `Async<`, `Void<`, `Stream<`, `State<` in
+value position and parsed with **`ts-morph`**: it loads the type checker, injects a stub for
+`@malopezr7/bridgekit/contract`, then walks the `defineContract` AST to extract params/result
+types from the generic arguments. No subprocess required.
+
+<Aside type="note">
+Both paths produce **hash parity** — a marker contract and its `t.*` equivalent hash to the
+same value, because the normalized descriptor is identical.
+</Aside>
+
+## The purity gate
+
+Before loading, the CLI walks the import graph. Any import other than
+`@malopezr7/bridgekit/contract` or a relative contract path is a **hard error with `file:line`**.
+This guarantees contracts are safe to import under Node, Jest, and web builds.
+
+## CI usage
+
+<Tabs>
+<TabItem label="Kotlin">
+
+```bash
+bridgekit generate \
+  --contracts 'src/**/*.contract.ts' \
+  --out-dir bridgekit/generated \
+  --check
+```
+
+</TabItem>
+<TabItem label="Swift">
+
+```bash
+bridgekit generate \
+  --contracts 'src/**/*.contract.ts' \
+  --out-dir ios/contracts/generated \
+  --platform swift \
+  --check
+```
+
+</TabItem>
+</Tabs>
+
+`--check` compares against the last generated files and exits non-zero on any drift. The
+drift message labels the platform explicitly:
+
+```text
+Drift detected in generated Kotlin bindings:
+  ExampleHostContract.kt: content differs
+Run `bridgekit generate` to regenerate and commit the result.
+```
+
+```text
+Drift detected in generated Swift bindings:
+  ExampleHostContract.swift: content differs
+Run `bridgekit generate --platform swift` to regenerate and commit the result.
+```
+
+Wire it into CI so contract changes and regenerated output always land together.

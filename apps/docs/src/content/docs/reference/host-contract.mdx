@@ -1,0 +1,154 @@
+---
+title: The host contract
+description: The global capability surface the host application provides to every feature. Members, consumer hooks, the native provider side, and what it deliberately does not expose.
+sidebar:
+  order: 4
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+`example.host` is an example of a **global capability surface** that the host application provides to every feature. It is the "host core" available to any JS feature running inside the host app: a
+small, fixed set of capabilities the feature calls **into native** for. Every member is
+**JS feature → native host** (native is the provider, JS is the consumer) — there are no
+streams and no state.
+
+It is provided **once at process start**, globally — there is no per-feature scoping. Any
+feature that imports the hook gets the same surface.
+
+## Members
+
+Five members, all synchronous reads or fire-and-forget calls.
+
+| Member | Kind | Params | Result | Description |
+|---|---|---|---|---|
+| `getCountryAndLanguage` | Sync | — | `{ country, language }` | Host country/language config (in-memory read). |
+| `getLiteral` | Sync | `{ key }` | `string` | Resolve a localisation key from the native literals cache. |
+| `getAppVersion` | Sync | — | `string` | Host app version (e.g. `BuildConfig.VERSION_NAME`). |
+| `trackEvent` | Void | `{ eventName, eventParams?: json }` | void | Fire an analytics event. `eventParams` is optional free-form JSON. |
+| `openUrl` | Void | `{ url }` | void | Open a URL in the system browser / deep-link handler. |
+
+## The contract
+
+The definition uses the type-first **marker** style (`Sync` / `Void`); `Sync(schema)` and
+`Sync(paramsSchema, resultSchema)` produce a synchronous-query descriptor with the schema
+embedded. This is equivalent to the `t.querySync` / `t.fire` forms of the `t.*` DSL —
+[either style](/contracts/defining/) yields the same runtime descriptor.
+
+```ts
+// packages/core/src/host/HostContract.ts
+export const useExampleHost = defineContract('example.host', {
+  methods: {
+    getCountryAndLanguage: Sync(t.object({ country: t.string(), language: t.string() })),
+    getLiteral: Sync(t.object({ key: t.string() }), t.string()),
+    getAppVersion: Sync(t.string()),
+    trackEvent: Void(t.object({ eventName: t.string(), eventParams: t.optional(t.json()) })),
+    openUrl: Void(t.object({ url: t.string() })),
+  },
+});
+```
+
+## Consuming the host from JS
+
+`useExampleHost` is the raw contract hook, re-exported from the host package. Because the contract is
+process-global there is nothing to scope — call it and read the members directly:
+
+```ts
+import { useExampleHost } from 'the host package';
+
+const { getLiteral, trackEvent } = useExampleHost();
+const label = getLiteral({ key: 'some.key' });   // Sync
+trackEvent({ eventName: 'view_item' });          // Void, fire-and-forget
+```
+
+The host package also ships **ergonomic wrapper hooks** that add fallbacks and small conveniences
+over the raw members. Each is re-exported from the host package.
+
+```ts
+// useCountryAndLanguage
+const { getCountryAndLanguage, getLanguageCode, getIntlLanguageCode } = useCountryAndLanguage();
+getLanguageCode();      // "de_DE"
+getIntlLanguageCode();  // "de-de"
+
+// useLiterals — try getLiteral; on empty/throw → defaultValue ?? key
+const { t } = useLiterals();
+t('some.key', 'fallback');
+
+// useAppVersion — '' when the host returns null
+const { getAppVersion } = useAppVersion();
+
+// useTrackEvent
+const { trackEvent } = useTrackEvent();
+trackEvent('view_item', { id: 42 });
+
+// useOpenUrl — open(url) → openUrl({ url })
+const { open } = useOpenUrl();
+open('https://example.com');
+```
+
+<Aside type="tip" title="Testing">
+Unit tests mock `useHost` directly — the wrapper hooks resolve against the mock, so you do not
+need a running BridgeKit runtime to test feature code that reads the host.
+</Aside>
+
+## The native provider side
+
+The generator emits a provider type per platform: a Kotlin `interface` and a Swift `protocol`.
+The host app implements it; the concrete implementation lives in the **host application**,
+**not** in the BridgeKit framework.
+
+<Tabs syncKey="native">
+  <TabItem label="Kotlin">
+  ```kotlin
+  interface ExampleHost {
+      fun getCountryAndLanguage(): GetCountryAndLanguageResult
+      fun getLiteral(params: GetLiteralParams): String
+      fun getAppVersion(): String
+      fun trackEvent(params: TrackEventParams)
+      fun openUrl(params: OpenUrlParams)
+  }
+  ```
+  </TabItem>
+  <TabItem label="Swift">
+  ```swift
+  public protocol ExampleHost: AnyObject {
+      func getCountryAndLanguage() throws -> GetCountryAndLanguageResult
+      func getLiteral(_ params: GetLiteralParams) throws -> String
+      func getAppVersion() throws -> String
+      func trackEvent(_ params: TrackEventParams)
+      func openUrl(_ params: OpenUrlParams)
+  }
+  ```
+  </TabItem>
+</Tabs>
+
+The three `Sync` members run on the synchronous path; `trackEvent` and `openUrl` run on the
+async/fire path (they return nothing). The Swift protocol is shipped through the
+`BridgeKitContracts` module inside `BridgeKit.xcframework` (see [Installation](/start/installation/)).
+
+## Versioning & drift
+
+Each contract carries a stable hash of the full descriptor (id plus every member kind and its
+param/result schemas). It appears in the generated Kotlin, the generated Swift, and
+`bridgekit.lock`. Per-member hashes give fine-grained drift attribution.
+
+If the TypeScript contract changes — a member added or a schema altered — the hash changes,
+`bridgekit.lock` drifts, and `bridgekit generate --check` fails until the bindings are
+regenerated and committed. See [Drift detection](/codegen/drift/).
+
+## What `example.host` does **not** expose
+
+The host surface is deliberately small. It does **not** include:
+
+- **Auth / session / identity** — no user, token, or login state.
+- **Navigation** beyond `openUrl` — no push/pop, no screen registry. `openUrl` covers
+  external URLs and deep links only.
+- **Feature flags / remote config.**
+- **Push notifications.**
+- **Storage** of any kind, including secure storage.
+- **Device info beyond version** — no OS version, model, or connectivity.
+- **Streams or state** — every member is a synchronous read or a fire-and-forget call.
+
+`eventParams` on `trackEvent` is intentionally untyped (`t.optional(t.json())`). The host is a
+global capability surface by design, not a place to add feature-specific behavior — feature
+capabilities belong in feature-owned contracts (see the
+[migration guide](/guides/migration-connect/)).

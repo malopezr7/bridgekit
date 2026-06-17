@@ -1,0 +1,86 @@
+---
+title: 'Kotlin: provide & consume'
+description: The native API — provide a contract, consume a typed proxy, the DI-friendly instance pattern, and BridgeValue state.
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The Kotlin API mirrors the JS one. Every entry point takes a `BridgeKit` instance, defaulting
+to the shared `BridgeKit.default` — so tests substitute instances and feature code uses the
+one it was handed.
+
+## Provide a contract
+
+Implement the generated interface, then register a **lazy** factory:
+
+```kotlin
+class ConnectHostProvider(private val deps: ConnectDeps) : ConnectHost {
+  override suspend fun isLoggedIn(): Boolean = deps.session.isLoggedIn()
+  override suspend fun installEsim(params: InstallEsimParams): InstallEsimResult = deps.esim.install(params)
+  override fun showLogin() { deps.nav.toLogin() }
+  override fun otpCodes(): Flow<String> = deps.sms.codes()
+  override val connectivity = MutableStateFlow(Connectivity(online = true))
+}
+
+val binding = bridgekit.provide(ConnectHostContract, Scope.global) { ConnectHostProvider(deps) }
+// later:
+binding.close()
+```
+
+- The factory is **lazy** — invoked on first resolution unless `eager = true`.
+- One live binding per `(contract, scope)`; a duplicate `provide` replaces with a dev warning.
+- `binding.close()` is handle-scoped and a no-op if already superseded.
+
+## Consume a contract
+
+`consume` returns a typed proxy. It **suspends** until *(dispatcher connected AND contract
+provided)*, bounded by the readiness timeout:
+
+```kotlin
+val lia = bridgekit.consume(LiaFeatureContract)   // suspend, readiness-bounded
+val count = lia.getUnreadCount()
+lia.sessionStatus.collect { value -> /* BridgeValue<SessionStatus> */ }
+```
+
+Non-suspending and explicit alternatives:
+
+```kotlin
+val maybe = bridgekit.tryConsume(LiaFeatureContract)        // null if not ready
+if (bridgekit.isProvided(LiaFeatureContract)) { /* ... */ }
+bridgekit.awaitProvided(LiaFeatureContract, timeout)        // explicit wait
+```
+
+<Aside type="caution">
+Never wrap a consume/await in `runBlocking` on the main thread — the blocking wait path
+detects the main looper and **fails fast with a loud error** naming the contract, rather than
+risking an ANR. See [Threading model](/runtime/threading/).
+</Aside>
+
+## State is `BridgeValue<T>`
+
+Consumed state carries availability:
+
+```kotlin
+lia.sessionStatus.collect { v ->
+  when (v) {
+    is BridgeValue.Available -> render(v.value)
+    is BridgeValue.Initial   -> render(v.value)         // seeded initial, no provider yet
+    is BridgeValue.Unprovided -> showStale(v.lastKnown) // binding closed
+  }
+}
+```
+
+## The DI-friendly instance pattern
+
+Generated proxy factories and lifecycle extensions take `bridgekit: BridgeKit =
+BridgeKit.default`. Feature code uses the instance it received — `BridgeKitModule.register`
+passes one (see [Auto-discovery](/usage/discovery/)) — and tests pass a
+`BridgeKit(testTransport)`.
+
+```kotlin
+class LiaController(private val bridgekit: BridgeKit) {
+  suspend fun unread() = bridgekit.consume(LiaFeatureContract).getUnreadCount()
+}
+```

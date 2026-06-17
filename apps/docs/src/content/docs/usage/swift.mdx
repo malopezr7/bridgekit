@@ -1,0 +1,167 @@
+---
+title: 'Swift: provide & consume'
+description: The native Swift API — provide a contract, consume a typed proxy, BridgeValue state streams, scopes, and readiness checks.
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The Swift API mirrors the Kotlin one. Every entry point goes through `BridgeKitRuntime.default`
+— the shared singleton that installs itself as the `BridgeKitNative` delegate at app init.
+
+## Imports
+
+```swift
+import BridgeKit        // runtime: BridgeKitRuntime, Binding, BridgeValue, Scope, BridgeKitError
+import BridgeKitContracts   // generated types: contract objects, provider protocols, structs
+```
+
+App code never imports `NitroModules`. The C++ seam is hidden inside the `BridgeKit.xcframework`
+binary; the `BridgeKit` and `BridgeKitContracts` modules expose a pure-Swift interface. See
+[Installation](/start/installation/) for how to add the xcframework to your project.
+
+## Provide a contract
+
+Implement the generated protocol, then register a factory:
+
+```swift
+import BridgeKitContracts
+
+final class MyExampleHostImpl: ExampleHost {
+    func getCountryAndLanguage() throws -> GetCountryAndLanguageResult {
+        GetCountryAndLanguageResult(country: "DE", language: "de")
+    }
+    func getLiteral(_ params: GetLiteralParams) throws -> String {
+        NSLocalizedString(params.key, comment: "")
+    }
+    func getAppVersion() throws -> String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+    }
+    func trackEvent(_ params: TrackEventParams) {
+        Analytics.shared.track(name: params.eventName)
+    }
+    func openUrl(_ params: OpenUrlParams) {
+        UIApplication.shared.open(URL(string: params.url)!)
+    }
+}
+
+// In AppDelegate or App.swift, before the React Native bridge starts:
+let binding = BridgeKitRuntime.default.provide(ExampleHostContract()) { MyExampleHostImpl() }
+```
+
+- The factory is **lazy** — invoked on first resolution.
+- Pass `scope: .global` (default), `.feature(name:)`, or `.instance(feature:tag:)` to scope
+  the binding.
+- `binding.close()` de-registers the provider and signals `Unprovided` to any active consumers.
+- There is no `ServiceLoader` on iOS. Providers must be registered explicitly — typically in
+  `AppDelegate.application(_:didFinishLaunchingWithOptions:)` or the `@main` App body —
+  **before** the React Native bridge initializes.
+
+## Consume a contract
+
+`consume` returns a typed client proxy. Call methods directly:
+
+```swift
+import BridgeKit
+import BridgeKitContracts
+
+let client: any ExampleHostClient = BridgeKitRuntime.default.consume(ExampleHostContract())
+
+// async query:
+let version = try await client.getAppVersion()
+
+// fire (no result, errors swallowed):
+client.trackEvent(TrackEventParams(eventName: "app_started"))
+```
+
+### Readiness checks
+
+```swift
+// Non-blocking check:
+let ready = BridgeKitRuntime.default.isProvided(ExampleHostContract())
+
+// Async wait with timeout (throws BridgeKitError.CONTRACT_NOT_PROVIDED on timeout):
+try await BridgeKitRuntime.default.awaitProvided(ExampleHostContract(), timeoutMs: 5_000)
+```
+
+<Aside type="caution">
+`invokeSync` toward a JS-provided contract throws `BridgeKitError.NOT_SUPPORTED`. JS cannot
+be called synchronously from native. If you need a synchronous result, restructure the call
+as a `query` and use `try await`. See [Threading model](/runtime/threading/) for why.
+</Aside>
+
+## State is `BridgeValue<T>`
+
+Consumed state arrives as an `AsyncStream<BridgeValue<T>>`. Iterate it on a background `Task`
+and dispatch to the main actor when updating UI:
+
+```swift
+Task {
+    for await bv in client.connectivity {
+        switch bv {
+        case .available(let v):    updateUI(v)         // provider live, value fresh
+        case .initial(let v):      updateUI(v)         // seeded initial, no provider yet
+        case .replacing(let last): showStale(last)     // epoch swap in progress (250ms grace)
+        case .unprovided(let last): showOffline(last)  // binding closed
+        }
+    }
+}
+```
+
+`BridgeValue<T>` has four cases:
+
+| Case | Meaning |
+|---|---|
+| `.available(T)` | Provider live, value is current. |
+| `.initial(T)` | Seeded from descriptor initial; no active provider yet. |
+| `.replacing(T?)` | Epoch swap in progress; last-known value held for up to 250ms. |
+| `.unprovided(T?)` | Binding closed; last-known value held if available. |
+
+## Scopes
+
+```swift
+// Global (default) — lives for the lifetime of the runtime:
+BridgeKitRuntime.default.provide(MyContract()) { MyImpl() }
+
+// Feature — tied to a named feature surface:
+BridgeKitRuntime.default.provide(MyContract(), scope: .feature(name: "connect")) { MyImpl() }
+
+// Instance — tied to a specific tagged instance of a feature:
+BridgeKitRuntime.default.provide(
+    MyContract(),
+    scope: .instance(feature: "checkout", tag: sessionId)
+) { MyImpl() }
+```
+
+Close the binding when the scope ends (e.g. on `viewDidDisappear` or `onDisappear`):
+
+```swift
+let binding = BridgeKitRuntime.default.provide(MyContract(), scope: .feature(name: "checkout")) {
+    CheckoutImpl()
+}
+// later:
+binding.close()
+```
+
+## Provider registration timing
+
+iOS has no `ServiceLoader` equivalent. Every provider must be registered **before** the React
+Native bridge calls `connectDispatcher`. The recommended location is
+`AppDelegate.application(_:didFinishLaunchingWithOptions:)` for global-scope providers:
+
+```swift
+func application(
+    _ application: UIApplication,
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+) -> Bool {
+    // Register global providers before React Native bridge starts:
+    _ = BridgeKitRuntime.default.provide(ExampleHostContract()) { ExampleHostImpl() }
+    // then initialize the bridge...
+    return true
+}
+```
+
+For feature- and instance-scoped providers, register when the feature surface becomes active
+and close the binding when it disappears. See [Auto-discovery (Android)](/usage/discovery/)
+for the Android ServiceLoader equivalent.

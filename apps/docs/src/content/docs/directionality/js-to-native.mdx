@@ -1,0 +1,134 @@
+---
+title: JS → Native
+description: The primary direction — native provides a capability, React Native consumes it. Methods, streams and state flowing from Kotlin to JS.
+sidebar:
+  order: 1
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+<span class="dir-pill">JS consumes · Native provides</span>
+
+This is the primary direction for **host / platform capabilities**: a native provider
+registers an implementation, and React Native consumes it through a typed proxy. Both
+Android (Kotlin) and iOS (Swift) are fully supported.
+
+## Methods
+
+The JS proxy mirrors the contract's methods. `query` becomes an `async` call; `fire` returns
+nothing; `querySync` reads synchronously.
+
+```tsx
+const connect = useBridge(ConnectHost);
+
+await connect.installEsim({ url, iccId });   // query → Promise<'success' | ...>
+connect.showLogin();                          // fire → void
+const info = connect.getDeviceInfo();         // querySync → value, synchronously
+```
+
+Native implements the generated interface:
+
+<Tabs>
+<TabItem label="Kotlin">
+```kotlin
+class ConnectHostProvider : ConnectHost {
+  override suspend fun isLoggedIn(): Boolean = session.isLoggedIn()
+  override suspend fun installEsim(params: InstallEsimParams): InstallEsimResult = /* ... */
+  override fun showLogin() { /* ... */ }
+}
+
+BridgeKit.default.provide(ConnectHostContract) { ConnectHostProvider() }
+```
+</TabItem>
+<TabItem label="Swift">
+```swift
+final class ConnectHostProvider: ConnectHost {
+  func isLoggedIn() throws -> Bool { session.isLoggedIn() }
+  func installEsim(_ params: InstallEsimParams) async throws -> InstallEsimResult { /* ... */ }
+  func showLogin() { /* ... */ }
+}
+
+let binding = BridgeKitRuntime.default.provide(ConnectHostContract()) { ConnectHostProvider() }
+```
+</TabItem>
+</Tabs>
+
+<Aside type="note">
+A JS call into a not-yet-provided contract **waits, bounded** — it covers the
+Activity-recreation / view-controller lifecycle gap instead of failing instantly. A binding
+closing with reason `replacing` holds incoming calls for a short grace window; only a final
+close yields `CONTRACT_NOT_PROVIDED`.
+</Aside>
+
+## Streams (native → JS)
+
+The provider exposes a platform stream type; BridgeKit collects it **once** per `(binding,
+stream, params)` and multiplexes to every JS subscriber.
+
+<Tabs>
+<TabItem label="Kotlin">
+```kotlin
+override fun otpCodes(): Flow<String> = smsRetriever.codes()
+```
+</TabItem>
+<TabItem label="Swift">
+```swift
+func otpCodes() -> AsyncStream<String> {
+    AsyncStream { continuation in
+        let task = Task { for await code in smsRetriever.codes() { continuation.yield(code) } }
+        continuation.onTermination = { _ in task.cancel() }
+    }
+}
+```
+</TabItem>
+</Tabs>
+
+```tsx
+const codes = connect.otpCodes();
+const off = codes.subscribe((code) => setOtp(code));   // Unsubscribe
+// or: for await (const code of codes) { ... }
+```
+
+Closing the JS subscription cancels the underlying collection. The default backpressure is a
+lossless bounded buffer (drop-oldest + logged diagnostic on overflow).
+
+## State (native → JS)
+
+Native owns a mutable reactive value; the router subscribes to it and feeds updates into the
+`StateStore`. On the JS side a **StateMirror** subscribes via `BridgeState.observe()` and
+serves `useBridgeState` through `useSyncExternalStore`.
+
+<Tabs>
+<TabItem label="Kotlin">
+```kotlin
+override val connectivity = MutableStateFlow(Connectivity(online = true))
+```
+</TabItem>
+<TabItem label="Swift">
+```swift
+// Expose state as an AsyncStream — the runtime subscribes in a background Task.
+var connectivity: AsyncStream<Connectivity> { get }
+```
+</TabItem>
+</Tabs>
+
+```tsx
+const { value, status } = useBridgeState(ConnectHost, 'connectivity');
+// status: 'initial' | 'available' | 'unprovided'
+```
+
+Two properties make this cheap and total:
+
+1. **`get()` is always local** — it reads the cached mirror, never crossing the bridge.
+2. **Hydration on connect** — `connectDispatcher` returns a snapshot of all native-provided
+   state, so JS mirrors are populated the instant the runtime connects. `BridgeKitReady`
+   implies hydrated mirrors.
+
+Per-hook subscriptions never cross the bridge: there is exactly **one** multiplexed native
+observation per `(contract, state key)`, released via `unobserve` when the JS subscriber
+count reaches zero.
+
+---
+
+The mirror image of this page — native calling into JS — is **[Native → JS
+(reverse)](/directionality/native-to-js/)**.

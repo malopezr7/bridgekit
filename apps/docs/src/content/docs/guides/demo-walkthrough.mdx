@@ -1,0 +1,290 @@
+---
+title: End-to-end demo walkthrough
+description: A complete real app — the BridgekitDemo screen — traced from four contracts through JS providers and global registration to the screen, proving all directions on-device.
+sidebar:
+  order: 1
+---
+
+import { Steps, Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+This is the real demo that validated BridgeKit on-device — on **both** platforms. The same
+four contracts drive a React Native screen against an Android (Kotlin) provider and against an
+iOS (Swift) provider with UI parity. It exercises **every** direction and **every** marker. We
+trace it from contracts to screen using the actual source.
+
+## The four contracts
+
+Each contract proves a different slice of the matrix.
+
+```ts
+// demo-host.contract.ts — NATIVE provides, JS consumes
+export const useDemoHost = defineContract('bridgekit.demo-host', {
+  methods: { ping: Async<{ message: string }, { reply: string; epoch: number }>(), increment: Async<number>(), say: Void<{ text: string }>() },
+  streams: { ticker: Stream<number>(), echoes: Stream<string>() },
+  state:   { counter: State<number>(0) },
+});
+```
+
+```ts
+// demo-jsinfo.contract.ts — JS provides, NATIVE consumes
+// (the bridgekit equivalent of the old getReactNativeVersion / getUserLevel Nitro modules)
+export const useDemoJsinfo = defineContract('bridgekit.demo-jsinfo', {
+  methods: { getReactNativeVersion: Async<string>(), getUserLevel: Async<{ level: number; label: string }>(), getUserSegments: Async<string[]>() },
+  streams: { clockTicks: Stream<number>() },
+});
+```
+
+```ts
+// demo-reverse.contract.ts — JS provides, NATIVE consumes — ALL four markers
+export const useDemoReverse = defineContract('bridgekit.demo-reverse', {
+  methods: { greetFromJs: Async<{ name: string }, string>(), onNativeEvent: Void<{ type: string; payload?: unknown }>() },
+  streams: { jsCounter: Stream<number>() },
+  state:   { jsStatus: State<string>('js-idle') },
+});
+```
+
+```ts
+// localhost.contract.ts — pure JS, local-first (never registered in Kotlin)
+export const useLocalhost = defineContract('bridgekit.localhost', {
+  methods: { getMotto: Sync<string>(), greet: Async<{ name: string }, string>() },
+  state:   { mood: State<string>('happy') },
+});
+```
+
+## 1. Implement the JS providers
+
+```ts
+// providers.ts
+import { streamSource } from '@malopezr7/bridgekit';
+
+export const jsInfoImpl = {
+  getReactNativeVersion: () => Promise.resolve(RN_VERSION),
+  getUserLevel: () => Promise.resolve({ level: 3, label: 'Senior Engineer' }),
+  getUserSegments: () => Promise.resolve(['employee', 'premium', 'beta-tester']),
+  clockTicks: () => streamSource<number>((emit) => {
+    let tick = 0;
+    const iv = setInterval(() => { emit(tick); tick += 1; }, 1000);
+    return () => clearInterval(iv);            // teardown
+  }),
+};
+
+export const localhostImpl = {
+  getMotto: () => 'Bridge the gap. Own the contract.',
+  greet: async ({ name }: { name: string }) => `Hello, ${name}! Resolved entirely in JS.`,
+};
+
+export const demoReverseImpl = {
+  greetFromJs: ({ name }: { name: string }) => Promise.resolve(`Hi ${name}, from JS reverse provider!`),
+  onNativeEvent: ({ type, payload }: { type: string; payload?: unknown }) =>
+    console.log(`[BridgeKit] Void received: type=${type} payload=${JSON.stringify(payload)}`),
+  jsCounter: () => streamSource<number>((emit, end) => {
+    let tick = 0;
+    const iv = setInterval(() => { emit(tick); tick += 1; if (tick >= 20) { clearInterval(iv); end(); } }, 500);
+    return () => clearInterval(iv);
+  }),
+};
+```
+
+## 2. Register the always-on providers globally
+
+`registerHostProviders.ts` is imported **once at the JS entry point** — a module-load side
+effect, never inside a component. It registers the providers native may consume at any time,
+regardless of which screen is visible.
+
+```ts
+// registerHostProviders.ts
+import { getDefaultBridgeKit } from '@malopezr7/bridgekit';
+
+const bk = getDefaultBridgeKit();
+
+// native consumes JS — binding lives for the bundle lifetime, never closed
+export const jsInfoBinding = bk.provide(useDemoJsinfo, jsInfoImpl);
+
+// must exist before the screen's first consumer snapshot, so the local State
+// handle resolves local-first instead of creating a transport-backed mirror
+export const localhostBinding = bk.provide(useLocalhost, localhostImpl);
+```
+
+<Aside type="caution" title="Registration timing">
+The `BRIDGE_NOT_READY` readiness window is bounded. Providers that native consumes must be
+registered **before** native tries to consume them — that's why this lives at the entry
+point, not in a component effect.
+</Aside>
+
+## 3. Wire consumers + logic in one hook
+
+`useDemoState` centralises all stateful logic so the screen stays pure layout. The key moves:
+
+#### Provide `demo.reverse` with a binding ref (needs `setState`)
+
+```ts
+const reverseBindingRef = useRef<Binding | null>(null);
+
+useEffect(() => {
+  const bk = getDefaultBridgeKit();
+  const binding = bk.provide(useDemoReverse, demoReverseImpl);
+  reverseBindingRef.current = binding;
+  return () => { binding.close('final'); reverseBindingRef.current = null; };
+}, []);
+
+// cycle the JS-owned state every 3s → native observes the change
+useEffect(() => {
+  const iv = setInterval(() => {
+    const next = nextStatus();
+    reverseBindingRef.current?.setState('jsStatus', next);  // JS → native state push
+  }, 3000);
+  return () => clearInterval(iv);
+}, []);
+```
+
+#### Consume `demo.host` in a single snapshot
+
+```ts
+// One destructure → methods, stream accessors AND state handles from the SAME snapshot,
+// avoiding two buildSnapshot() calls that could yield mismatched mirrors.
+const { ping, increment, say, ticker, echoes, state: hostState } = useDemoHost();
+const counterHandle = hostState.counter;            // StateHandle<number>
+
+const { getMotto, greet, state: localhostState } = useLocalhost();
+const localhostMoodHandle = localhostState.mood;
+```
+
+#### Subscribe to streams and state
+
+```ts
+// counter state → React state
+useEffect(() => counterHandle.subscribe(setCounterValue), []);
+
+// native ticker stream
+useEffect(() => {
+  const unsub = ticker().subscribe((v) => setTickerValues((p) => [...p, v].slice(-20)));
+  return unsub;
+}, []);
+
+// native echoes back uppercased 'say' payloads
+useEffect(() => {
+  const unsub = echoes().subscribe((text) => setEchoEntries((p) => [...p.slice(-19), entry(text)]));
+  return unsub;
+}, []);
+
+// local-first mood state
+useEffect(() => localhostMoodHandle.subscribe(setMood), []);
+```
+
+<Aside type="note" title="Why effects here are correct">
+These effects synchronize with an **external system** (the bridge stream/state source) and
+return their unsubscribe as cleanup. That is the legitimate use of an effect — subscribing to
+something outside React. Reads at render time (`counterHandle.get()`, `getMotto()`) stay
+synchronous and local.
+</Aside>
+
+#### Handlers
+
+```ts
+const handlePing = async () => {
+  const r = await ping({ message: pingMessage });          // JS → native async
+  setPingResult(`${r.reply} · epoch ${r.epoch}`);
+};
+const handleSay = () => say({ text });                     // JS → native fire
+const handleMoodCycle = () =>                              // write local-first state
+  getDefaultBridgeKit().registry.resolve(useLocalhost.id, GLOBAL_SCOPE)?.binding.setState('mood', next);
+```
+
+## 4. The screen is pure composition
+
+```tsx
+// screens/BridgekitDemo/index.native.tsx
+function BridgekitDemo() {
+  const s = useDemoState();
+  return (
+    <ScrollView>
+      <NativeToJsSection {...s} />   {/* native → JS: ping, counter, ticker, echoes */}
+      <JsToNativeSection {...s} />   {/* JS → native: version, level, segments, jsStatus */}
+      <LocalSection {...s} />        {/* local-first: motto, greet, mood */}
+    </ScrollView>
+  );
+}
+```
+
+## 5. The native side provides `demo.host`
+
+The screen above consumes `demo.host`; the native side provides it. The provider is the same
+shape on both platforms — `ping`/`increment` as async, `say` as void, `ticker`/`echoes` as
+streams, `counter` as native-owned state. The generated binding is a plain Kotlin `interface`
+and a plain Swift `protocol`; you implement it directly.
+
+<Tabs>
+<TabItem label="Kotlin">
+
+```kotlin
+// BridgekitDemoInitializer.kt — registered once at app init
+val bridgeKit = BridgeKit.default
+bridgeKit.initialize(host)
+bridgeKit.provide(BridgekitDemoHostContract, Scope.Global, eager = true) { DemoHostImpl() }
+
+class DemoHostImpl : BridgekitDemoHost {
+  override val counter = MutableStateFlow(0.0)
+  private val sayChannel = MutableSharedFlow<String>(replay = 1, extraBufferCapacity = 64)
+
+  override suspend fun ping(p: PingParams) =
+    PingResult("pong: ${p.message}", System.currentTimeMillis().toDouble())
+  override suspend fun increment(): Double { val n = counter.value + 1.0; counter.value = n; return n }
+  override fun say(p: SayParams) { sayChannel.tryEmit(p.text) }
+  override fun ticker(): Flow<Double> = flow { var t = 0.0; while (isActive) { emit(t++); delay(1000) } }
+  override fun echoes(): Flow<String> = sayChannel.map { it.uppercase() }
+}
+```
+
+</TabItem>
+<TabItem label="Swift">
+
+```swift
+// BridgekitDemoInitializer.swift — registered once at app init
+let bridgeKit = BridgeKitRuntime.default
+_ = bridgeKit.provide(BridgekitDemoHostContract(), scope: .global) { DemoHostImpl() }
+
+final class DemoHostImpl: BridgekitDemoHost {
+  func ping(_ p: PingParams) async throws -> PingResult {
+    PingResult(reply: "pong: \(p.message)", epoch: Double(Date().timeIntervalSince1970 * 1000))
+  }
+  func increment() async throws -> Double {
+    counterLock.lock(); _counter += 1; let v = _counter; counterLock.unlock(); pushCounter(v); return v
+  }
+  func say(_ p: SayParams) { echoText(p.text.uppercased()) }
+  func ticker() -> AsyncStream<Double> {
+    AsyncStream { cont in Task { var i = 0.0; while true {
+      try? await Task.sleep(nanoseconds: 1_000_000_000); i += 1; cont.yield(i)
+    } } }
+  }
+  func echoes() -> AsyncStream<String> { AsyncStream { cont in /* register continuation by UUID */ } }
+  var counter: AsyncStream<Double> { AsyncStream { cont in cont.yield(_counter); /* register */ } }
+}
+```
+
+</TabItem>
+</Tabs>
+
+The provider markers map the same way the [generated Swift](/codegen/generated-swift/) and
+[generated Kotlin](/codegen/generated-kotlin) bindings describe: `suspend fun` ↔ `async throws`,
+`Flow<T>` ↔ `AsyncStream<T>`, `MutableStateFlow<T>` ↔ a native-owned `AsyncStream<T>` getter.
+
+<Aside type="note" title="iOS demo C++ isolation (harness-only)">
+The iOS demo isolates all Nitro C++ interop in a dedicated `BridgeKitDemoKit` module, reached
+from the app target through an Objective-C shim (`NSClassFromString` + a selector). That keeps
+C++ headers out of the demo app target. This is a **demo-harness** detail tied to the
+CocoaPods build — the production the host app end-state needs none of it: it is pure SPM with
+Swift-only facades. See [Migrating Connect to BridgeKit](/guides/migration-connect/).
+</Aside>
+
+## What each part proves
+
+| Surface | Direction | Markers exercised |
+|---|---|---|
+| `demo.host` | native → JS | `Async` (ping, increment), `Void` (say), `Stream` (ticker, echoes), `State` (counter) |
+| `demo.jsinfo` | JS → native | `Async` ×3, `Stream` (clockTicks) |
+| `demo.reverse` | JS → native | **all four** — `Async`, `Void`, `Stream`, `State` (incl. JS→native state push) |
+| `localhost` | JS → JS (local-first) | `Sync`, `Async`, `State` — **no native crossing** |
+
+That single screen is the on-device proof that the four primitives work in **both**
+directions, against **both** native providers (Android Kotlin and iOS Swift), and that
+local-first resolution sidesteps the bridge entirely.

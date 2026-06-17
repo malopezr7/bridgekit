@@ -1,0 +1,145 @@
+---
+title: Methods, streams & state
+description: The three member kinds in depth — fire / query / querySync, stream options, and state semantics.
+sidebar:
+  order: 3
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+A contract has three buckets: **methods**, **streams**, and **state**. Each maps to a marker
+and a `t.*` form.
+
+## Methods
+
+#### `t.fire(params?)` · `Void<P>()`
+
+Fire-and-forget. No result. Failures (no provider, no method) produce an internal envelope:
+logged loudly in dev, dropped and counted in diagnostics in prod.
+
+```ts
+showLogin: t.fire(),                                  // no params
+trackEvent: t.fire(t.object({ name: t.string() })),  // with params
+```
+
+#### `t.query(result)` · `t.query(params, result, opts?)` · `Async<P, R>()`
+
+Async request/response. The `opts.timeoutMs` controls the per-method timeout:
+
+- a number → default-per-method timeout,
+- `null` → **never** times out (interactive actions: `pickMedia`, `showDatePicker`,
+  `installEsim`),
+- unset → no default; the caller may set a timeout per call.
+
+```ts
+isLoggedIn: t.query(t.boolean()),
+installEsim: t.query(InstallParams, InstallResult, { timeoutMs: null }),
+```
+
+#### `t.querySync(params, result)` · `Sync<P, R>()`
+
+A **constrained** synchronous read over the sync transport channel. The documented contract:
+**in-memory lookup only** on the provider side — dev builds assert the duration (`< 2ms`)
+and warn. It exists for parameterized render-time reads.
+
+<Aside type="caution">
+`querySync` is **only valid on native-provided contracts** — JS cannot be called
+synchronously from native. For most "read a value at render time" needs, model the data as
+**state** instead (see below); `querySync` is the escape hatch for genuinely parameterized
+sync reads.
+</Aside>
+
+## Streams
+
+```ts
+otpCodes: t.stream(t.string()),
+positions: t.stream(t.object({ lat: t.number(), lng: t.number() }), {
+  params: t.object({ highAccuracy: t.boolean() }),  // parameterized stream
+  latestOnly: true,                                 // conflation instead of buffering
+  sticky: true,                                     // auto-resubscribe across rebinds
+}),
+```
+
+| Option | Default | Effect |
+|---|---|---|
+| `params` | none | Schema for a parameterized stream (the params become part of the sharing key). |
+| `latestOnly` | `false` | Switch backpressure from a lossless bounded buffer to **conflation**. |
+| `sticky` | `false` | Opt into **auto-resubscribe** across provider rebinds. |
+
+The default is **lossless** — a bounded buffer (default 64, drop-oldest with a logged
+diagnostic). Streams replace events; conflation silently dropping discrete values is the
+wrong default, so you opt into it explicitly with `latestOnly`.
+
+The native provider returns a platform stream type:
+
+<Tabs>
+<TabItem label="Kotlin">
+```kotlin
+override fun otpCodes(): Flow<String> = smsRetriever.codes()
+```
+</TabItem>
+<TabItem label="Swift">
+```swift
+func otpCodes() -> AsyncStream<String> {
+    AsyncStream { continuation in
+        let task = Task { for await code in smsRetriever.codes() { continuation.yield(code) } }
+        continuation.onTermination = { _ in task.cancel() }
+    }
+}
+```
+</TabItem>
+</Tabs>
+
+## State
+
+```ts
+connectivity: t.state(t.object({ online: t.boolean() }), { online: false }),
+counter: State<number>(0),
+```
+
+The **initial value is required** — this is the keystone decision. It seeds the native store
+and the JS mirror *before any provider binds*, so reads are total (`get(): T`, never
+`undefined`). The render-gating dance dies here.
+
+State is provider-owned and **single-writer**, enforced by the router (`NOT_PROVIDER` if the
+non-owning side writes). Availability travels *with* the value:
+
+```text
+BridgeValue<T> = Available(value) | Initial(value) | Unprovided(lastKnown)
+```
+
+Binding close transitions observers to `Unprovided`; a re-provide resets to the new
+provider's current value with a normal change notification.
+
+The native provider exposes state as a platform-native reactive type:
+
+<Tabs>
+<TabItem label="Kotlin">
+```kotlin
+// Provider interface (generated)
+override val connectivity: MutableStateFlow<Connectivity>
+
+// Consumer side (generated client interface)
+val connectivity: StateFlow<BridgeValue<Connectivity>>
+```
+</TabItem>
+<TabItem label="Swift">
+```swift
+// Provider protocol (generated)
+var connectivity: AsyncStream<Connectivity> { get }
+
+// Consumer side (generated client protocol)
+var connectivity: AsyncStream<BridgeValue<Connectivity>> { get }
+```
+The provider yields values via the `AsyncStream` continuation; the runtime subscribes in a
+background `Task` and feeds `StateStore`. `BridgeValue.remap(_:)` re-types the carried value
+element-wise on the outbound path.
+</TabItem>
+</Tabs>
+
+<Aside type="tip">
+**The dictionary pattern.** The highest-frequency sync call in a typical app is a literal /
+translation lookup. Model it as state — `literals: t.state(t.record(t.string()), {})` pushed
+once per locale. Render-time reads become local-map lookups with **zero bridge traffic**,
+and they stay observable on locale change.
+</Aside>

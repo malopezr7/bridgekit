@@ -1,0 +1,91 @@
+---
+title: BridgeKit
+description: Typed, bidirectional communication between React Native and native code — contracts, providers, reactive streams and observable state.
+template: splash
+hero:
+  tagline: One contract in TypeScript drives everything — JS types, runtime metadata, and generated Kotlin and Swift. No bridge boilerplate, no event-emitter bugs, no render-gating dance.
+  actions:
+    - text: Get started
+      link: /start/introduction/
+      icon: right-arrow
+      variant: primary
+    - text: Where we came from
+      link: /start/where-we-came-from/
+      icon: open-book
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+## One definition, both sides
+
+You write a **contract** once. BridgeKit gives you a typed proxy on the JS side, a typed
+interface to implement on the native side — a Kotlin interface on Android, a Swift protocol
+on iOS — reactive streams, observable state, and the code generator keeps them in lockstep
+through a contract hash.
+
+```ts
+// connect-host.contract.ts — provided by NATIVE, consumed by RN
+import { defineContract, t } from '@malopezr7/bridgekit/contract';
+
+export const ConnectHost = defineContract('connect.host', {
+  methods: {
+    showLogin: t.fire(),                                  // fire-and-forget
+    isLoggedIn: t.query(t.boolean()),                     // async request/response
+    installEsim: t.query(
+      t.object({ url: t.string(), iccId: t.string() }),
+      t.literals('success', 'already-installed', 'cancelled', 'error'),
+      { timeoutMs: null },                                // interactive: never times out
+    ),
+  },
+  streams: {
+    otpCodes: t.stream(t.string()),                       // lossless buffered by default
+  },
+  state: {
+    connectivity: t.state(t.object({ online: t.boolean() }), { online: false }),
+  },
+});
+```
+
+<CardGrid>
+	<Card title="Bidirectional & typed" icon="random">
+		RN → native **and** native → RN. The same four markers — async, fire, stream, state —
+		work in both directions over one transport.
+	</Card>
+	<Card title="Contract-first codegen" icon="seti:typescript">
+		`bridgekit generate` reads your `.contract.ts` and emits committed, readable
+		**Kotlin and Swift** from the same source. Nitrogen never runs for feature code.
+	</Card>
+	<Card title="Reactive streams" icon="bars">
+		Lossless-by-default flows replace event emitters **and** polling. Backpressure,
+		sharing and cancellation are handled for you.
+	</Card>
+	<Card title="Observable state" icon="setting">
+		Provider-owned, single-writer, synchronously readable. Initial values make every
+		read total — the render-gating dance dies here.
+	</Card>
+	<Card title="Local-first resolution" icon="rocket">
+		A JS-provided contract resolves inside the runtime with zero native crossing —
+		web target, standalone mode and tests work without Kotlin.
+	</Card>
+	<Card title="Testable & observable" icon="approve-check">
+		In-memory loopback transport for plain Jest. Every op carries a correlation id;
+		`BridgeKit.dump()` prints bindings, streams, state and epoch.
+	</Card>
+</CardGrid>
+
+## Start reading
+
+<CardGrid>
+	<LinkCard title="What is BridgeKit" href="/start/introduction/" description="The problem it solves and the shape of the solution." />
+	<LinkCard title="Where we came from" href="/start/where-we-came-from/" description="feature-actions, NativeEventEmitter, connectGet* — and why they hurt." />
+	<LinkCard title="Core concepts" href="/start/concepts/" description="Contract, provider, consumer, scope, binding, state, stream, epoch." />
+	<LinkCard title="Quick start" href="/start/quickstart/" description="From an empty contract to a live round trip in five steps." />
+</CardGrid>
+
+:::note[Status]
+BridgeKit is **production-validated on Android (Kotlin) and iOS (Swift)**. Typed
+bidirectional contracts — async, fire, streams and state — are proven on-device on **both**
+platforms at parity, and Connect / the host app runs on BridgeKit over pure SPM. The
+remaining deferred target is the **web transport**; see [Limitations](/reference/limitations/).
+:::

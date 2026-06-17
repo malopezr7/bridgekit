@@ -1,0 +1,99 @@
+---
+title: React hooks
+description: useBridge, useBridgeState, useBridgeReady, useProvideBridge, the bridge() imperative API, and BridgeScopeProvider.
+sidebar:
+  order: 1
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The React surface is small and deliberately effect-free where it matters.
+
+```ts
+import {
+  bridge,
+  provideBridge,
+  useBridge,
+  useProvideBridge,
+  useBridgeState,
+  useBridgeReady,
+} from '@malopezr7/bridgekit';
+```
+
+## `useBridge(Contract, opts?)`
+
+Returns a **stable typed proxy**. Safe to destructure; the reference is stable across renders.
+
+```tsx
+const connect = useBridge(ConnectHost);
+const result = await connect.installEsim({ url, iccId });   // Promise<'success' | ...>
+const codes = connect.otpCodes();                           // { subscribe } + AsyncIterable
+```
+
+Scope it explicitly when you need to:
+
+```tsx
+const scoped = useBridge(ConnectHost, { scope: { kind: 'feature', feature: 'connect' } });
+```
+
+## `useBridgeState(Contract, key)`
+
+Subscribes to a state member and returns `{ value, status }`, backed by
+`useSyncExternalStore`. `value` is total — initial values guarantee it's never `undefined`.
+
+```tsx
+const { value: net, status } = useBridgeState(ConnectHost, 'connectivity');
+// status: 'initial' | 'available' | 'unprovided'
+return <Banner offline={!net.online} stale={status === 'unprovided'} />;
+```
+
+## `useBridgeReady(Contract)`
+
+A reactive readiness gate — one hook, not a dance. Readiness is **not monotonic**; it drops on
+runtime teardown and returns on reconnect.
+
+```tsx
+const ready = useBridgeReady(ConnectHost);
+if (!ready) return <Skeleton />;
+```
+
+## `useProvideBridge(Contract, impl)`
+
+Provide a contract **from JS** (the reverse direction). Auto-unregisters on unmount and is
+StrictMode-safe — a double mount supersedes harmlessly.
+
+```tsx
+useProvideBridge(LiaFeature, {
+  getUnreadCount: () => store.unread,
+});
+```
+
+## Imperative `bridge()` / `provideBridge()`
+
+Outside React (services, entry points, tests), use the imperative forms:
+
+```ts
+const connect = bridge(ConnectHost);
+await connect.isLoggedIn();
+
+const binding = provideBridge(LiaFeature, impl);
+binding.close();
+```
+
+## `BridgeScopeProvider`
+
+Sets the ambient feature + instance scope for a subtree. The instance tag is the React root
+view tag — the single source of truth for instance scoping.
+
+```tsx
+<BridgeScopeProvider feature="connect" instance={rootTag}>
+  {children}
+</BridgeScopeProvider>
+```
+
+<Aside type="tip">
+Streams returned by a proxy are subscribed imperatively (`stream.subscribe(cb)`), not via a
+`useEffect` that re-creates the stream each render. Subscribe in a stable place and return the
+unsubscribe as cleanup — see the [demo walkthrough](/guides/demo-walkthrough/) for the exact
+pattern used in the live app.
+</Aside>

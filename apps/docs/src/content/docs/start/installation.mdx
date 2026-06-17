@@ -1,0 +1,166 @@
+---
+title: Installation
+description: Wire BridgeKit into a real app — the Android AAR and host initialization, and the iOS xcframework / synthetic framework-alias packaging for SPM and CocoaPods.
+sidebar:
+  order: 5
+---
+
+import { Aside, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+The [quick start](/start/quickstart/) showed the round trip in isolation. This page is the
+setup that gets BridgeKit into a real app on each platform: where the native runtime comes
+from, how it is initialized, and the packaging constraints that matter.
+
+BridgeKit's transport is built on [Nitro](https://nitro.margelo.com/) modules, so on both
+platforms the native runtime ships as a prebuilt artifact rather than something you compile
+from this repo. You add the artifact, initialize the runtime once at process start, then
+`provide`/`consume` contracts as shown in [Using BridgeKit](/usage/kotlin/).
+
+## Android
+
+The Android runtime is the most mature target — full bidirectional round trips (async, fire,
+streams, state) run on a real device or emulator. Setup is three moving parts: the
+dependency, the one-time initialization, and provider auto-discovery.
+
+<Steps>
+
+1. **Add the BridgeKit dependency.** BridgeKit is a React Native native module backed by
+   `react-native-nitro-modules`; it ships as an AAR consumed through your app's existing
+   React Native / Gradle setup. The Nitro headers are delivered as a Prefab AAR
+   (`buildFeatures.prefab = true`), and a single `libBridgeKit.so` is built per ABI
+   (`armeabi-v7a`, `x86`, `x86_64`, `arm64-v8a`).
+
+   <Aside type="note">
+   Exact Gradle coordinates depend on how BridgeKit is distributed into your app (the
+   monorepo wires it via autolinking, not a public Maven coordinate). Follow your project's
+   established BridgeKit dependency wiring; the steps below are what matters regardless of how
+   the AAR arrives.
+   </Aside>
+
+2. **Initialize the runtime before React Native.** Call `BridgeKit.default.initialize(host)`
+   **before** `ReactManager.initialize()`. The initialization seeds the Nitro native
+   delegate (the `Router`) that every inbound call lands on.
+
+   ```kotlin
+   val bridgeKit = BridgeKit.default
+   bridgeKit.initialize(host)
+   // … then ReactManager.initialize(...)
+   ```
+
+3. **Register providers in the provide window.** Provider discovery must run **before**
+   `ReactManager.initialize()` as well — that is the window in which contracts are provided so
+   the JS side can resolve them on first connect. You can register explicitly:
+
+   ```kotlin
+   bridgeKit.provide(MyHostContract, Scope.Global, eager = true) { MyHostImpl() }
+   ```
+
+   …or let `ServiceLoader`-based auto-discovery register feature providers for you. See
+   [Discovery & auto-registration](/usage/discovery/) for the `ServiceLoader` contract and
+   the R8 keep rules it needs.
+
+</Steps>
+
+<Aside type="caution" title="Ordering is load-bearing">
+Both runtime initialization and provider discovery must precede
+`ReactManager.initialize()`. Providers registered after the React context comes up miss the
+initial connect snapshot. Consuming a JS-provided contract from the **main thread** throws —
+do it from a coroutine on `Dispatchers.Default` (see [Threading](/runtime/threading/)).
+</Aside>
+
+Once initialized, implementing and registering a provider is covered in
+**[Kotlin: provide & consume](/usage/kotlin/)**.
+
+## iOS
+
+iOS is at **parity** with Android — the same four markers run on-device, validated end to
+end. The interesting part of iOS setup is packaging: BridgeKit is a Nitro-backed Swift module
+with C++ interop, and the central constraint is that **consumers must not be forced to drag in
+Nitro/C++ headers**. BridgeKit solves this with a synthetic framework-alias approach.
+
+### What ships
+
+The build pipeline (`platforms/ios/Makefile`) archives every Swift module and produces a
+single xcframework:
+
+```text
+make all
+  → make update-podfile         # sets USE_FRAMEWORKS=static in the Podfile
+  → xcodebuild archive          # iphonesimulator + iphoneos
+  → xcodebuild -create-xcframework  → BridgeKit.xcframework
+  → sanitize-ios-public-module.py   # synthetic framework injection
+```
+
+The output is `BridgeKit.xcframework` with exactly **one binary** (`BridgeKit`); all Swift modules —
+`BridgeKit`, `BridgeKitContracts`, and the rest — are statically linked into it. The
+sanitize step then synthesizes, for each public module (`BridgeKit`, `BridgeKitContracts`) and
+each slice, a thin `{Module}.framework` whose:
+
+- `Modules/{Module}.swiftmodule/{triple}.swiftinterface` is a hand-authored **pure-Swift**
+  interface — no `import NitroModules`, no C++ types;
+- binary is a **symlink** to the real `BridgeKit` binary.
+
+Consumers see a clean Swift module; the actual code is the single linked `BridgeKit` binary. This
+is what lets a consumer import `BridgeKit` and `BridgeKitContracts` **without** enabling C++
+interop.
+
+<Aside type="caution" title="Do not enable SWIFT_OBJC_INTEROP_MODE in consumers">
+`BridgeKitContracts` itself is built with `SWIFT_OBJC_INTEROP_MODE = objcxx` (it imports
+BridgeKit → NitroModules C++). The synthetic `.swiftinterface` exists precisely to break that
+chain at the consumer boundary. Consumers point at the xcframework on
+`FRAMEWORK_SEARCH_PATHS` and import the pure-Swift modules — they do **not** turn on cxx
+interop and do **not** import `NitroModules`. The C++ seam stays hidden inside the binary.
+</Aside>
+
+### Consuming it
+
+<Tabs syncKey="ios-pkg">
+  <TabItem label="Swift Package Manager">
+  This is the target end-state:
+
+  - Add `BridgeKit.xcframework` as a `binaryTarget`, and put its directory on
+    `FRAMEWORK_SEARCH_PATHS` (e.g. `unsafeFlags: ["-F", "<xcframeworks-search-path>"]`).
+  - Import the pure-Swift facades — `import BridgeKit` for the runtime and
+    `import BridgeKitContracts` for the generated types. The app target links against `BridgeKit`.
+  - **No** `SWIFT_OBJC_INTEROP_MODE`, no C++ headers, no CocoaPods.
+
+  ```swift
+  // App.swift
+  @_implementationOnly import BridgeKit
+  @_implementationOnly import BridgeKitContracts
+
+  let bk = BridgeKitRuntime.default
+  let hostBinding = bk.provide(ExampleHostContract(), scope: .global) { MyHostImpl() }
+  ```
+  </TabItem>
+  <TabItem label="CocoaPods">
+  The generated Swift bindings are delivered through a **separate** `BridgeKitContracts` pod
+  (kept distinct from `BridgeKit.podspec` — two podspecs at the host package root would break
+  NitroActions autolinking):
+
+  ```ruby
+  pod 'BridgeKitContracts', :path => '../../packages/core/ios/contracts'
+  ```
+
+  The `BridgeKitContracts` pod sets `objcxx` + `c++20` and depends on `BridgeKit`. The Podfile
+  enforces static linking via `ENV['USE_FRAMEWORKS'] = "static"` (applied by
+  `make update-podfile` before archiving).
+  </TabItem>
+</Tabs>
+
+<Aside type="note" title="Linking & minimum version">
+BridgeKit, NitroModules and BridgeKitContracts are **statically linked** into the single `BridgeKit`
+binary (`USE_FRAMEWORKS=static`). Minimum deployment target is **iOS 15.1** — the engine uses
+the closure-based `AsyncStream { continuation in … }` form rather than the iOS-16
+`AsyncStream.makeStream()`.
+</Aside>
+
+In app code you do not need to import `NitroModules` — the C++ seam is hidden inside the
+framework binary. Providing and consuming from Swift is covered in
+**[Swift: provide & consume](/usage/swift/)**.
+
+## Where to next
+
+- **[Kotlin: provide & consume](/usage/kotlin/)** — implement and register a provider on Android.
+- **[Swift: provide & consume](/usage/swift/)** — the same on iOS.
+- **[Quick start](/start/quickstart/)** — the end-to-end round trip if you skipped it.

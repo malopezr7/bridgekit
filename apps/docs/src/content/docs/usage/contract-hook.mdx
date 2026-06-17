@@ -1,0 +1,96 @@
+---
+title: Marker contract hooks
+description: The Zustand-style callable hook returned by marker contracts — selectors, getState, scoped, useProvide, and StateHandle.
+sidebar:
+  order: 2
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+When you author a contract with the **marker API**, `defineContract` returns a
+**`ContractHook`** — a callable, Zustand-style hook that is *also* a `BridgeContract`. It is
+the most ergonomic way to consume a contract.
+
+```ts
+export const useDemoHost = defineContract('bridgekit.demo-host', {
+  methods: { ping: Async<{ message: string }, { reply: string; epoch: number }>(), increment: Async<number>(), say: Void<{ text: string }>() },
+  streams: { ticker: Stream<number>(), echoes: Stream<string>() },
+  state:   { counter: State<number>(0) },
+});
+```
+
+## Calling the hook
+
+```tsx
+// Full snapshot — methods, stream accessors, and a `state` map:
+const { ping, increment, say, ticker, echoes, state } = useDemoHost();
+
+// Selector form (subscribe to a slice):
+const counterHandle = useDemoHost((c) => c.state.counter);
+```
+
+The derived consumer merges three things:
+
+- **method signatures** — `ping`, `increment`, `say` (typed from the markers),
+- **stream accessors** — `ticker()`, `echoes()` returning subscribable streams,
+- **a `state` map** — each entry is a `StateHandle<V>`.
+
+## `StateHandle<V>`
+
+```ts
+interface StateHandle<V> {
+  get(): V;                              // imperative, synchronous, local
+  subscribe(cb: (v: V) => void): () => void;  // returns an unsubscribe
+}
+```
+
+```tsx
+const counter = state.counter;          // StateHandle<number>
+const now = counter.get();              // synchronous read
+const off = counter.subscribe(setCount);// subscribe, returns unsubscribe
+```
+
+## The full hook surface
+
+```ts
+interface ContractHook<T> {
+  (): DerivedConsumer<T>;                       // no-arg snapshot
+  <U>(selector: (c: DerivedConsumer<T>) => U): U; // selector
+  getState(): DerivedConsumer<T>;               // imperative, non-React
+  scoped(scope): ContractHook<T>;               // bind a scope
+  useProvide(impl: Partial<DerivedConsumer<T>>): void; // provide from JS
+  readonly id: string;
+  readonly hash: string;
+  readonly descriptor: MarkerContractDescriptor;
+}
+```
+
+### `getState()` — outside React
+
+```ts
+const { ping } = useDemoHost.getState();
+const { reply } = await ping({ message: 'hi' });
+```
+
+### `scoped(scope)` — a scoped variant
+
+```ts
+const featureHost = useDemoHost.scoped({ kind: 'feature', feature: 'demo' });
+const { counter } = featureHost().state;
+```
+
+### `useProvide(impl)` — provide from JS
+
+The reverse-direction provider, expressed on the same hook:
+
+```tsx
+useDemoReverse.useProvide({
+  greetFromJs: ({ name }) => Promise.resolve(`Hi ${name}`),
+  onNativeEvent: ({ type }) => { log(type); },
+});
+```
+
+<Aside type="note">
+`getState()` and `get()` never cross the bridge — they read the local mirror. They're the
+synchronous, render-safe reads. Crossing only happens for `query` / `fire` / opening a stream.
+</Aside>

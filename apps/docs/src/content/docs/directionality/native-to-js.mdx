@@ -1,0 +1,208 @@
+---
+title: Native → JS (reverse)
+description: The reverse direction — React Native provides, native consumes. All four markers (Async, Void, Stream, State) proven on-device on both Android and iOS.
+sidebar:
+  order: 2
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+<span class="dir-pill">Native consumes · JS provides</span>
+
+In the reverse direction, **JS registers an implementation** and native calls into it. All
+four markers — `Async`, `Void`, `Stream`, `State` — work native → JS over the real
+transport, proven on-device on **both Android (Kotlin) and iOS (Swift)**.
+
+The demo contract `bridgekit.demo-reverse` exercises every one:
+
+```ts
+// demo-reverse.contract.ts — provided by JS, consumed by NATIVE
+export const useDemoReverse = defineContract('bridgekit.demo-reverse', {
+  methods: {
+    greetFromJs: Async<{ name: string }, string>(),            // native awaits a JS result
+    onNativeEvent: Void<{ type: string; payload?: unknown }>(), // fire-and-forget into JS
+  },
+  streams: {
+    jsCounter: Stream<number>(),   // native collects JS-emitted values
+  },
+  state: {
+    jsStatus: State<string>('js-idle'),  // native observes JS-owned state
+  },
+});
+```
+
+## The native side: `OutboundCaller`
+
+Generated outbound code calls into a frozen `OutboundCaller` interface, implemented by
+`OutboundCallerImpl`. It is the native → JS call engine:
+
+<Tabs>
+<TabItem label="Kotlin">
+```kotlin
+@BridgeKitGeneratedApiV1
+interface OutboundCaller {
+  suspend fun invoke(member: String, payload: Map<String, Any?>?): Any?
+  fun invokeSync(member: String, payload: Map<String, Any?>?): Any?
+  fun fire(member: String, payload: Map<String, Any?>?)
+  fun stream(member: String, payload: Map<String, Any?>?): Flow<Any?>
+  fun state(member: String): StateFlow<BridgeValue<Any?>>
+}
+```
+</TabItem>
+<TabItem label="Swift">
+```swift
+// OutboundCallerImpl (internal) exposes the same surface via the generated typed client.
+// invokeSync throws BridgeKitError.NOT_SUPPORTED — JS cannot be called synchronously.
+// stream() returns AsyncThrowingStream<Any?, Error> backed by channels in the Router.
+// state(member:) returns AsyncStream<BridgeValue<Any?>> from StateStore.
+```
+</TabItem>
+</Tabs>
+
+Every outbound op first calls `awaitDispatcher()` — it parks until the JS dispatcher is
+connected (bounded by a readiness timeout) before sending anything across.
+
+## Async — native awaits a JS result
+
+<Tabs>
+<TabItem label="Kotlin">
+```kotlin
+val reply: String = demoReverse.greetFromJs(GreetFromJsParams(name = "Android"))
+```
+`OutboundCallerImpl.invoke()` parks on `awaitDispatcher()`, builds a call envelope, and hands
+it to `JsDispatcherCallbacks.onInvoke`. The result is collected through a
+`CompletableDeferred` guarded by `withTimeout(callTimeoutMs)`.
+</TabItem>
+<TabItem label="Swift">
+```swift
+let reverse = BridgeKitRuntime.default.consume(BridgekitDemoReverseContract(), scope: .global)
+let greeting = try await reverse.greetFromJs(GreetFromJsParams(name: "iOS"))
+```
+`OutboundCallerImpl.invoke()` polls `awaitDispatcher()`, wraps the continuation in an
+`OnceContinuation`, and races against `withBridgeTimeout`.
+</TabItem>
+</Tabs>
+
+```tsx
+useDemoReverse.useProvide({
+  greetFromJs: ({ name }) => Promise.resolve(`Hi ${name}, from JS!`),
+});
+```
+
+## Void — fire-and-forget into JS
+
+<Tabs>
+<TabItem label="Kotlin">
+```kotlin
+demoReverse.onNativeEvent(OnNativeEventParams(type = "native-tap", payload = "button_a"))
+```
+`OutboundCallerImpl.fire()` launches a coroutine on a supervised scope and **swallows all errors**.
+</TabItem>
+<TabItem label="Swift">
+```swift
+reverse.onNativeEvent(OnNativeEventParams(type: "native-tap", payload: "button_a"))
+```
+Swift `fire()` runs in a detached `Task` on a supervised scope; errors are swallowed.
+</TabItem>
+</Tabs>
+
+```tsx
+useDemoReverse.useProvide({
+  onNativeEvent: ({ type, payload }) => { console.log(`event: ${type}`); },
+});
+```
+
+<Aside type="note">
+`fire()` was the missing piece before the bidirectionality hardening — without it, native
+could not call JS fire-and-forget methods. It was added to the `OutboundCaller` interface and
+implemented in `OutboundCallerImpl` on both platforms.
+</Aside>
+
+## Stream — native subscribes to a JS-provided stream
+
+<Tabs>
+<TabItem label="Kotlin">
+```kotlin
+demoReverse.jsCounter().take(5).onEach { v -> Log.i(TAG, "tick=$v") }.launchIn(appScope)
+```
+`OutboundCallerImpl.stream()` returns a `callbackFlow`. After `awaitDispatcher()` it
+generates a `streamId`, maps it to a `Channel` in the router, and calls
+`callbacks.onStreamOpen(envelope)` to start the JS producer.
+</TabItem>
+<TabItem label="Swift">
+```swift
+Task {
+    var count = 0
+    for await v in reverse.jsCounter() {
+        count += 1
+        if count >= 5 { break }
+    }
+}
+```
+Swift `stream()` returns an `AsyncThrowingStream` backed by a channel registered in the
+Router. Breaking the loop sends `onStreamClose` to JS to tear down the producer.
+</TabItem>
+</Tabs>
+
+```tsx
+useDemoReverse.useProvide({
+  jsCounter: () => streamSource<number>((emit, end) => {
+    let n = 0;
+    const iv = setInterval(() => emit(n++), 1000);
+    return () => clearInterval(iv);   // teardown on close
+  }),
+});
+```
+
+On collector cancellation (break or scope cancel), `onStreamClose` is sent to JS.
+
+## State — native observes JS-owned state
+
+<Tabs>
+<TabItem label="Kotlin">
+```kotlin
+reverse.jsStatus.onEach { bv ->
+    when (bv) {
+        is BridgeValue.Available  -> Log.i(TAG, "state=${bv.value}")
+        is BridgeValue.Initial    -> Log.i(TAG, "initial(${bv.value})")
+        is BridgeValue.Replacing  -> Log.i(TAG, "replacing(${bv.lastKnown})")
+        is BridgeValue.Unprovided -> Log.i(TAG, "unprovided(${bv.lastKnown})")
+    }
+}.launchIn(appScope)
+```
+`OutboundCallerImpl.state(member)` returns `router.stateStore.getFlow(...)` as a `StateFlow<BridgeValue<T>>`.
+</TabItem>
+<TabItem label="Swift">
+```swift
+Task {
+    for await bv in reverse.jsStatus {
+        switch bv {
+        case .available(let v):     print("state=\(v)")
+        case .initial(let v):       print("initial(\(v))")
+        case .replacing(let last):  print("replacing(\(String(describing: last)))")
+        case .unprovided(let last): print("unprovided(\(String(describing: last)))")
+        }
+    }
+}
+```
+`OutboundCallerImpl.state(member:)` returns `AsyncStream<BridgeValue<T>>` from the `StateStore`.
+`BridgeValue.remap(_:)` re-types the carried value element-wise on the outbound path.
+</TabItem>
+</Tabs>
+
+```tsx
+// JS pushes state to native:
+const binding = bk.provide(useDemoReverse, demoReverseImpl);
+binding.setState('jsStatus', 'js-ready');
+```
+
+Under the hood, `binding.setState()` triggers `transport.pushProviderState(...)`, which
+routes to `StateStore.writeFromJs()` on the native side. The router rejects with
+`NOT_PROVIDER` if native already owns a binding for this contract — single-writer is
+enforced in **both** directions. Binding close transitions the native-side stream to
+`Unprovided`.
+
+---
+
+When the consumer and provider are **both in JS**, none of this transport machinery runs —
+see **[Local-first resolution](/directionality/local-first/)**.
