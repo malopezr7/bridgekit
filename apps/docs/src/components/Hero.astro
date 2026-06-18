@@ -1,0 +1,236 @@
+---
+// Custom splash hero — centred, jato-style: mono eyebrow, hierarchical title,
+// tagline, actions and a copyable install block, all with staggered fade-in.
+const { data } = Astro.locals.starlightRoute.entry;
+const { title = data.title, tagline, actions = [] } = data.hero || {};
+
+const eyebrow = 'React Native ↔ Native · Fully typed';
+const commands = ['pnpm add @malopezr7/bridgekit', 'pnpm bridgekit generate'];
+---
+
+<div class="bk-hero">
+	<p class="eyebrow fade-in">{eyebrow}</p>
+	<h1 data-page-title class="hero-title fade-in" style="--d: 0.06s" set:html={title} />
+	{tagline && <p class="hero-tagline fade-in" style="--d: 0.12s" set:html={tagline} />}
+	{
+		actions.length > 0 && (
+			<div class="hero-actions fade-in" style="--d: 0.18s">
+				{actions.map(({ link, text, variant = 'primary' }) => (
+					<a href={link} class:list={['hero-action', variant]}>
+						<span set:html={text} />
+						{variant === 'primary' && <span class="arrow" aria-hidden="true">{'→'}</span>}
+					</a>
+				))}
+			</div>
+		)
+	}
+	<div class="install fade-in" style="--d: 0.26s">
+		{
+			commands.map((cmd) => (
+				<div class="install-block">
+					<span class="prompt" aria-hidden="true">$</span>
+					<code>{cmd}</code>
+					<button class="copy" type="button" data-cmd={cmd} aria-label={`Copy: ${cmd}`}>
+						<svg class="i-copy" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+						<svg class="i-check" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+					</button>
+				</div>
+			))
+		}
+	</div>
+</div>
+
+<style>
+	.bk-hero {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		text-align: center;
+		gap: 1.6rem;
+		padding-block: clamp(3rem, 6vw, 6rem) clamp(2rem, 4vw, 4rem);
+	}
+
+	.eyebrow {
+		margin: 0;
+		font-family: var(--sl-font-mono);
+		font-size: 0.72rem;
+		letter-spacing: 0.22em;
+		text-transform: uppercase;
+		color: var(--sl-color-gray-3);
+	}
+
+	.hero-title {
+		margin: 0;
+		font-size: clamp(2.6rem, 1rem + 6vw, 5rem);
+		line-height: 1.04;
+		letter-spacing: -0.035em;
+		font-weight: 300;
+		color: var(--sl-color-white);
+		max-width: 16ch;
+	}
+	.hero-title :global(.hero-accent) {
+		font-weight: 600;
+		color: var(--sl-color-text-accent);
+	}
+
+	.hero-tagline {
+		margin: 0;
+		max-width: 46ch;
+		font-size: clamp(1rem, 0.9rem + 0.5vw, 1.2rem);
+		font-weight: 300;
+		line-height: 1.6;
+		color: var(--sl-color-gray-2);
+	}
+
+	.hero-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.9rem;
+		justify-content: center;
+		margin-top: 0.4rem;
+	}
+	.hero-action {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.45rem;
+		padding: 0.6rem 1.3rem;
+		border-radius: 999px;
+		font-size: 0.95rem;
+		font-weight: 500;
+		text-decoration: none;
+		transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+	}
+	.hero-action.primary {
+		background: var(--sl-color-text-accent);
+		color: var(--sl-color-black);
+		border: 1px solid var(--sl-color-text-accent);
+	}
+	.hero-action.primary:hover {
+		transform: translateY(-2px);
+		filter: brightness(1.06);
+	}
+	.hero-action.primary .arrow {
+		transition: transform 0.2s ease;
+	}
+	.hero-action.primary:hover .arrow {
+		transform: translateX(3px);
+	}
+	.hero-action.minimal {
+		color: var(--sl-color-white);
+		border: 1px solid var(--sl-color-gray-5);
+		background: transparent;
+	}
+	.hero-action.minimal:hover {
+		border-color: var(--sl-color-gray-4);
+		background: var(--sl-color-gray-6);
+	}
+
+	.install {
+		display: flex;
+		flex-direction: column;
+		gap: 0.6rem;
+		align-items: center;
+		margin-top: 0.6rem;
+	}
+	.install-block {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.7rem;
+		font-family: var(--sl-font-mono);
+		font-size: 0.85rem;
+		border: 1px solid var(--sl-color-gray-5);
+		background: var(--sl-color-bg-inline-code);
+		border-radius: 0.55rem;
+		padding: 0.2rem 0.2rem 0.2rem 0.95rem;
+		transition: border-color 0.2s ease;
+	}
+	.install-block:hover {
+		border-color: var(--sl-color-gray-4);
+	}
+	.install-block .prompt {
+		color: var(--sl-color-gray-3);
+		user-select: none;
+	}
+	.install-block code {
+		color: var(--sl-color-text);
+		background: none;
+		border: none;
+		padding: 0;
+		user-select: all;
+	}
+	.install-block .copy {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.5rem 0.65rem;
+		border: none;
+		border-left: 1px solid var(--sl-color-gray-5);
+		background: transparent;
+		color: var(--sl-color-gray-3);
+		cursor: pointer;
+		border-radius: 0 0.45rem 0.45rem 0;
+		transition: color 0.2s ease, background 0.2s ease;
+	}
+	.install-block .copy:hover {
+		color: var(--sl-color-text-accent);
+		background: var(--sl-color-gray-6);
+	}
+	.install-block .i-check {
+		display: none;
+		color: #5fb37a;
+	}
+	.install-block.copied .i-copy {
+		display: none;
+	}
+	.install-block.copied .i-check {
+		display: inline;
+	}
+
+	/* Staggered entrance — the jato signature. */
+	.fade-in {
+		opacity: 0;
+		transform: translateY(18px);
+		transition:
+			opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1),
+			transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+		transition-delay: var(--d, 0s);
+	}
+	.fade-in.visible {
+		opacity: 1;
+		transform: none;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.fade-in {
+			opacity: 1;
+			transform: none;
+			transition: none;
+		}
+	}
+</style>
+
+<script>
+	const obs = new IntersectionObserver(
+		(entries) => {
+			for (const e of entries) {
+				if (e.isIntersecting) {
+					e.target.classList.add('visible');
+					obs.unobserve(e.target);
+				}
+			}
+		},
+		{ threshold: 0.1 },
+	);
+	for (const el of document.querySelectorAll('.fade-in')) obs.observe(el);
+
+	for (const btn of document.querySelectorAll<HTMLButtonElement>('.install-block .copy')) {
+		btn.addEventListener('click', () => {
+			const cmd = btn.dataset.cmd || '';
+			navigator.clipboard.writeText(cmd).then(() => {
+				const block = btn.closest('.install-block');
+				if (!block) return;
+				block.classList.add('copied');
+				setTimeout(() => block.classList.remove('copied'), 1600);
+			});
+		});
+	}
+</script>

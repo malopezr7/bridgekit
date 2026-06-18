@@ -1,0 +1,58 @@
+---
+// Subtle mono wordmark + a few highlighted nav links, jato-style.
+const { siteTitle, siteTitleHref } = Astro.locals.starlightRoute;
+
+const navLinks = [
+	{ label: 'Quick start', href: '/start/quickstart/' },
+	{ label: 'Guides', href: '/guides/demo-walkthrough/' },
+	{ label: 'Reference', href: '/reference/cheatsheet/' },
+];
+---
+
+<div class="bk-titlebar sl-flex">
+	<a href={siteTitleHref} class="bk-wordmark" translate="no">{siteTitle}</a>
+	<nav class="bk-navlinks" aria-label="Highlighted">
+		{navLinks.map((l) => <a href={l.href}>{l.label}</a>)}
+	</nav>
+</div>
+
+<style>
+	.bk-titlebar {
+		align-items: center;
+		gap: 1.75rem;
+		min-width: 0;
+	}
+	.bk-wordmark {
+		font-family: var(--sl-font-mono);
+		font-size: 1rem;
+		font-weight: 500;
+		letter-spacing: -0.02em;
+		color: var(--sl-color-white);
+		text-decoration: none;
+		white-space: nowrap;
+	}
+	.bk-wordmark:hover {
+		color: var(--sl-color-text-accent);
+	}
+	.bk-navlinks {
+		display: none;
+		align-items: center;
+		gap: 1.25rem;
+	}
+	.bk-navlinks a {
+		font-size: 0.85rem;
+		color: var(--sl-color-gray-2);
+		text-decoration: none;
+		transition: color 0.2s ease;
+		white-space: nowrap;
+	}
+	.bk-navlinks a:hover {
+		color: var(--sl-color-white);
+	}
+	/* Only show the highlighted links when there's room. */
+	@media (min-width: 72rem) {
+		.bk-navlinks {
+			display: flex;
+		}
+	}
+</style>

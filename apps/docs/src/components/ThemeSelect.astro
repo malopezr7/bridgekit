@@ -1,0 +1,93 @@
+---
+// Sliding-knob light/dark toggle (jato-style), wired into Starlight's theme
+// system: it drives `data-theme` on <html> and the `starlight-theme` storage key.
+// Registered as a custom element so every instance (header + mobile menu) wires
+// itself up and survives Starlight's client-side re-renders.
+---
+
+<bk-theme-toggle>
+	<button class="toggle" type="button" aria-label="Toggle light / dark theme">
+		<span class="knob"><span class="ico" aria-hidden="true"></span></span>
+	</button>
+</bk-theme-toggle>
+
+<script>
+	class BkThemeToggle extends HTMLElement {
+		#observer?: MutationObserver;
+
+		connectedCallback() {
+			const btn = this.querySelector<HTMLButtonElement>('.toggle');
+			const ico = this.querySelector<HTMLElement>('.ico');
+			const current = (): 'light' | 'dark' =>
+				document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+			const render = () => {
+				const theme = current();
+				this.dataset.theme = theme;
+				if (ico) ico.textContent = theme === 'light' ? '☀️' : '🌙';
+			};
+
+			render();
+			btn?.addEventListener('click', () => {
+				const next = current() === 'light' ? 'dark' : 'light';
+				document.documentElement.dataset.theme = next;
+				try {
+					localStorage.setItem('starlight-theme', next);
+				} catch {}
+				render();
+			});
+
+			// Stay in sync if the theme changes elsewhere.
+			this.#observer = new MutationObserver(render);
+			this.#observer.observe(document.documentElement, {
+				attributes: true,
+				attributeFilter: ['data-theme'],
+			});
+		}
+
+		disconnectedCallback() {
+			this.#observer?.disconnect();
+		}
+	}
+
+	if (!customElements.get('bk-theme-toggle')) {
+		customElements.define('bk-theme-toggle', BkThemeToggle);
+	}
+</script>
+
+<style>
+	bk-theme-toggle {
+		display: inline-flex;
+		align-items: center;
+	}
+	.toggle {
+		position: relative;
+		width: 50px;
+		height: 28px;
+		padding: 0;
+		border: none;
+		border-radius: 999px;
+		cursor: pointer;
+		flex-shrink: 0;
+		background: var(--bk-toggle-bg);
+		transition: background 0.3s ease;
+	}
+	.knob {
+		position: absolute;
+		top: 3px;
+		left: 3px;
+		width: 22px;
+		height: 22px;
+		border-radius: 999px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 11px;
+		line-height: 1;
+		background: var(--bk-toggle-knob);
+		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+		transition: left 0.25s cubic-bezier(0.22, 1, 0.36, 1), background 0.3s ease;
+	}
+	bk-theme-toggle[data-theme='dark'] .knob {
+		left: 25px;
+	}
+</style>

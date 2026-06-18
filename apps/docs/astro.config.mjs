@@ -12,6 +12,29 @@ export default defineConfig({
 				'Typed, bidirectional communication between React Native and native code: contracts, providers, reactive streams and observable state.',
 			tagline: 'One contract. Both sides. No bridge boilerplate.',
 			customCss: ['./src/styles/global.css'],
+			components: {
+				Hero: './src/components/Hero.astro',
+				SiteTitle: './src/components/SiteTitle.astro',
+				ThemeSelect: './src/components/ThemeSelect.astro',
+				SocialIcons: './src/components/SocialIcons.astro',
+			},
+			social: [
+				{ icon: 'github', label: 'GitHub', href: 'https://github.com/malopezr7/bridgekit' },
+			],
+			head: [
+				{ tag: 'link', attrs: { rel: 'preconnect', href: 'https://fonts.googleapis.com' } },
+				{
+					tag: 'link',
+					attrs: { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: true },
+				},
+				{
+					tag: 'link',
+					attrs: {
+						rel: 'stylesheet',
+						href: 'https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap',
+					},
+				},
+			],
 			lastUpdated: true,
 			pagination: true,
 			tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 3 },
@@ -90,7 +113,6 @@ export default defineConfig({
 					label: 'Reference',
 					items: [
 						{ label: 'API cheat sheet', slug: 'reference/cheatsheet' },
-						{ label: 'Host contract', slug: 'reference/host-contract' },
 						{ label: 'Limitations & non-goals', slug: 'reference/limitations' },
 						{ label: 'Roadmap', slug: 'reference/roadmap' },
 					],

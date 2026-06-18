@@ -16,8 +16,7 @@ Android (Kotlin) and iOS (Swift):
 - The **Kotlin runtime** — registry, router, epoch manager, park buffer, state store,
   ServiceLoader discovery.
 - The **Swift runtime** — `Router`, `StateStore`, `StreamHub`, `OutboundCaller`, the Nitro
-  C++/Swift seam, and `BridgeKitRuntime.default`. At parity with Android, runtime-validated
-  with UI parity in a live iOS demo.
+  C++/Swift seam, and `BridgeKitRuntime.default`. At parity with Android.
 - The **TypeScript runtime** — registry, dispatcher, typed proxies, state mirrors, React
   hooks, marker contract hooks.
 - The **code generator** for **both** targets — `bridgekit generate --platform kotlin`
@@ -27,9 +26,8 @@ Android (Kotlin) and iOS (Swift):
   JS→native, including JS→native state push.
 - **Local-first resolution** for pure-JS providers.
 - The generic **Nitro transport** (the single Nitrogen-built component) on both platforms.
-- The **shared host contract** (`example.host`, owned by `the host package`) and **feature-owned
-  contracts** (e.g. `checkout.host`) — both in use after the feature migration. See
-  [the host contract](/reference/host-contract/) and
+- **Shared and feature-owned host contracts** — a globally-provided host contract plus
+  contracts owned and provided by a single feature at `Scope.Feature(...)`. See
   [migrating a feature](/guides/migration/).
 
 ## Still deferred
@@ -39,19 +37,16 @@ Part of the design and the API is shaped to accommodate them, but **not** built 
 | Area | Status |
 |---|---|
 | **Web transport** | Deferred. `LoopbackTransport` runs pure-JS providers in-process (web / test / standalone), but there is **no** formal web bridge yet. Local-first resolution already enables a pure-JS web target without a native side; a real transport is the remaining work. |
-| **Native binary payloads** | `t.binary()` exists in the TS DSL with a base64 codec, but a native binary round-trip is **not validated end-to-end** (Android has no binary-specific codec; the wire protocol carries no blobs). Treat it as a JS-level, experimental capability. |
+| **Native binary payloads** | `t.binary()` exists in the TS DSL with a base64 codec, but a native binary round-trip is **not validated end-to-end** (no native binary-specific codec; the wire protocol carries no blobs). Treat it as a JS-level, experimental capability. |
 | **Gradle-plugin discovery** | Discovery is ServiceLoader-based on Android and explicit registration at app init on iOS; a Gradle plugin remains a non-goal. |
 
-## In use, not planned
+## Incremental adoption
 
-These shipped during the feature migration and are no longer roadmap items:
-
-- **Shared + feature-owned host contracts.** `example.host` is the shared, globally-provided host
-  contract; `checkout.host` is feature-owned and provided at `Scope.Feature("YourApp.Feature")`.
-  The duplication problem the design called out is addressed by this split, in production.
-- **Migration coexistence.** A feature can move actions onto a BridgeKit contract incrementally
-  while leaving the rest on `FeatureActions` — the Checkout feature runs exactly this way (17 actions on
-  `checkout.host`, two on `example.host`, five intentionally still on `FeatureActions`).
+BridgeKit is built to land in an existing app **incrementally**. You can move a feature onto a
+BridgeKit contract a few actions at a time and leave the rest on whatever bridge mechanism the
+app already uses — the two coexist at runtime, so a migration never has to be a big-bang
+rewrite. The [migration guide](/guides/migration/) walks through moving a feature one contract
+at a time.
 
 ## Explicit non-goals
 

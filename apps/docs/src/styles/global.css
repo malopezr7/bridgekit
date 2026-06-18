@@ -1,5 +1,6 @@
-/* BridgeKit docs theme — slate gray + muted teal accent.
-   Tailwind v4 + Starlight. Restrained, minimalist, low-saturation. */
+/* BridgeKit docs theme — aligned with the jato landing.
+   Warm paper neutrals + terracotta accent, DM Sans / JetBrains Mono.
+   Tailwind v4 + Starlight. */
 @layer base, starlight, theme, components, utilities;
 
 @import '@astrojs/starlight-tailwind';
@@ -7,52 +8,72 @@
 @import 'tailwindcss/utilities.css' layer(utilities);
 
 @theme {
-	/* Muted teal accent — evokes a "bridge / signal" without shouting. */
-	--color-accent-50: #f1f7f6;
-	--color-accent-100: #dcebe9;
-	--color-accent-200: #bcd8d3;
-	--color-accent-300: #93beb8;
-	--color-accent-400: #689e98;
-	--color-accent-500: #4d827b;
-	--color-accent-600: #3c6862;
-	--color-accent-700: #335450;
-	--color-accent-800: #2c4442;
-	--color-accent-900: #273a37;
-	--color-accent-950: #11201f;
+	/* Terracotta accent — jato's signature warm orange. */
+	--color-accent-50: #fbf4ee;
+	--color-accent-100: #f6e4d3;
+	--color-accent-200: #edc6a4;
+	--color-accent-300: #e2a270;
+	--color-accent-400: #d9824a;
+	--color-accent-500: #c96b2c;
+	--color-accent-600: #b25623;
+	--color-accent-700: #8f4220;
+	--color-accent-800: #74381f;
+	--color-accent-900: #5f2f1c;
+	--color-accent-950: #34170c;
 
-	/* Cool slate gray scale. */
-	--color-gray-50: #f8fafc;
-	--color-gray-100: #f1f5f9;
-	--color-gray-200: #e2e8f0;
-	--color-gray-300: #cbd5e1;
-	--color-gray-400: #94a3b8;
-	--color-gray-500: #64748b;
-	--color-gray-600: #475569;
-	--color-gray-700: #334155;
-	--color-gray-800: #1e293b;
-	--color-gray-900: #0f172a;
-	--color-gray-950: #020617;
+	/* Warm paper neutral scale (replaces the cool slate). */
+	--color-gray-50: #f7f6f3;
+	--color-gray-100: #eeedea;
+	--color-gray-200: #dedcd7;
+	--color-gray-300: #c5c2bb;
+	--color-gray-400: #a7a49c;
+	--color-gray-500: #88857e;
+	--color-gray-600: #66635d;
+	--color-gray-700: #444240;
+	--color-gray-800: #2a2927;
+	--color-gray-900: #1a1a18;
+	--color-gray-950: #111110;
+
+	/* Typography — match jato exactly. */
+	--font-sans: 'DM Sans', sans-serif;
+	--font-mono: 'JetBrains Mono', monospace;
 }
 
-/* Slightly roomier content column + softer headings for a calmer read. */
+/* Fonts + roomier column wired into Starlight's own variables. */
 :root {
+	--sl-font: 'DM Sans', sans-serif;
+	--sl-font-mono: 'JetBrains Mono', monospace;
 	--sl-content-width: 50rem;
 	--sl-nav-pad-x: 1.5rem;
 }
 
-/* Tighten heading weight a touch — minimalist, less "shouty". */
+/* Dark theme (Starlight default :root) — warm near-black, like jato. */
+:root {
+	--sl-color-bg: #111110;
+	--sl-color-bg-nav: #161614;
+	--sl-color-bg-sidebar: #191918;
+	--sl-color-bg-inline-code: #282825;
+	--sl-color-hairline-shade: #2e2e2b;
+	--bk-toggle-bg: #2e2e2b;
+	--bk-toggle-knob: #918e88;
+}
+
+/* Light theme — jato's paper tones. */
+:root[data-theme='light'] {
+	--sl-color-bg: #f5f4f0;
+	--sl-color-bg-nav: #f0efeb;
+	--sl-color-bg-sidebar: #eeedea;
+	--sl-color-bg-inline-code: #e5e3dd;
+	--sl-color-hairline-shade: #dedcd7;
+	--bk-toggle-bg: #e0ded9;
+	--bk-toggle-knob: #ffffff;
+}
+
+/* Typographic voice — jato's calm, low-weight, tight-tracked headings. */
 .sl-markdown-content h1,
 .sl-markdown-content h2,
 .sl-markdown-content h3 {
-	letter-spacing: -0.015em;
-}
-
-/* Hero on the splash page: calm gradient wash, no loud color. */
-.hero {
-	gap: 2rem;
-}
-.hero h1 {
-	letter-spacing: -0.03em;
+	letter-spacing: -0.02em;
 }
 
 /* Subtle card grid used across landing + concept pages. */
@@ -60,9 +81,9 @@
 	border-color: var(--sl-color-gray-5);
 }
 
-/* Inline code: quieter than default. */
+/* Inline code: quieter than default, warm-toned. */
 .sl-markdown-content code:not(:where(.expressive-code *)) {
-	background-color: var(--sl-color-gray-6);
+	background-color: var(--sl-color-bg-inline-code);
 	border: 1px solid var(--sl-color-gray-5);
 	border-radius: 0.3rem;
 	padding: 0.1rem 0.35rem;
