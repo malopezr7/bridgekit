@@ -1,10 +1,6 @@
 pluginManagement {
-    includeBuild(
-        providers.exec {
-            workingDir(rootDir)
-            commandLine("node", "--print", "require('path').dirname(require.resolve('@react-native/gradle-plugin/package.json', { paths: [require('path').dirname(require.resolve('react-native/package.json'))] }))")
-        }.standardOutput.asText.get().trim()
-    )
+    // node_modules is hoisted at the monorepo root (pnpm nodeLinker: hoisted): three levels up.
+    includeBuild("../../../node_modules/@react-native/gradle-plugin")
     repositories {
         google()
         mavenCentral()
@@ -23,9 +19,4 @@ extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
 rootProject.name = 'BridgeKitExample'
 include ':app'
 
-includeBuild(
-    providers.exec {
-        workingDir(rootDir)
-        commandLine("node", "--print", "require('path').dirname(require.resolve('@react-native/gradle-plugin/package.json', { paths: [require('path').dirname(require.resolve('react-native/package.json'))] }))")
-    }.standardOutput.asText.get().trim()
-)
+includeBuild("../../../node_modules/@react-native/gradle-plugin")

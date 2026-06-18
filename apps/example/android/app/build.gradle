@@ -3,9 +3,13 @@ apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
 react {
-    // Automatic linking — no manual entryFile needed for RN 0.73+
-    // hermesc lives in the pnpm-hoisted hermes-compiler package, not RN's sdks dir
+    // node_modules is hoisted at the monorepo root (pnpm nodeLinker: hoisted), so the
+    // RN Gradle Plugin resolves react-native, codegen and the CLI from there automatically.
+    // RN 0.83 ships hermesc in the standalone hermes-compiler package, not react-native/sdks.
     hermesCommand = "$rootDir/../../../node_modules/hermes-compiler/hermesc/%OS-BIN%/hermesc"
+
+    // Pulls every autolinked native module (BridgeKit, Nitro) into the app. No manual deps.
+    autolinkLibrariesWithApp()
 }
 
 android {
@@ -44,9 +48,8 @@ android {
 }
 
 dependencies {
-    // The version of react-native is set by the React Native Gradle Plugin
+    // Versions are set by the React Native Gradle Plugin.
+    // BridgeKit and react-native-nitro-modules are linked via autolinkLibrariesWithApp().
     implementation("com.facebook.react:react-android")
     implementation("com.facebook.react:hermes-android")
-    implementation(project(":malopezr7_bridgekit"))
-    implementation(project(":react-native-nitro-modules"))
 }
