@@ -30,8 +30,6 @@ PODS:
     - ReactCommon/turbomodule/core
     - SocketRocket
     - Yoga
-  - BridgeKitExampleDemo (0.0.1):
-    - BridgeKit
   - DoubleConversion (1.1.6)
   - fast_float (8.0.0)
   - FBLazyVector (0.83.6)
@@ -2517,7 +2515,6 @@ PODS:
 DEPENDENCIES:
   - boost (from `../node_modules/react-native/third-party-podspecs/boost.podspec`)
   - "BridgeKit (from `../node_modules/@malopezr7/bridgekit`)"
-  - BridgeKitExampleDemo (from `./BridgeKitExampleDemo`)
   - DoubleConversion (from `../node_modules/react-native/third-party-podspecs/DoubleConversion.podspec`)
   - fast_float (from `../node_modules/react-native/third-party-podspecs/fast_float.podspec`)
   - FBLazyVector (from `../node_modules/react-native/Libraries/FBLazyVector`)
@@ -2607,8 +2604,6 @@ EXTERNAL SOURCES:
     :podspec: "../node_modules/react-native/third-party-podspecs/boost.podspec"
   BridgeKit:
     :path: "../node_modules/@malopezr7/bridgekit"
-  BridgeKitExampleDemo:
-    :path: "./BridgeKitExampleDemo"
   DoubleConversion:
     :podspec: "../node_modules/react-native/third-party-podspecs/DoubleConversion.podspec"
   fast_float:
@@ -2768,7 +2763,6 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   boost: 7e761d76ca2ce687f7cc98e698152abd03a18f90
   BridgeKit: dac96b9f6dd8bfe64b3d96d8fea6e3911ad5cdc7
-  BridgeKitExampleDemo: 8873b283f835e06e247081fabbf14655bf98c624
   DoubleConversion: cb417026b2400c8f53ae97020b2be961b59470cb
   fast_float: b32c788ed9c6a8c584d114d0047beda9664e7cc6
   FBLazyVector: 06b1c8278e6e1b31ef68e9e14c296b7872e79e48
@@ -2848,6 +2842,6 @@ SPEC CHECKSUMS:
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
   Yoga: cf2a67aa1c8a225f0cb98a5f531d6f305d3f12e5
 
-PODFILE CHECKSUM: 33705081a3bbfbb0b2525de0476b877fb9102cbe
+PODFILE CHECKSUM: 7f7232f0eae42b1004b752aeebce5d2afe419e69
 
 COCOAPODS: 1.16.2

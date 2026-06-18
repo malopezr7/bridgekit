@@ -5,6 +5,10 @@ private let bridgeKitDemoTag = "BridgeKitDemo"
 private let bridgeKitReverseTag = "BridgeKitReverse"
 private let bridgeKitJsInfoTag = "BridgeKitJsInfo"
 
+private func bridgeKitDemoLog(_ message: String) {
+  NSLog("%@", message)
+}
+
 enum BridgekitDemoInitializer {
   static func configure() {
     let bridgeKit = BridgeKitRuntime.default
@@ -12,16 +16,16 @@ enum BridgekitDemoInitializer {
     _ = bridgeKit.provide(BridgekitDemoHostContract(), scope: .global) {
       DemoHostImpl()
     }
-    print("[\(bridgeKitDemoTag)] DemoHost provided at global scope")
+    bridgeKitDemoLog("[\(bridgeKitDemoTag)] DemoHost provided at global scope")
 
     Task {
       try? await Task.sleep(nanoseconds: 15_000_000_000)
       do {
         let feature = bridgeKit.consume(BridgekitDemoFeatureContract(), scope: .global)
         let result = try await feature.getGreeting(GetGreetingParams(name: "BridgeKit"))
-        print("[\(bridgeKitDemoTag)] JS greeting=\(result)")
+        bridgeKitDemoLog("[\(bridgeKitDemoTag)] JS greeting=\(result)")
       } catch {
-        print("[\(bridgeKitDemoTag)] native-to-JS feature consume failed: \(error)")
+        bridgeKitDemoLog("[\(bridgeKitDemoTag)] native-to-JS feature consume failed: \(error)")
       }
     }
 
@@ -34,7 +38,7 @@ enum BridgekitDemoInitializer {
         while !asyncOk && Date() < deadline {
           do {
             let greeting = try await reverse.greetFromJs(GreetFromJsParams(name: "iOS"))
-            print("[\(bridgeKitReverseTag)] async=\(greeting)")
+            bridgeKitDemoLog("[\(bridgeKitReverseTag)] async=\(greeting)")
             asyncOk = true
           } catch {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -42,16 +46,16 @@ enum BridgekitDemoInitializer {
         }
 
         if !asyncOk {
-          print("[\(bridgeKitReverseTag)] async never became ready within 90s")
+          bridgeKitDemoLog("[\(bridgeKitReverseTag)] async never became ready within 90s")
         }
 
         reverse.onNativeEvent(OnNativeEventParams(type: "native-tap", payload: "button_a"))
-        print("[\(bridgeKitReverseTag)] void fired type=native-tap")
+        bridgeKitDemoLog("[\(bridgeKitReverseTag)] void fired type=native-tap")
 
         Task {
           var count = 0
           for await value in reverse.jsCounter() {
-            print("[\(bridgeKitReverseTag)] stream tick=\(value)")
+            bridgeKitDemoLog("[\(bridgeKitReverseTag)] stream tick=\(value)")
             count += 1
             if count >= 5 { break }
           }
@@ -61,18 +65,18 @@ enum BridgekitDemoInitializer {
           for await value in reverse.jsStatus {
             switch value {
             case .available(let status):
-              print("[\(bridgeKitReverseTag)] state=\(status)")
+              bridgeKitDemoLog("[\(bridgeKitReverseTag)] state=\(status)")
             case .initial(let status):
-              print("[\(bridgeKitReverseTag)] state=initial(\(status))")
+              bridgeKitDemoLog("[\(bridgeKitReverseTag)] state=initial(\(status))")
             case .replacing(let last):
-              print("[\(bridgeKitReverseTag)] state=replacing(\(String(describing: last)))")
+              bridgeKitDemoLog("[\(bridgeKitReverseTag)] state=replacing(\(String(describing: last)))")
             case .unprovided(let last):
-              print("[\(bridgeKitReverseTag)] state=unprovided(\(String(describing: last)))")
+              bridgeKitDemoLog("[\(bridgeKitReverseTag)] state=unprovided(\(String(describing: last)))")
             }
           }
         }
       } catch {
-        print("[\(bridgeKitReverseTag)] reverse consume failed: \(error)")
+        bridgeKitDemoLog("[\(bridgeKitReverseTag)] reverse consume failed: \(error)")
       }
     }
 
@@ -86,7 +90,7 @@ enum BridgekitDemoInitializer {
           let version = try await jsInfo.getReactNativeVersion()
           let level = try await jsInfo.getUserLevel()
           let segments = try await jsInfo.getUserSegments()
-          print(
+          bridgeKitDemoLog(
             "[\(bridgeKitJsInfoTag)] rnVersion=\(version) userLevel=L\(Int(level.level)) \(level.label) segments=\(segments.joined(separator: ","))"
           )
           ready = true
@@ -96,20 +100,20 @@ enum BridgekitDemoInitializer {
       }
 
       if !ready {
-        print("[\(bridgeKitJsInfoTag)] getReactNativeVersion never became ready within 90s")
+        bridgeKitDemoLog("[\(bridgeKitJsInfoTag)] getReactNativeVersion never became ready within 90s")
       }
 
       Task {
         var count = 0
         for await value in jsInfo.clockTicks() {
-          print("[\(bridgeKitJsInfoTag)] clock tick=\(value)")
+          bridgeKitDemoLog("[\(bridgeKitJsInfoTag)] clock tick=\(value)")
           count += 1
           if count >= 5 { break }
         }
       }
     }
 
-    print("[\(bridgeKitDemoTag)] BridgeKit initialized. dump=\(bridgeKit.dump())")
+    bridgeKitDemoLog("[\(bridgeKitDemoTag)] BridgeKit initialized. dump=\(bridgeKit.dump())")
   }
 }
 
@@ -141,7 +145,7 @@ private final class DemoHostImpl: BridgekitDemoHost {
 
   func say(_ params: SayParams) {
     let echoed = params.text.uppercased()
-    print("[\(bridgeKitDemoTag)] DemoHostImpl.say: \(params.text) -> \(echoed)")
+    bridgeKitDemoLog("[\(bridgeKitDemoTag)] DemoHostImpl.say: \(params.text) -> \(echoed)")
     echoText(echoed)
   }
 

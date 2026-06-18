@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "generate": "node ../../packages/cli/dist/index.js generate --contracts \"src/demo/contracts/*.contract.ts\" --out-dir android/app/src/main/java/com/bridgekit/example/generated --platform kotlin",
     "ios": "react-native run-ios",
-    "generate:ios": "node ../../packages/cli/dist/index.js generate --contracts \"src/demo/contracts/*.contract.ts\" --out-dir ios/BridgeKitExampleDemo/Sources/Generated --platform swift"
+    "generate:ios": "node ../../packages/cli/dist/index.js generate --contracts \"src/demo/contracts/*.contract.ts\" --out-dir ios/BridgeKitExample/Generated --platform swift"
   },
   "dependencies": {
     "@malopezr7/bridgekit": "workspace:*",
