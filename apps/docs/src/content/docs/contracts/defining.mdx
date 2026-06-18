@@ -14,7 +14,7 @@ Every contract is built with `defineContract(id, shape)` from the pure
 ```ts
 import { defineContract, t } from '@malopezr7/bridgekit/contract';
 
-export const ConnectHost = defineContract('connect.host', {
+export const AppHost = defineContract('app.host', {
   methods: { /* ... */ },
   streams: { /* ... */ },
   state:   { /* ... */ },
@@ -39,19 +39,19 @@ descriptors** — pick by taste and by what your codegen path supports.
   ```ts
   import { defineContract, t } from '@malopezr7/bridgekit/contract';
 
-  export const ConnectHost = defineContract('connect.host', {
+  export const AppHost = defineContract('app.host', {
     methods: {
       showLogin: t.fire(),
       isLoggedIn: t.query(t.boolean()),
-      installEsim: t.query(
-        t.object({ url: t.string(), iccId: t.string() }),
-        t.literals('success', 'already-installed', 'cancelled', 'error'),
+      saveFile: t.query(
+        t.object({ url: t.string(), name: t.string() }),
+        t.literals('success', 'already-exists', 'cancelled', 'error'),
         { timeoutMs: null },
       ),
       getDeviceInfo: t.querySync(t.object({ model: t.string(), osVersion: t.string() })),
       trackEvent: t.fire(t.object({ name: t.string(), params: t.json() })),
     },
-    streams: { otpCodes: t.stream(t.string()) },
+    streams: { notifications: t.stream(t.string()) },
     state:   { connectivity: t.state(t.object({ online: t.boolean() }), { online: false }) },
   });
   ```
@@ -109,7 +109,7 @@ side provides**. The same shape works both ways:
 
 ```ts
 // provided by NATIVE, consumed by RN
-export const ConnectHost = defineContract('connect.host', { /* ... */ });
+export const AppHost = defineContract('app.host', { /* ... */ });
 
 // provided by RN, consumed by NATIVE — same shape, reverse direction
 export const ExampleFeature = defineContract('example.feature', {
@@ -147,9 +147,9 @@ the derived TypeScript types:
 const PickedFile = t.object({ uri: t.string(), mime: t.string() });
 
 type Picked = t.Infer<typeof PickedFile>;
-type Params = MethodParams<typeof ConnectHost, 'installEsim'>;
-type Result = MethodResult<typeof ConnectHost, 'installEsim'>;
-type Net    = StateValue<typeof ConnectHost, 'connectivity'>;
+type Params = MethodParams<typeof AppHost, 'saveFile'>;
+type Result = MethodResult<typeof AppHost, 'saveFile'>;
+type Net    = StateValue<typeof AppHost, 'connectivity'>;
 ```
 
 Next: the full **[schema DSL](/contracts/schema/)**, then **[methods, streams &

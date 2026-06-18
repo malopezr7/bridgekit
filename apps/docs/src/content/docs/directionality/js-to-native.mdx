@@ -19,11 +19,11 @@ The JS proxy mirrors the contract's methods. `query` becomes an `async` call; `f
 nothing; `querySync` reads synchronously.
 
 ```tsx
-const connect = useBridge(ConnectHost);
+const app = useBridge(AppHost);
 
-await connect.installEsim({ url, iccId });   // query → Promise<'success' | ...>
-connect.showLogin();                          // fire → void
-const info = connect.getDeviceInfo();         // querySync → value, synchronously
+await app.saveFile({ url, name });   // query → Promise<'success' | ...>
+app.showLogin();                          // fire → void
+const info = app.getDeviceInfo();         // querySync → value, synchronously
 ```
 
 Native implements the generated interface:
@@ -31,24 +31,24 @@ Native implements the generated interface:
 <Tabs>
 <TabItem label="Kotlin">
 ```kotlin
-class ConnectHostProvider : ConnectHost {
+class AppHostProvider : AppHost {
   override suspend fun isLoggedIn(): Boolean = session.isLoggedIn()
-  override suspend fun installEsim(params: InstallEsimParams): InstallEsimResult = /* ... */
+  override suspend fun saveFile(params: SaveFileParams): SaveFileResult = /* ... */
   override fun showLogin() { /* ... */ }
 }
 
-BridgeKit.default.provide(ConnectHostContract) { ConnectHostProvider() }
+BridgeKit.default.provide(AppHostContract) { AppHostProvider() }
 ```
 </TabItem>
 <TabItem label="Swift">
 ```swift
-final class ConnectHostProvider: ConnectHost {
+final class AppHostProvider: AppHost {
   func isLoggedIn() throws -> Bool { session.isLoggedIn() }
-  func installEsim(_ params: InstallEsimParams) async throws -> InstallEsimResult { /* ... */ }
+  func saveFile(_ params: SaveFileParams) async throws -> SaveFileResult { /* ... */ }
   func showLogin() { /* ... */ }
 }
 
-let binding = BridgeKitRuntime.default.provide(ConnectHostContract()) { ConnectHostProvider() }
+let binding = BridgeKitRuntime.default.provide(AppHostContract()) { AppHostProvider() }
 ```
 </TabItem>
 </Tabs>
@@ -68,14 +68,14 @@ stream, params)` and multiplexes to every JS subscriber.
 <Tabs>
 <TabItem label="Kotlin">
 ```kotlin
-override fun otpCodes(): Flow<String> = smsRetriever.codes()
+override fun notifications(): Flow<String> = pushService.messages()
 ```
 </TabItem>
 <TabItem label="Swift">
 ```swift
-func otpCodes() -> AsyncStream<String> {
+func notifications() -> AsyncStream<String> {
     AsyncStream { continuation in
-        let task = Task { for await code in smsRetriever.codes() { continuation.yield(code) } }
+        let task = Task { for await code in pushService.messages() { continuation.yield(code) } }
         continuation.onTermination = { _ in task.cancel() }
     }
 }
@@ -84,9 +84,9 @@ func otpCodes() -> AsyncStream<String> {
 </Tabs>
 
 ```tsx
-const codes = connect.otpCodes();
-const off = codes.subscribe((code) => setOtp(code));   // Unsubscribe
-// or: for await (const code of codes) { ... }
+const notes = app.notifications();
+const off = notes.subscribe((note) => addNotification(note));   // Unsubscribe
+// or: for await (const note of notes) { ... }
 ```
 
 Closing the JS subscription cancels the underlying collection. The default backpressure is a
@@ -113,7 +113,7 @@ var connectivity: AsyncStream<Connectivity> { get }
 </Tabs>
 
 ```tsx
-const { value, status } = useBridgeState(ConnectHost, 'connectivity');
+const { value, status } = useBridgeState(AppHost, 'connectivity');
 // status: 'initial' | 'available' | 'unprovided'
 ```
 

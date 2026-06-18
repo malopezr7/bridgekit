@@ -125,20 +125,20 @@ Task {
 BridgeKitRuntime.default.provide(MyContract()) { MyImpl() }
 
 // Feature — tied to a named feature surface:
-BridgeKitRuntime.default.provide(MyContract(), scope: .feature(name: "connect")) { MyImpl() }
+BridgeKitRuntime.default.provide(MyContract(), scope: .feature(name: "YourApp.Feature")) { MyImpl() }
 
 // Instance — tied to a specific tagged instance of a feature:
 BridgeKitRuntime.default.provide(
     MyContract(),
-    scope: .instance(feature: "checkout", tag: sessionId)
+    scope: .instance(feature: "YourApp.Feature", tag: sessionId)
 ) { MyImpl() }
 ```
 
 Close the binding when the scope ends (e.g. on `viewDidDisappear` or `onDisappear`):
 
 ```swift
-let binding = BridgeKitRuntime.default.provide(MyContract(), scope: .feature(name: "checkout")) {
-    CheckoutImpl()
+let binding = BridgeKitRuntime.default.provide(MyContract(), scope: .feature(name: "YourApp.Feature")) {
+    MyHostImpl()
 }
 // later:
 binding.close()

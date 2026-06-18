@@ -17,19 +17,19 @@ React Native.
    `@malopezr7/bridgekit/contract` entrypoint.
 
    ```ts
-   // connect-host.contract.ts
+   // app-host.contract.ts
    import { defineContract, t } from '@malopezr7/bridgekit/contract';
 
-   export const ConnectHost = defineContract('connect.host', {
+   export const AppHost = defineContract('app.host', {
      methods: {
        isLoggedIn: t.query(t.boolean()),
-       installEsim: t.query(
-         t.object({ url: t.string(), iccId: t.string() }),
-         t.literals('success', 'already-installed', 'cancelled', 'error'),
+       saveFile: t.query(
+         t.object({ url: t.string(), name: t.string() }),
+         t.literals('success', 'already-exists', 'cancelled', 'error'),
          { timeoutMs: null },
        ),
      },
-     streams: { otpCodes: t.stream(t.string()) },
+     streams: { notifications: t.stream(t.string()) },
      state: { connectivity: t.state(t.object({ online: t.boolean() }), { online: false }) },
    });
    ```
@@ -51,32 +51,32 @@ React Native.
    <Tabs syncKey="native">
      <TabItem label="Kotlin">
      ```kotlin
-     class ConnectHostProvider : ConnectHost {
+     class AppHostProvider : AppHost {
        override suspend fun isLoggedIn(): Boolean = session.isLoggedIn()
-       override suspend fun installEsim(params: InstallEsimParams): InstallEsimResult = /* ... */
-       override fun otpCodes(): Flow<String> = smsRetriever.codes()
+       override suspend fun saveFile(params: SaveFileParams): SaveFileResult = /* ... */
+       override fun notifications(): Flow<String> = pushService.messages()
        override val connectivity = MutableStateFlow(Connectivity(online = true))
      }
 
-     BridgeKit.default.provide(ConnectHostContract, Scope.Global) { ConnectHostProvider() }
+     BridgeKit.default.provide(AppHostContract, Scope.Global) { AppHostProvider() }
      ```
      </TabItem>
      <TabItem label="Swift">
      ```swift
      import BridgeKitContracts
 
-     final class ConnectHostProvider: ConnectHost {
+     final class AppHostProvider: AppHost {
        func isLoggedIn() throws -> Bool { session.isLoggedIn() }
-       func installEsim(_ params: InstallEsimParams) async throws -> String { /* ... */ }
-       func otpCodes() -> AsyncStream<String> { smsRetriever.codes() }
+       func saveFile(_ params: SaveFileParams) async throws -> String { /* ... */ }
+       func notifications() -> AsyncStream<String> { pushService.messages() }
        var connectivity: AsyncStream<Connectivity> { /* yield current + updates */ }
      }
      ```
      ```swift
      import BridgeKit
 
-     _ = BridgeKitRuntime.default.provide(ConnectHostContract(), scope: .global) {
-       ConnectHostProvider()
+     _ = BridgeKitRuntime.default.provide(AppHostContract(), scope: .global) {
+       AppHostProvider()
      }
      ```
      </TabItem>
@@ -87,13 +87,13 @@ React Native.
    ```tsx
    import { useBridge, useBridgeState } from '@malopezr7/bridgekit';
 
-   function Checkout() {
-     const connect = useBridge(ConnectHost);
-     const { value: net } = useBridgeState(ConnectHost, 'connectivity');
+   function FileScreen() {
+     const app = useBridge(AppHost);
+     const { value: net } = useBridgeState(AppHost, 'connectivity');
 
      const onInstall = async () => {
-       const result = await connect.installEsim({ url, iccId });
-       // result: 'success' | 'already-installed' | 'cancelled' | 'error'
+       const result = await app.saveFile({ url, name });
+       // result: 'success' | 'already-exists' | 'cancelled' | 'error'
      };
 
      return <Button disabled={!net.online} onPress={onInstall} />;
@@ -103,9 +103,9 @@ React Native.
 5. **Subscribe to a stream** — no `useEffect` dance, no event-emitter names.
 
    ```tsx
-   const codes = connect.otpCodes();
-   const unsubscribe = codes.subscribe((code) => setOtp(code));
-   // …or: for await (const code of codes) { ... }
+   const notes = app.notifications();
+   const unsubscribe = notes.subscribe((note) => addNotification(note));
+   // …or: for await (const note of notes) { ... }
    ```
 
 </Steps>

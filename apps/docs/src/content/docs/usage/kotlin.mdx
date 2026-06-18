@@ -16,15 +16,15 @@ one it was handed.
 Implement the generated interface, then register a **lazy** factory:
 
 ```kotlin
-class ConnectHostProvider(private val deps: ConnectDeps) : ConnectHost {
+class AppHostProvider(private val deps: AppDeps) : AppHost {
   override suspend fun isLoggedIn(): Boolean = deps.session.isLoggedIn()
-  override suspend fun installEsim(params: InstallEsimParams): InstallEsimResult = deps.esim.install(params)
+  override suspend fun saveFile(params: SaveFileParams): SaveFileResult = deps.files.save(params)
   override fun showLogin() { deps.nav.toLogin() }
-  override fun otpCodes(): Flow<String> = deps.sms.codes()
+  override fun notifications(): Flow<String> = deps.push.messages()
   override val connectivity = MutableStateFlow(Connectivity(online = true))
 }
 
-val binding = bridgekit.provide(ConnectHostContract, Scope.global) { ConnectHostProvider(deps) }
+val binding = bridgekit.provide(AppHostContract, Scope.global) { AppHostProvider(deps) }
 // later:
 binding.close()
 ```

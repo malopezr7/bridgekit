@@ -24,21 +24,21 @@ on iOS — reactive streams, observable state, and the code generator keeps them
 through a contract hash.
 
 ```ts
-// connect-host.contract.ts — provided by NATIVE, consumed by RN
+// app-host.contract.ts — provided by NATIVE, consumed by RN
 import { defineContract, t } from '@malopezr7/bridgekit/contract';
 
-export const ConnectHost = defineContract('connect.host', {
+export const AppHost = defineContract('app.host', {
   methods: {
     showLogin: t.fire(),                                  // fire-and-forget
     isLoggedIn: t.query(t.boolean()),                     // async request/response
-    installEsim: t.query(
-      t.object({ url: t.string(), iccId: t.string() }),
-      t.literals('success', 'already-installed', 'cancelled', 'error'),
+    saveFile: t.query(
+      t.object({ url: t.string(), name: t.string() }),
+      t.literals('success', 'already-exists', 'cancelled', 'error'),
       { timeoutMs: null },                                // interactive: never times out
     ),
   },
   streams: {
-    otpCodes: t.stream(t.string()),                       // lossless buffered by default
+    notifications: t.stream(t.string()),                       // lossless buffered by default
   },
   state: {
     connectivity: t.state(t.object({ online: t.boolean() }), { online: false }),

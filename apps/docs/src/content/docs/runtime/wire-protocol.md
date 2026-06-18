@@ -15,8 +15,8 @@ Sent for every op, both directions:
 ```jsonc
 {
   "op": "invoke | invokeSync | streamOpen | streamClose | stateRead | stateWrite | ...",
-  "contractId": "checkout.host",
-  "member": "installEsim",
+  "contractId": "app.host",
+  "member": "saveFile",
   "scope": { "kind": "global | feature | instance", "feature": "...", "instance": "..." },
   "payload": { /* encoded params, declared fields only */ },
   "correlationId": "…",
@@ -34,10 +34,10 @@ Sent for every op, both directions:
 {
   "ok": false,
   "code": "TIMEOUT",
-  "message": "dispatcher connected, contract 'checkout.host' not provided in scope feature(checkout)",
-  "contractId": "checkout.host",
-  "member": "installEsim",
-  "scope": { "kind": "feature", "feature": "checkout" },
+  "message": "dispatcher connected, contract 'app.host' not provided in scope feature(YourApp.Feature)",
+  "contractId": "app.host",
+  "member": "saveFile",
+  "scope": { "kind": "feature", "feature": "YourApp.Feature" },
   "readiness": "connected",
   "details": { /* optional */ }
 }
@@ -69,7 +69,7 @@ cases), errors are matched by a stable `code`, not by class:
 import { isBridgeError } from '@malopezr7/bridgekit';
 
 try {
-  await checkout.installEsim({ url, iccId });
+  await app.saveFile({ url, name });
 } catch (e) {
   if (isBridgeError(e, 'TIMEOUT')) retryLater();
   else if (isBridgeError(e, 'CONTRACT_NOT_PROVIDED')) showFallback();

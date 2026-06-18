@@ -18,7 +18,7 @@ test touches.
 ```ts
 import { mockBridge } from '@malopezr7/bridgekit/testing';
 
-const mock = mockBridge(ConnectHost, {
+const mock = mockBridge(AppHost, {
   isLoggedIn: async () => true,
 });
 ```
@@ -34,10 +34,10 @@ import { createTestBridge } from '@malopezr7/bridgekit/testing';
 
 const { bridgekit } = createTestBridge();
 
-bridgekit.provide(ConnectHostContract, { isLoggedIn: async () => true });
-const connect = bridgekit.consume(ConnectHost);
+bridgekit.provide(AppHostContract, { isLoggedIn: async () => true });
+const app = bridgekit.consume(AppHost);
 
-expect(await connect.isLoggedIn()).toBe(true);
+expect(await app.isLoggedIn()).toBe(true);
 ```
 
 <Aside type="tip">
@@ -51,11 +51,11 @@ Generated provider/client interfaces are plain Kotlin interfaces — fake them d
 mocking framework required.
 
 ```kotlin
-val fake = object : ConnectHost {
+val fake = object : AppHost {
   override suspend fun isLoggedIn(): Boolean = true
-  override suspend fun installEsim(params: InstallEsimParams) = InstallEsimResult.SUCCESS
+  override suspend fun saveFile(params: SaveFileParams) = SaveFileResult.SUCCESS
   override fun showLogin() {}
-  override fun otpCodes(): Flow<String> = flowOf("123456")
+  override fun notifications(): Flow<String> = flowOf("123456")
   override val connectivity = MutableStateFlow(Connectivity(online = true))
 }
 ```
@@ -68,9 +68,9 @@ JVM.
 
 ```kotlin
 val bridgekit = BridgeKit(TestBridgeTransport())
-bridgekit.provide(ConnectHostContract) { fake }
+bridgekit.provide(AppHostContract) { fake }
 
-val client = bridgekit.consume(ConnectHostContract)
+val client = bridgekit.consume(AppHostContract)
 assertTrue(client.isLoggedIn())
 ```
 
@@ -81,16 +81,16 @@ in the signatures). Conform a test double to it and inject that — no runtime, 
 simulator needed for the provider's own logic.
 
 ```swift
-final class FakeConnectHost: ConnectHost {
+final class FakeAppHost: AppHost {
   func isLoggedIn() throws -> Bool { true }
-  func installEsim(_ params: InstallEsimParams) async throws -> String { "success" }
+  func saveFile(_ params: SaveFileParams) async throws -> String { "success" }
   func closeFeature() {}
   func showWebpage(_ params: ShowWebpageParams) {}
   // ...implement only the members the test exercises
 }
 
 // Drive the unit under test directly against the fake.
-let host: any ConnectHost = FakeConnectHost()
+let host: any AppHost = FakeAppHost()
 XCTAssertTrue(try host.isLoggedIn())
 ```
 

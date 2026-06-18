@@ -28,12 +28,12 @@ Async request/response. The `opts.timeoutMs` controls the per-method timeout:
 
 - a number → default-per-method timeout,
 - `null` → **never** times out (interactive actions: `pickMedia`, `showDatePicker`,
-  `installEsim`),
+  `saveFile`),
 - unset → no default; the caller may set a timeout per call.
 
 ```ts
 isLoggedIn: t.query(t.boolean()),
-installEsim: t.query(InstallParams, InstallResult, { timeoutMs: null }),
+saveFile: t.query(InstallParams, InstallResult, { timeoutMs: null }),
 ```
 
 #### `t.querySync(params, result)` · `Sync<P, R>()`
@@ -52,7 +52,7 @@ sync reads.
 ## Streams
 
 ```ts
-otpCodes: t.stream(t.string()),
+notifications: t.stream(t.string()),
 positions: t.stream(t.object({ lat: t.number(), lng: t.number() }), {
   params: t.object({ highAccuracy: t.boolean() }),  // parameterized stream
   latestOnly: true,                                 // conflation instead of buffering
@@ -75,14 +75,14 @@ The native provider returns a platform stream type:
 <Tabs>
 <TabItem label="Kotlin">
 ```kotlin
-override fun otpCodes(): Flow<String> = smsRetriever.codes()
+override fun notifications(): Flow<String> = pushService.messages()
 ```
 </TabItem>
 <TabItem label="Swift">
 ```swift
-func otpCodes() -> AsyncStream<String> {
+func notifications() -> AsyncStream<String> {
     AsyncStream { continuation in
-        let task = Task { for await code in smsRetriever.codes() { continuation.yield(code) } }
+        let task = Task { for await code in pushService.messages() { continuation.yield(code) } }
         continuation.onTermination = { _ in task.cancel() }
     }
 }

@@ -23,7 +23,7 @@ surface was derived from a real action inventory (a real app's action inventory 
 ```ts
 t.object({
   url: t.string(),
-  iccId: t.string(),
+  name: t.string(),
 })
 ```
 
@@ -43,7 +43,7 @@ references it everywhere.
 ## Literal unions
 
 ```ts
-t.literals('success', 'already-installed', 'cancelled', 'error')
+t.literals('success', 'already-exists', 'cancelled', 'error')
 ```
 
 A string-literal union. Generates a Kotlin `enum class` and a Swift `enum` (String raw
@@ -91,11 +91,11 @@ genuinely has no fixed shape — e.g. an analytics `trackEvent` params bag.
 type Net = t.Infer<typeof connectivitySchema>;
 
 // Derive types from a whole contract:
-type Shape  = ContractShape<typeof ConnectHost>;
-type Params = MethodParams<typeof ConnectHost, 'installEsim'>;
-type Result = MethodResult<typeof ConnectHost, 'installEsim'>;
-type Code   = StreamValue<typeof ConnectHost, 'otpCodes'>;
-type State  = StateValue<typeof ConnectHost, 'connectivity'>;
+type Shape  = ContractShape<typeof AppHost>;
+type Params = MethodParams<typeof AppHost, 'saveFile'>;
+type Result = MethodResult<typeof AppHost, 'saveFile'>;
+type Code   = StreamValue<typeof AppHost, 'notifications'>;
+type State  = StateValue<typeof AppHost, 'connectivity'>;
 ```
 
 :::tip[Encoding is always on]

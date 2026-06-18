@@ -25,15 +25,15 @@ import {
 Returns a **stable typed proxy**. Safe to destructure; the reference is stable across renders.
 
 ```tsx
-const connect = useBridge(ConnectHost);
-const result = await connect.installEsim({ url, iccId });   // Promise<'success' | ...>
-const codes = connect.otpCodes();                           // { subscribe } + AsyncIterable
+const app = useBridge(AppHost);
+const result = await app.saveFile({ url, name });   // Promise<'success' | ...>
+const notes = app.notifications();                           // { subscribe } + AsyncIterable
 ```
 
 Scope it explicitly when you need to:
 
 ```tsx
-const scoped = useBridge(ConnectHost, { scope: { kind: 'feature', feature: 'connect' } });
+const scoped = useBridge(AppHost, { scope: { kind: 'feature', feature: 'YourApp.Feature' } });
 ```
 
 ## `useBridgeState(Contract, key)`
@@ -42,7 +42,7 @@ Subscribes to a state member and returns `{ value, status }`, backed by
 `useSyncExternalStore`. `value` is total — initial values guarantee it's never `undefined`.
 
 ```tsx
-const { value: net, status } = useBridgeState(ConnectHost, 'connectivity');
+const { value: net, status } = useBridgeState(AppHost, 'connectivity');
 // status: 'initial' | 'available' | 'unprovided'
 return <Banner offline={!net.online} stale={status === 'unprovided'} />;
 ```
@@ -53,7 +53,7 @@ A reactive readiness gate — one hook, not a dance. Readiness is **not monotoni
 runtime teardown and returns on reconnect.
 
 ```tsx
-const ready = useBridgeReady(ConnectHost);
+const ready = useBridgeReady(AppHost);
 if (!ready) return <Skeleton />;
 ```
 
@@ -73,8 +73,8 @@ useProvideBridge(InboxFeature, {
 Outside React (services, entry points, tests), use the imperative forms:
 
 ```ts
-const connect = bridge(ConnectHost);
-await connect.isLoggedIn();
+const app = bridge(AppHost);
+await app.isLoggedIn();
 
 const binding = provideBridge(InboxFeature, impl);
 binding.close();
@@ -86,7 +86,7 @@ Sets the ambient feature + instance scope for a subtree. The instance tag is the
 view tag — the single source of truth for instance scoping.
 
 ```tsx
-<BridgeScopeProvider feature="connect" instance={rootTag}>
+<BridgeScopeProvider feature="YourApp.Feature" instance={rootTag}>
   {children}
 </BridgeScopeProvider>
 ```

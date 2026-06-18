@@ -87,7 +87,7 @@ introduced in iOS 16).
 
 ```swift
 // Consuming an async-provided contract from Swift:
-let client: any ConnectHostClient = BridgeKitRuntime.default.consume(ConnectHostContract())
+let client: any AppHostClient = BridgeKitRuntime.default.consume(AppHostContract())
 let version = try await client.getAppVersion()
 
 // State — iterate on a background Task, dispatch to main when needed:
@@ -119,7 +119,7 @@ JS proxies accept an `AbortSignal`:
 
 ```ts
 const controller = new AbortController();
-const p = connect.installEsim({ url, iccId }, { signal: controller.signal, timeoutMs: 30_000 });
+const p = app.saveFile({ url, name }, { signal: controller.signal, timeoutMs: 30_000 });
 controller.abort();   // propagates CANCELLED into the provider's coroutine / Task
 ```
 

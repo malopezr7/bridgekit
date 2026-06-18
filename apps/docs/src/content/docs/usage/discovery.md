@@ -16,7 +16,7 @@ only**.
 ## A discovery module
 
 ```kotlin
-class ConnectBridgeModule : BridgeKitModule {
+class AppBridgeModule : BridgeKitModule {
   override fun register(bridgekit: BridgeKit, host: BridgeKitHost) {
     // host carries the Application Context + the host-installed dependency locator
     bridgekit.provide(SegmentsContract, Scope.global) { SegmentsProvider(host.locate()) }
@@ -28,7 +28,7 @@ Register it as a service:
 
 ```text
 // META-INF/services/com.bridgekit.discovery.BridgeKitModule
-com.example.connect.ConnectBridgeModule
+com.example.app.AppBridgeModule
 ```
 
 `BridgeKit.initialize(host)` runs `ServiceLoader.load` + each `register()`.

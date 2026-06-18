@@ -27,7 +27,7 @@ call time** through the handle/context, so surface recreation replaces the handl
 caches a dead tag.
 
 ```tsx
-<BridgeScopeProvider feature="connect" instance={rootTag}>
+<BridgeScopeProvider feature="YourApp.Feature" instance={rootTag}>
   {children}
 </BridgeScopeProvider>
 ```
@@ -49,7 +49,7 @@ A **binding** is a provider registered in a scope. Rules:
 - Closing a binding closes all its streams on **both** sides.
 
 ```kotlin
-val binding = bridgekit.provide(ConnectHostContract, scope) { ConnectHostProvider(deps) }
+val binding = bridgekit.provide(AppHostContract, scope) { AppHostProvider(deps) }
 binding.close()
 ```
 

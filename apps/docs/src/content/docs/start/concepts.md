@@ -78,7 +78,7 @@ belongs to an epoch and is cleanly cancelled, failed or replayed when the epoch 
 ## How they fit together
 
 ```text
-        defineContract('connect.host', { methods, streams, state })
+        defineContract('app.host', { methods, streams, state })
                                 │
                  ┌──────────────┴───────────────┐
             PROVIDER                         CONSUMER
