@@ -10,3 +10,11 @@ node_modules/
 **/local.properties
 .DS_Store
 **/.DS_Store
+
+# iOS / Xcode
+**/Pods/
+**/xcuserdata/
+**/*.xcuserstate
+**/DerivedData/
+**/.xcode.env.local
+**/*.hmap

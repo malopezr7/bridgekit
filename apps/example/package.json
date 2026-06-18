@@ -7,7 +7,9 @@
     "start": "react-native start --reset-cache",
     "android": "react-native run-android",
     "typecheck": "tsc --noEmit",
-    "generate": "node ../../packages/cli/dist/index.js generate --contracts \"src/demo/contracts/*.contract.ts\" --out-dir android/app/src/main/java/com/bridgekit/example/generated --platform kotlin"
+    "generate": "node ../../packages/cli/dist/index.js generate --contracts \"src/demo/contracts/*.contract.ts\" --out-dir android/app/src/main/java/com/bridgekit/example/generated --platform kotlin",
+    "ios": "react-native run-ios",
+    "generate:ios": "node ../../packages/cli/dist/index.js generate --contracts \"src/demo/contracts/*.contract.ts\" --out-dir ios/BridgeKitExampleDemo/Sources/Generated --platform swift"
   },
   "dependencies": {
     "@malopezr7/bridgekit": "workspace:*",
@@ -26,7 +28,8 @@
     "@react-native/metro-config": "0.83.6",
     "@react-native/typescript-config": "0.83.6",
     "@types/react": "^19.0.0",
-    "typescript": "5.9.2"
+    "typescript": "5.9.2",
+    "@react-native-community/cli-platform-ios": "^20.1.3"
   },
   "engines": {
     "node": ">=26.0.0"
