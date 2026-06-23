@@ -9,6 +9,17 @@ fun reactNativeArchitectures(): List<String> {
     return value?.split(",") ?: listOf("armeabi-v7a", "x86", "x86_64", "arm64-v8a")
 }
 
+// Resolve minSdk from the host app's rootProject.ext.minSdkVersion (matching how
+// NitroModules resolves it) so BridgeKit's native build stays SDK-compatible with
+// the consumer. Falls back to 24 for standalone builds.
+fun resolveMinSdkVersion(): Int {
+    return when (val value = rootProject.properties["minSdkVersion"]) {
+        is Int -> value
+        is String -> value.toInt()
+        else -> 24
+    }
+}
+
 apply(from = "../nitrogen/generated/android/BridgeKit+autolinking.gradle")
 apply(from = "./fix-prefab.gradle")
 
@@ -17,7 +28,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        minSdk = 24
+        minSdk = resolveMinSdkVersion()
         consumerProguardFiles("consumer-rules.pro")
         buildConfigField("boolean", "IS_NEW_ARCHITECTURE_ENABLED", "true")
 
