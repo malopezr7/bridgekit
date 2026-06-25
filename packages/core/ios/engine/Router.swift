@@ -10,17 +10,17 @@ import Foundation
 // MARK: - JsDispatcherCallbacks
 
 /// Callbacks that the dispatcher passes back to JS.
-public final class JsDispatcherCallbacks {
-    public let onInvoke: (
+final class JsDispatcherCallbacks {
+    let onInvoke: (
         _ env: [String: Any?],
         _ completion: @escaping (_ ok: [String: Any?]?, _ err: Error?) -> Void
     ) -> Void
 
-    public let onStreamOpen:  (_ env: [String: Any?]) -> Void
-    public let onStreamClose: (_ env: [String: Any?]) -> Void
-    public let onStateWrite:  (_ env: [String: Any?]) -> Void
+    let onStreamOpen:  (_ env: [String: Any?]) -> Void
+    let onStreamClose: (_ env: [String: Any?]) -> Void
+    let onStateWrite:  (_ env: [String: Any?]) -> Void
 
-    public init(
+    init(
         onInvoke: @escaping (
             _ env: [String: Any?],
             _ completion: @escaping (_ ok: [String: Any?]?, _ err: Error?) -> Void

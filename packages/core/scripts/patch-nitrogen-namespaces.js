@@ -7,14 +7,25 @@ function processFile(filePath) {
   let content = fs.readFileSync(filePath, 'utf-8');
   const originalContent = content;
 
-  // Replace non-namespaced Swift wrapper references with globally namespaced ones.
-  // Example: `const BridgeKit::HybridBridgeHostSpec_cxx&` -> `const ::BridgeKit::HybridBridgeHostSpec_cxx&`
-  // The negative lookbehind prevents double-prefixing already-qualified names.
-  content = content.replace(/(?<!:)\bBridgeKit::/g, '::BridgeKit::');
+  if (filePath.endsWith('.swift')) {
+    // Hide Nitro from BridgeKit's public Swift module interface.  Nitrogen's
+    // Swift/C++ bridge still needs the generated Swift symbols in BridgeKit-Swift.h,
+    // so generated bridge types are exported as SPI instead of public API.
+    content = content.replace(/(?<!@_implementationOnly )import NitroModules/g, '@_implementationOnly import NitroModules');
+    content = content.replace(/^public final class /gm, '@_spi(BridgeKitNitro) public final class ');
+    content = content.replace(/^public protocol /gm, '@_spi(BridgeKitNitro) public protocol ');
+    content = content.replace(/^open class /gm, '@_spi(BridgeKitNitro) public class ');
+    content = content.replace(/^public typealias /gm, '@_spi(BridgeKitNitro) public typealias ');
+  } else {
+    // Replace non-namespaced Swift wrapper references with globally namespaced ones.
+    // Example: `const BridgeKit::HybridBridgeHostSpec_cxx&` -> `const ::BridgeKit::HybridBridgeHostSpec_cxx&`
+    // The negative lookbehind prevents double-prefixing already-qualified names.
+    content = content.replace(/(?<!:)\bBridgeKit::/g, '::BridgeKit::');
+  }
 
   if (content !== originalContent) {
     fs.writeFileSync(filePath, content, 'utf-8');
-    console.log(`[Nitrogen Patch] Fixed namespaces in: ${path.basename(filePath)}`);
+    console.log(`[Nitrogen Patch] Patched: ${path.basename(filePath)}`);
   }
 }
 
@@ -24,7 +35,7 @@ function walkDir(dir) {
     const fullPath = path.join(dir, file);
     if (fs.statSync(fullPath).isDirectory()) {
       walkDir(fullPath);
-    } else if (fullPath.endsWith('.hpp') || fullPath.endsWith('.cpp') || fullPath.endsWith('.mm')) {
+    } else if (fullPath.endsWith('.hpp') || fullPath.endsWith('.cpp') || fullPath.endsWith('.mm') || fullPath.endsWith('.swift')) {
       processFile(fullPath);
     }
   }

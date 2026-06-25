@@ -5,10 +5,10 @@
 /// Copyright © Marc Rousavy @ Margelo
 ///
 
-import NitroModules
+@_implementationOnly import NitroModules
 
 /// See ``HybridBridgeStreamsSpec``
-public protocol HybridBridgeStreamsSpec_protocol: HybridObject {
+@_spi(BridgeKitNitro) public protocol HybridBridgeStreamsSpec_protocol: HybridObject {
   // Properties
   
 
@@ -27,7 +27,7 @@ public extension HybridBridgeStreamsSpec_protocol {
 }
 
 /// See ``HybridBridgeStreamsSpec``
-open class HybridBridgeStreamsSpec_base {
+@_spi(BridgeKitNitro) public class HybridBridgeStreamsSpec_base {
   private weak var cxxWrapper: HybridBridgeStreamsSpec_cxx? = nil
   public init() { }
   public func getCxxWrapper() -> HybridBridgeStreamsSpec_cxx {
@@ -55,4 +55,4 @@ open class HybridBridgeStreamsSpec_base {
  * }
  * ```
  */
-public typealias HybridBridgeStreamsSpec = HybridBridgeStreamsSpec_protocol & HybridBridgeStreamsSpec_base
+@_spi(BridgeKitNitro) public typealias HybridBridgeStreamsSpec = HybridBridgeStreamsSpec_protocol & HybridBridgeStreamsSpec_base

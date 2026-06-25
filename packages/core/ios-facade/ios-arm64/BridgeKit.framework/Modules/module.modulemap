@@ -1,0 +1,10 @@
+framework module BridgeKit {
+  umbrella header "BridgeKit.h"
+  export *
+
+  module * { export * }
+}
+
+module BridgeKit.Swift {
+  header "BridgeKit-Swift.h"
+}

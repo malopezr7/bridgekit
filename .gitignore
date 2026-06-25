@@ -18,3 +18,10 @@ node_modules/
 **/DerivedData/
 **/.xcode.env.local
 **/*.hmap
+
+# iOS xcframework build project (distributable facade is committed under packages/core/ios-facade/)
+packages/core/ios-xcframework/
+
+# local agent config
+.atl/
+.claude/

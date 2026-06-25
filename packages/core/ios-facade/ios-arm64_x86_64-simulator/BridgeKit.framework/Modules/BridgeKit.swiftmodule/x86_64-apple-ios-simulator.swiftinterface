@@ -1,0 +1,126 @@
+// swift-interface-format-version: 1.0
+// swift-compiler-version: Apple Swift version 6.3.2 effective-5.10 (swiftlang-6.3.2.1.108 clang-2100.1.1.101)
+// swift-module-flags: -target x86_64-apple-ios15.1-simulator -enable-objc-interop -enable-library-evolution -swift-version 5 -O -enable-experimental-feature DebugDescriptionMacro -enable-bare-slash-regex -module-name BridgeKit
+// swift-module-flags-ignorable: -no-verify-emitted-module-interface -formal-cxx-interoperability-mode=swift-6 -interface-compiler-version 6.3.2
+@_exported import BridgeKit
+import Foundation
+import Swift
+import _Concurrency
+import _StringProcessing
+import _SwiftConcurrencyShims
+public enum CloseReason {
+  case replacing
+  case final_
+  public static let replacingGraceMs: Swift.Int64
+  public static func == (a: BridgeKit.CloseReason, b: BridgeKit.CloseReason) -> Swift.Bool
+  public func hash(into hasher: inout Swift.Hasher)
+  public var hashValue: Swift.Int {
+    get
+  }
+}
+public protocol Binding : AnyObject {
+  var contractId: Swift.String { get }
+  var scope: BridgeKit.Scope { get }
+  var isLive: Swift.Bool { get }
+  func close(reason: BridgeKit.CloseReason)
+}
+extension BridgeKit.Binding {
+  public func close()
+}
+public protocol InboundContractAdapter : AnyObject {
+  var stateInitials: [Swift.String : Any?] { get }
+  func invoke(member: Swift.String, payload: [Swift.String : Any?]?) async throws -> Any?
+  func invokeSync(member: Swift.String, payload: [Swift.String : Any?]?) throws -> Any?
+  func openStream(member: Swift.String, payload: [Swift.String : Any?]?) -> _Concurrency.AsyncThrowingStream<Any?, any Swift.Error>
+  func stateStreams() -> [Swift.String : _Concurrency.AsyncStream<Any?>]
+}
+public protocol OutboundCaller : AnyObject {
+  func invoke(member: Swift.String, payload: [Swift.String : Any?]?) async throws -> Any?
+  func invokeSync(member: Swift.String, payload: [Swift.String : Any?]?) throws -> Any?
+  func fire(member: Swift.String, payload: [Swift.String : Any?]?)
+  func stream(member: Swift.String, payload: [Swift.String : Any?]?) -> _Concurrency.AsyncThrowingStream<Any?, any Swift.Error>
+  func state(member: Swift.String) -> _Concurrency.AsyncStream<BridgeKit.BridgeValue<Any?>>
+}
+open class BridgeContractDefinition<P, C> {
+  final public let id: Swift.String
+  final public let contractHash: Swift.String
+  final public let memberHashes: [Swift.String : Swift.String]
+  public init(id: Swift.String, contractHash: Swift.String, memberHashes: [Swift.String : Swift.String])
+  open func inbound(_ impl: P) -> any BridgeKit.InboundContractAdapter
+  open func outbound(_ caller: any BridgeKit.OutboundCaller) -> C
+  @objc deinit
+}
+public protocol BridgeKitApi : AnyObject {
+  func provide<P, C>(_ definition: BridgeKit.BridgeContractDefinition<P, C>, scope: BridgeKit.Scope, factory: () -> P) -> any BridgeKit.Binding
+  func consume<P, C>(_ definition: BridgeKit.BridgeContractDefinition<P, C>, scope: BridgeKit.Scope) -> C
+  func isProvided<P, C>(_ definition: BridgeKit.BridgeContractDefinition<P, C>, scope: BridgeKit.Scope) -> Swift.Bool
+}
+final public class BridgeKitRuntime : BridgeKit.BridgeKitApi {
+  public static let `default`: BridgeKit.BridgeKitRuntime
+  public init(readinessTimeoutMs: Swift.UInt64 = 5_000, callTimeoutMs: Swift.UInt64 = 30_000)
+  final public func provide<P, C>(_ definition: BridgeKit.BridgeContractDefinition<P, C>, scope: BridgeKit.Scope = .global, factory: () -> P) -> any BridgeKit.Binding
+  final public func consume<P, C>(_ definition: BridgeKit.BridgeContractDefinition<P, C>, scope: BridgeKit.Scope = .global) -> C
+  final public func isProvided<P, C>(_ definition: BridgeKit.BridgeContractDefinition<P, C>, scope: BridgeKit.Scope = .global) -> Swift.Bool
+  final public func awaitProvided<P, C>(_ definition: BridgeKit.BridgeContractDefinition<P, C>, scope: BridgeKit.Scope = .global, timeoutMs: Swift.UInt64 = 30_000) async -> Swift.Bool
+  final public func dump() -> Swift.String
+  @objc deinit
+}
+public struct BridgeKitError : Swift.Error, Swift.CustomStringConvertible {
+  public let code: Swift.String
+  public let message: Swift.String
+  public let contractId: Swift.String?
+  public let member: Swift.String?
+  public init(code: Swift.String, message: Swift.String, contractId: Swift.String? = nil, member: Swift.String? = nil)
+  public var description: Swift.String {
+    get
+  }
+}
+extension _Concurrency.AsyncStream {
+  public func map<T>(_ transform: @escaping (Element) async -> T) -> _Concurrency.AsyncStream<T>
+}
+extension _Concurrency.AsyncThrowingStream {
+  public func map<T>(_ transform: @escaping (Element) async throws -> T) -> _Concurrency.AsyncThrowingStream<T, any Swift.Error>
+}
+@_inheritsConvenienceInitializers @objc(BKBridgeKitRuntime) final public class BridgeKitObjC : ObjectiveC.NSObject {
+  @objc(configureDefault) public static func configureDefault()
+  @objc(dump) public static func dump() -> Foundation.NSString
+  @objc(invokeContractWithContractId:scope:member:payload:completion:) public static func invokeContract(contractId: Foundation.NSString, scope: Foundation.NSString?, member: Foundation.NSString, payload: Foundation.NSDictionary?, completion: @escaping (Any?, Foundation.NSString?) -> Swift.Void)
+  @objc(startStreamWithContractId:scope:member:payload:onValue:) public static func startStream(contractId: Foundation.NSString, scope: Foundation.NSString?, member: Foundation.NSString, payload: Foundation.NSDictionary?, onValue: @escaping (Any?, Foundation.NSString?) -> Swift.Void) -> Foundation.NSString
+  @objc(stopStreamWithId:) public static func stopStream(id: Foundation.NSString)
+  @objc(stopAllStreams) public static func stopAllStreams()
+  @objc override dynamic public init()
+  @objc deinit
+}
+public struct BridgeKitDecodeError : Swift.Error, Swift.CustomStringConvertible {
+  public let field: Swift.String
+  public let expectedType: Swift.String
+  public init(field: Swift.String, expectedType: Swift.String)
+  public var description: Swift.String {
+    get
+  }
+}
+@inline(__always) public func bridgeKitThrow<T>(field: Swift.String, expectedType: Swift.String) throws -> T
+public enum BridgeValue<T> {
+  case available(T)
+  case initial(T)
+  case replacing(T?)
+  case unprovided(T?)
+  public func valueOrNil() -> T?
+  public func remap<U>(_ transform: (T) -> U?) -> BridgeKit.BridgeValue<U>
+}
+public func paramsHash(_ payload: [Swift.String : Any?]?) -> Swift.Int64
+public enum Scope : Swift.Hashable {
+  case global
+  case feature(Swift.String)
+  case instance(feature: Swift.String, tag: Swift.String)
+  public func serialized() -> Swift.String
+  public static func deserialize(_ s: Swift.String) -> BridgeKit.Scope
+  public static func from(envelopeMap map: [Swift.String : Any?]) -> BridgeKit.Scope
+  public static func == (a: BridgeKit.Scope, b: BridgeKit.Scope) -> Swift.Bool
+  public func hash(into hasher: inout Swift.Hasher)
+  public var hashValue: Swift.Int {
+    get
+  }
+}
+extension BridgeKit.CloseReason : Swift.Equatable {}
+extension BridgeKit.CloseReason : Swift.Hashable {}

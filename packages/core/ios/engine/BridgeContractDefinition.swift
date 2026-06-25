@@ -70,7 +70,7 @@ open class BridgeContractDefinition<P, C> {
 // MARK: - AnyBridgeContractDefinition
 
 /// Engine-internal protocol that erases P/C generics for storage.
-public protocol AnyBridgeContractDefinition: AnyObject {
+protocol AnyBridgeContractDefinition: AnyObject {
     var id: String { get }
     var contractHash: String { get }
     var memberHashes: [String: String] { get }

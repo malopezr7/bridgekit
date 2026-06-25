@@ -4,9 +4,9 @@
 // CLASS NAME: MUST be HybridBridgeHost — BridgeKitAutolinking.swift instantiates by exact name.
 // A rename here silently breaks Nitro autolinking.
 //
-// Requires import NitroModules (only available inside the pod build).
+// Requires @_implementationOnly import NitroModules (only available inside the pod build).
 
-import NitroModules
+@_implementationOnly import NitroModules
 
 // Double-Promise adapter (connectDispatcher / onInvoke)
 //
@@ -18,17 +18,17 @@ import NitroModules
 // detached Task that peels both layers with `.await().await()` and calls
 // completion exactly once (do/catch wrapper).
 
-public class HybridBridgeHost: HybridBridgeHostSpec {
+final class HybridBridgeHost: HybridBridgeHostSpec {
 
     // `override` (not `required`) — HybridBridgeHostSpec_base.init() is not required.
-    public override init() {
+    override init() {
         super.init()
     }
 
     // MARK: - invoke
 
     /// Async invoke — returns a Promise resolved when the delegate's completion fires.
-    public func invoke(env: AnyMap) throws -> Promise<AnyMap> {
+    func invoke(env: AnyMap) throws -> Promise<AnyMap> {
         return Promise.async {
             let envMap = AnyMapCodec.fromAnyMap(env)
 
@@ -46,7 +46,7 @@ public class HybridBridgeHost: HybridBridgeHostSpec {
     // MARK: - invokeSync
 
     /// Synchronous invoke — blocks the calling thread until delegate returns.
-    public func invokeSync(env: AnyMap) throws -> AnyMap {
+    func invokeSync(env: AnyMap) throws -> AnyMap {
         let envMap  = AnyMapCodec.fromAnyMap(env)
         let result  = BridgeKitNative.shared.delegate.invokeSync(env: envMap)
         return try AnyMapCodec.toAnyMap(result)
@@ -57,7 +57,7 @@ public class HybridBridgeHost: HybridBridgeHostSpec {
     /// Register the JS dispatcher. Synchronous — returns epoch + snapshot envelope.
     /// onInvoke uses Nitro's double-Promise signature — see the Double-Promise adapter
     /// comment at the top of this file.
-    public func connectDispatcher(
+    func connectDispatcher(
         epochInfo: AnyMap,
         onInvoke: @escaping (_ env: AnyMap) -> Promise<Promise<AnyMap>>,
         onStreamOpen: @escaping (_ env: AnyMap) -> Void,

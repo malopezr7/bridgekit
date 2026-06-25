@@ -1,0 +1,68 @@
+name: iOS Facade
+
+# The distributable iOS facade (packages/core/ios-facade/) is a generated artifact:
+# a C++-clean BridgeKit.framework skeleton (interface + modulemap + headers, no
+# binary) that ships in the npm package and lets consumers (Axion) expose BridgeKit
+# without dragging Nitro/C++. It MUST stay in sync with the iOS Swift source. This
+# workflow rebuilds it on a Mac and fails if the committed copy is stale or leaks
+# C++ — so a source change can never ship with a divergent facade.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/core/ios/**'
+      - 'packages/core/nitrogen/generated/ios/**'
+      - 'packages/core/scripts/build-ios-xcframework.sh'
+      - 'packages/core/scripts/create-ios-xcframework-project.rb'
+      - 'packages/core/ios-facade/**'
+      - '.github/workflows/ios-facade.yml'
+  pull_request:
+    paths:
+      - 'packages/core/ios/**'
+      - 'packages/core/nitrogen/generated/ios/**'
+      - 'packages/core/scripts/build-ios-xcframework.sh'
+      - 'packages/core/scripts/create-ios-xcframework-project.rb'
+      - 'packages/core/ios-facade/**'
+      - '.github/workflows/ios-facade.yml'
+
+jobs:
+  ios-facade:
+    name: Build & verify iOS facade
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build BridgeKit.xcframework + extract facade
+        run: ./packages/core/scripts/build-ios-xcframework.sh
+
+      - name: Verify committed ios-facade is up to date
+        run: |
+          if ! git diff --quiet -- packages/core/ios-facade; then
+            echo "::error::packages/core/ios-facade is STALE. Re-run packages/core/scripts/build-ios-xcframework.sh and commit packages/core/ios-facade/."
+            git --no-pager diff --stat -- packages/core/ios-facade
+            exit 1
+          fi
+          echo "✅ ios-facade matches the current iOS Swift source"
+
+      - name: Verify facade interface is C++-clean
+        run: |
+          leaks=$(grep -rEl 'NitroModules|margelo|std::|[^A-Za-z]AnyMap[^A-Za-z]|HybridBridge' \
+            packages/core/ios-facade --include='*.swiftinterface' || true)
+          if [ -n "$leaks" ]; then
+            echo "::error::facade .swiftinterface leaks Nitro/C++ symbols:"
+            echo "$leaks"
+            exit 1
+          fi
+          echo "✅ facade interface is C++-clean (no Nitro/C++ leak)"

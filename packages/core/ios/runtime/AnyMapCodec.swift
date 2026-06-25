@@ -7,10 +7,10 @@
 //
 // This file will NOT compile standalone — requires NitroModules (pod/Xcode build only).
 
-import NitroModules
+@_implementationOnly import NitroModules
 
 /// Bulk ``AnyMap`` ↔ `[String: Any?]` conversion.
-public enum AnyMapCodec {
+enum AnyMapCodec {
     /// Convert a plain `[String: Any?]` dictionary to an ``AnyMap`` for passing
     /// across the Nitro bridge.
     ///
@@ -19,13 +19,13 @@ public enum AnyMapCodec {
     ///
     /// - Throws: ``BridgeKitDecodeError`` (wrapped) or a NitroModules error if any
     ///   value in `map` is not AnyMap-compatible.
-    public static func toAnyMap(_ map: [String: Any?]) throws -> AnyMap {
+    static func toAnyMap(_ map: [String: Any?]) throws -> AnyMap {
         return try AnyMap.fromDictionary(map)
     }
 
     /// Convert an ``AnyMap`` from the Nitro bridge to a plain `[String: Any?]`.
     /// Returns an empty dictionary if `anyMap` is `nil`.
-    public static func fromAnyMap(_ anyMap: AnyMap?) -> [String: Any?] {
+    static func fromAnyMap(_ anyMap: AnyMap?) -> [String: Any?] {
         return anyMap?.toDictionary() ?? [:]
     }
 }

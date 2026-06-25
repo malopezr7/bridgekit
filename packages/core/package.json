@@ -1,61 +1,112 @@
 {
   "name": "@malopezr7/bridgekit",
+  "version": "0.0.1-beta.2",
   "description": "Typed bidirectional bridge between React Native and native (Android/iOS)",
-  "version": "83.0.0",
   "author": "malopezr7 <malopezr7@gmail.com> (https://github.com/malopezr7)",
-  "bugs": "https://github.com/malopezr7/bridgekit/issues",
-  "engines": {
-    "node": ">=26.0.0"
+  "license": "MIT",
+  "homepage": "https://github.com/malopezr7/bridgekit#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/malopezr7/bridgekit.git",
+    "directory": "packages/core"
   },
+  "bugs": {
+    "url": "https://github.com/malopezr7/bridgekit/issues"
+  },
+  "keywords": [
+    "react-native",
+    "android",
+    "ios",
+    "nitro",
+    "nitro-modules",
+    "bridge",
+    "native-modules",
+    "ipc",
+    "typescript",
+    "codegen"
+  ],
+  "main": "dist/commonjs/index.js",
+  "module": "dist/module/index.js",
+  "types": "dist/typescript/index.d.ts",
+  "react-native": "src/index.ts",
+  "source": "src/index.ts",
   "exports": {
     ".": {
       "types": "./dist/typescript/index.d.ts",
-      "import": "./src/index.ts",
+      "react-native": "./src/index.ts",
+      "import": "./dist/module/index.js",
       "require": "./dist/commonjs/index.js"
     },
     "./contract": {
       "types": "./dist/typescript/contract/index.d.ts",
-      "import": "./src/contract/index.ts",
+      "react-native": "./src/contract/index.ts",
+      "import": "./dist/module/contract/index.js",
       "require": "./dist/commonjs/contract/index.js"
+    },
+    "./react": {
+      "types": "./dist/typescript/react/index.d.ts",
+      "react-native": "./src/react/index.ts",
+      "import": "./dist/module/react/index.js",
+      "require": "./dist/commonjs/react/index.js"
+    },
+    "./test": {
+      "types": "./dist/typescript/testing/index.d.ts",
+      "react-native": "./src/testing/index.ts",
+      "import": "./dist/module/testing/index.js",
+      "require": "./dist/commonjs/testing/index.js"
     },
     "./package.json": "./package.json"
   },
   "files": [
-    "dist",
-    "android",
-    "ios",
     "src",
-    "README.md",
-    "nitro.json",
-    "nitrogen/generated",
-    "android/CMakeLists.txt",
+    "dist",
+    "android/src",
     "android/build.gradle.kts",
+    "android/CMakeLists.txt",
     "android/fix-prefab.gradle",
+    "android/consumer-rules.pro",
+    "ios/**/*.h",
+    "ios/**/*.m",
+    "ios/**/*.mm",
+    "ios/**/*.swift",
+    "ios-facade",
+    "nitrogen/generated",
+    "react-native.config.js",
+    "nitro.json",
     "*.podspec",
+    "README.md",
     "!**/__tests__",
     "!**/__fixtures__",
     "!**/__mocks__",
-    "!android/build"
+    "!**/*.test.ts",
+    "!**/*.test.tsx"
   ],
-  "homepage": "https://github.com/malopezr7/bridgekit#readme",
-  "keywords": [
-    "android",
-    "ios",
-    "react-native"
-  ],
-  "license": "MIT",
-  "main": "dist/commonjs/index.js",
-  "module": "src/index.ts",
-  "peerDependencies": {
-    "react": "19.2.0",
-    "react-native": "0.83.6",
-    "react-native-nitro-modules": "0.35.0"
+  "scripts": {
+    "build": "bob build",
+    "prepack": "bob build",
+    "clean": "rimraf android/build && rimraf dist",
+    "clean:modules": "rimraf .turbo node_modules",
+    "check": "biome check src/",
+    "format": "biome check --write src/",
+    "typecheck": "tsc --noEmit",
+    "nitrogen": "nitrogen && node scripts/patch-nitrogen-namespaces.js",
+    "test": "pnpm test:web && pnpm test:native",
+    "test:native": "jest --config ./jest.config.cjs --selectProjects native --passWithNoTests",
+    "test:web": "jest --config ./jest.config.cjs --selectProjects web --passWithNoTests",
+    "pub:beta": "pnpm publish --no-git-checks --access public --tag beta",
+    "pub:next": "pnpm publish --no-git-checks --access public --tag next",
+    "pub:release": "pnpm publish --access public"
   },
+  "peerDependencies": {
+    "react": "*",
+    "react-native": "*",
+    "react-native-nitro-modules": "*"
+  },
+  "sideEffects": false,
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
-  "react-native": "src/index.ts",
   "react-native-builder-bob": {
     "source": "src",
     "output": "dist",
@@ -71,26 +122,6 @@
     ],
     "exclude": "{**/tests/**,**/*.stories.*}"
   },
-  "repository": "git+https://github.com/malopezr7/bridgekit.git",
-  "scripts": {
-    "build": "bob build",
-    "check": "biome check src/",
-    "typecheck": "tsc --noEmit",
-    "clean": "rimraf android/build && rimraf dist",
-    "clean:modules": "rimraf .turbo node_modules",
-    "format": "biome check --write src/",
-    "prepublish": "bob build",
-    "pub:beta": "pnpm publish --no-git-checks --access public --tag beta",
-    "pub:next": "pnpm publish --no-git-checks --access public --tag next",
-    "pub:release": "pnpm publish --access public",
-    "test": "pnpm test:web && pnpm test:native",
-    "nitrogen": "nitrogen && node scripts/patch-nitrogen-namespaces.js",
-    "test:native": "jest --config ./jest.config.cjs --selectProjects native --passWithNoTests",
-    "test:web": "jest --config ./jest.config.cjs --selectProjects web --passWithNoTests"
-  },
-  "sideEffects": false,
-  "source": "src/index.ts",
-  "types": "dist/typescript/index.d.ts",
   "devDependencies": {
     "@babel/core": "7.28.3",
     "@babel/preset-env": "7.28.3",

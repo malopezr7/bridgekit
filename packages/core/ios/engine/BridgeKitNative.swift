@@ -12,7 +12,7 @@ import Foundation
 
 /// Full delegate surface exposed to the Swift core.
 /// All [String: Any?] values conform to the {v: <value>} wire rule.
-public protocol BridgeKitNativeDelegate: AnyObject {
+protocol BridgeKitNativeDelegate: AnyObject {
 
     // BridgeHost
     func invoke(env: [String: Any?], complete: @escaping ([String: Any?]) -> Void)
@@ -35,10 +35,10 @@ public protocol BridgeKitNativeDelegate: AnyObject {
 // MARK: - BridgeKitNative singleton
 
 /// Singleton seam — HybridBridgeHost/State/Streams delegate every call here.
-public final class BridgeKitNative {
+final class BridgeKitNative {
 
     /// Shared singleton.
-    public static let shared = BridgeKitNative()
+    static let shared = BridgeKitNative()
 
     // nonisolated(unsafe): set once before Nitro host creation; NSLock guards the window.
     private let _lock = NSLock()
@@ -49,7 +49,7 @@ public final class BridgeKitNative {
     /// Get/set the active delegate.
     ///
     /// Thread-safe: NSLock-protected. Set BEFORE Nitro host initialization.
-    public var delegate: BridgeKitNativeDelegate {
+    var delegate: BridgeKitNativeDelegate {
         get {
             _lock.lock(); defer { _lock.unlock() }
             return _delegate
@@ -72,24 +72,24 @@ private func notReadyEnvelope() -> [String: Any?] {
 }
 
 /// Default delegate — returns BRIDGE_NOT_READY envelopes until the real impl is wired in.
-public final class NotReadyDelegate: BridgeKitNativeDelegate {
+final class NotReadyDelegate: BridgeKitNativeDelegate {
 
-    public static let shared = NotReadyDelegate()
+    static let shared = NotReadyDelegate()
     private init() {}
 
-    public func invoke(env: [String: Any?], complete: @escaping ([String: Any?]) -> Void) {
+    func invoke(env: [String: Any?], complete: @escaping ([String: Any?]) -> Void) {
         complete(notReadyEnvelope())
     }
 
-    public func invokeSync(env: [String: Any?]) -> [String: Any?] {
+    func invokeSync(env: [String: Any?]) -> [String: Any?] {
         notReadyEnvelope()
     }
 
-    public func connectDispatcher(epochInfo: [String: Any?], callbacks: JsDispatcherCallbacks) -> [String: Any?] {
+    func connectDispatcher(epochInfo: [String: Any?], callbacks: JsDispatcherCallbacks) -> [String: Any?] {
         ["epoch": 0, "snapshot": [] as [[String: Any?]]]
     }
 
-    public func openStream(
+    func openStream(
         env: [String: Any?],
         onNext: @escaping ([String: Any?]) -> Void,
         onEnd: @escaping ([String: Any?]) -> Void
@@ -98,12 +98,12 @@ public final class NotReadyDelegate: BridgeKitNativeDelegate {
         return ""
     }
 
-    public func closeStream(streamId: String) {}
-    public func emitFromJs(streamId: String, value: [String: Any?]) {}
-    public func endFromJs(streamId: String, end: [String: Any?]) {}
+    func closeStream(streamId: String) {}
+    func emitFromJs(streamId: String, value: [String: Any?]) {}
+    func endFromJs(streamId: String, end: [String: Any?]) {}
 
-    public func stateRead(env: [String: Any?]) -> [String: Any?] { notReadyEnvelope() }
-    public func stateObserve(env: [String: Any?], onChange: @escaping ([String: Any?]) -> Void) -> String { "" }
-    public func stateUnobserve(obsId: String) {}
-    public func stateWrite(env: [String: Any?]) -> [String: Any?] { notReadyEnvelope() }
+    func stateRead(env: [String: Any?]) -> [String: Any?] { notReadyEnvelope() }
+    func stateObserve(env: [String: Any?], onChange: @escaping ([String: Any?]) -> Void) -> String { "" }
+    func stateUnobserve(obsId: String) {}
+    func stateWrite(env: [String: Any?]) -> [String: Any?] { notReadyEnvelope() }
 }

@@ -5,14 +5,14 @@
 /// Copyright © Marc Rousavy @ Margelo
 ///
 
-import NitroModules
+@_implementationOnly import NitroModules
 
 /**
  * Wraps a Swift `(_ value: AnyMap) -> Void` as a class.
  * This class can be used from C++, e.g. to wrap the Swift closure as a `std::function`.
  */
-public final class Func_void_std__shared_ptr_AnyMap_ {
-  public typealias bridge = margelo.nitro.BridgeKit.bridge.swift
+@_spi(BridgeKitNitro) public final class Func_void_std__shared_ptr_AnyMap_ {
+  @_spi(BridgeKitNitro) public typealias bridge = margelo.nitro.BridgeKit.bridge.swift
 
   private let closure: (_ value: AnyMap) -> Void
 

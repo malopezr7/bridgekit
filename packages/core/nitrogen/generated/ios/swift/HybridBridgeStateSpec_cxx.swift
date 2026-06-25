@@ -5,7 +5,7 @@
 /// Copyright © Marc Rousavy @ Margelo
 ///
 
-import NitroModules
+@_implementationOnly import NitroModules
 
 /**
  * A class implementation that bridges HybridBridgeStateSpec over to C++.
@@ -16,13 +16,13 @@ import NitroModules
  * - Other HybridObjects need to be wrapped/unwrapped from the Swift TCxx wrapper
  * - Throwing methods need to be wrapped with a Result<T, Error> type, as exceptions cannot be propagated to C++
  */
-open class HybridBridgeStateSpec_cxx {
+@_spi(BridgeKitNitro) public class HybridBridgeStateSpec_cxx {
   /**
    * The Swift <> C++ bridge's namespace (`margelo::nitro::BridgeKit::bridge::swift`)
    * from `BridgeKit-Swift-Cxx-Bridge.hpp`.
    * This contains specialized C++ templates, and C++ helper functions that can be accessed from Swift.
    */
-  public typealias bridge = margelo.nitro.BridgeKit.bridge.swift
+  @_spi(BridgeKitNitro) public typealias bridge = margelo.nitro.BridgeKit.bridge.swift
 
   /**
    * Holds an instance of the `HybridBridgeStateSpec` Swift protocol.
