@@ -1,0 +1,18 @@
+// Expo Metro config, extended for the pnpm hoisted monorepo so the bundler
+// can resolve @malopezr7/bridgekit and react-native-nitro-modules from the
+// repo root node_modules.
+const { getDefaultConfig } = require('expo/metro-config');
+const path = require('node:path');
+
+const projectRoot = __dirname;
+const monorepoRoot = path.resolve(projectRoot, '../..');
+
+const config = getDefaultConfig(projectRoot);
+
+config.watchFolders = [monorepoRoot];
+config.resolver.nodeModulesPaths = [
+  path.resolve(projectRoot, 'node_modules'),
+  path.resolve(monorepoRoot, 'node_modules'),
+];
+
+module.exports = config;

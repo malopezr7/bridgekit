@@ -1,0 +1,83 @@
+// Top-level build file shared by the reactnativeapp library and host app modules.
+buildscript {
+    ext {
+        buildToolsVersion = "36.0.0"
+        minSdkVersion = 24
+        compileSdkVersion = 36
+        targetSdkVersion = 36
+        ndkVersion = "27.0.12077973"
+        kotlinVersion = "2.1.20"
+    }
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath("com.android.tools.build:gradle:8.12.0")
+        classpath("com.facebook.react:react-native-gradle-plugin")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:${kotlinVersion}")
+        // Brownfield Gradle Plugin — packages RN into an AAR.
+        // Latest stable on Maven Central as of 2026-06-18: 1.1.0
+        // Source: https://repo1.maven.org/maven2/com/callstack/react/brownfield-gradle-plugin/maven-metadata.xml
+        classpath("com.callstack.react:brownfield-gradle-plugin:1.1.0")
+        // Kotlin Compose compiler plugin (Kotlin 2.x — replaces composeOptions.kotlinCompilerExtensionVersion).
+        classpath("org.jetbrains.kotlin:compose-compiler-gradle-plugin:${kotlinVersion}")
+    }
+}
+
+// Do not apply com.facebook.react.rootproject here: RN 0.83's root plugin hardcodes
+// a ':app' application module, while this brownfield sample intentionally uses
+// ':reactnativeapp' (AAR) + ':host' (native app).
+
+subprojects { subproject ->
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    plugins.withId("com.android.application") {
+        android {
+            compileOptions {
+                sourceCompatibility JavaVersion.VERSION_17
+                targetCompatibility JavaVersion.VERSION_17
+            }
+        }
+    }
+
+    plugins.withId("com.android.library") {
+        android {
+            compileOptions {
+                sourceCompatibility JavaVersion.VERSION_17
+                targetCompatibility JavaVersion.VERSION_17
+            }
+        }
+    }
+
+    tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+        kotlinOptions {
+            jvmTarget = "17"
+        }
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        sourceCompatibility = "17"
+        targetCompatibility = "17"
+    }
+
+    configurations.configureEach {
+        resolutionStrategy.eachDependency { details ->
+            if (details.requested.group == "com.facebook.react" && details.requested.name == "react-native") {
+                details.useTarget("com.facebook.react:react-android:0.83.6")
+                details.because("react-native artifact was renamed to react-android for RN 0.71+")
+            }
+            if (details.requested.group == "com.facebook.react" && details.requested.name == "react-android") {
+                details.useTarget("com.facebook.react:react-android:0.83.6")
+                details.because("RN root plugin is not applied in this two-module brownfield layout")
+            }
+            if (details.requested.group == "com.facebook.react" && details.requested.name in ["hermes-engine", "hermes-android"]) {
+                details.useTarget("com.facebook.hermes:hermes-android:0.14.1")
+                details.because("RN 0.83 publishes Hermes under com.facebook.hermes, versioned from sdks/hermes-engine/version.properties")
+            }
+        }
+    }
+}

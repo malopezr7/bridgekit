@@ -1,0 +1,165 @@
+name: BridgeKitExpoBrownfield
+
+# xcodegen 2.x project spec
+# Run: xcodegen generate --spec ios/project.yml (from the package root)
+# Then: pod install (from ios/)
+
+options:
+  bundleIdPrefix: com.bridgekit
+  deploymentTarget:
+    iOS: "15.1"
+  defaultConfig: Debug
+  # Required: Expo/RN autolinking injects xcconfig that must not be sandboxed
+  # ENABLE_USER_SCRIPT_SANDBOXING is set per-target below
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+
+targets:
+  BridgeKitExpoBrownfield:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.1"
+
+    # Source files — app shell + Expo provider only.
+    # BridgeKit Swift glue lives in BridgeKitDemoSupport so this app target can
+    # avoid Swift C++ interop; ExpoModulesCore does not compile under objcxx.
+    sources:
+      - path: BridgeKitExpoBrownfield
+        excludes:
+          - "Generated/**"
+          - "bridgekit/**"
+
+    resources:
+      - BridgeKitExpoBrownfield/LaunchScreen.storyboard
+      - BridgeKitExpoBrownfield/Images.xcassets
+      - BridgeKitExpoBrownfield/PrivacyInfo.xcprivacy
+
+    settings:
+      base:
+        # Bundle identity
+        PRODUCT_BUNDLE_IDENTIFIER: com.bridgekit.expobrownfield
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+
+        SWIFT_OBJC_BRIDGING_HEADER: "BridgeKitExpoBrownfield/BridgeKitExpoBrownfield-Bridging-Header.h"
+
+        HEADER_SEARCH_PATHS:
+          - "$(inherited)"
+
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-ObjC"
+          - "-lc++"
+
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/Frameworks"
+
+        # Required: CocoaPods script phases won't run in a sandboxed build
+        ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+
+        # App icon + launch screen
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_FILE: BridgeKitExpoBrownfield/Info.plist
+
+        CLANG_ENABLE_MODULES: YES
+        ENABLE_BITCODE: NO
+
+      configs:
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+
+    # -----------------------------------------------------------------
+    # Build script phases (mirror the bare RN host — project.pbxproj)
+    # -----------------------------------------------------------------
+    preBuildScripts:
+      # [CP] Check Pods Manifest.lock — injected by CocoaPods post-install,
+      # listed here so xcodegen doesn't remove it on re-gen.
+      # NOTE: CocoaPods will re-inject its own phases on `pod install`;
+      # these entries ensure the phase slots exist before pod install runs.
+      - name: "[CP] Check Pods Manifest.lock"
+        shell: /bin/sh
+        script: |
+          diff "${PODS_PODFILE_DIR_PATH}/Podfile.lock" "${PODS_ROOT}/Manifest.lock" > /dev/null
+          if [ $? != 0 ] ; then
+            echo "error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation." >&2
+            exit 1
+          fi
+          echo "SUCCESS" > "${SCRIPT_OUTPUT_FILE_0}"
+        inputFiles: []
+        outputFiles:
+          - "$(DERIVED_FILE_DIR)/Pods-BridgeKitExpoBrownfield-checkManifestLockResult.txt"
+        showEnvVarsInLog: false
+
+    postBuildScripts:
+      # Bundle React Native code and images (same script as bare host)
+      - name: "Bundle React Native code and images"
+        shell: /bin/sh
+        script: |
+          set -e
+          WITH_ENVIRONMENT="${REACT_NATIVE_PATH}/scripts/xcode/with-environment.sh"
+          REACT_NATIVE_XCODE="${REACT_NATIVE_PATH}/scripts/react-native-xcode.sh"
+          /bin/sh -c "\"${WITH_ENVIRONMENT}\" \"${REACT_NATIVE_XCODE}\""
+        inputFiles:
+          - "$(SRCROOT)/.xcode.env.local"
+          - "$(SRCROOT)/.xcode.env"
+        outputFiles: []
+
+      # [CP] Embed Pods Frameworks — injected by CocoaPods; listed here as placeholder
+      - name: "[CP] Embed Pods Frameworks"
+        shell: /bin/sh
+        script: |
+          "${PODS_ROOT}/Target Support Files/Pods-BridgeKitExpoBrownfield/Pods-BridgeKitExpoBrownfield-frameworks.sh"
+        inputFileLists:
+          - "${PODS_ROOT}/Target Support Files/Pods-BridgeKitExpoBrownfield/Pods-BridgeKitExpoBrownfield-frameworks-${CONFIGURATION}-input-files.xcfilelist"
+        outputFileLists:
+          - "${PODS_ROOT}/Target Support Files/Pods-BridgeKitExpoBrownfield/Pods-BridgeKitExpoBrownfield-frameworks-${CONFIGURATION}-output-files.xcfilelist"
+        showEnvVarsInLog: false
+
+      # [CP] Copy Pods Resources
+      - name: "[CP] Copy Pods Resources"
+        shell: /bin/sh
+        script: |
+          "${PODS_ROOT}/Target Support Files/Pods-BridgeKitExpoBrownfield/Pods-BridgeKitExpoBrownfield-resources.sh"
+        inputFileLists:
+          - "${PODS_ROOT}/Target Support Files/Pods-BridgeKitExpoBrownfield/Pods-BridgeKitExpoBrownfield-resources-${CONFIGURATION}-input-files.xcfilelist"
+        outputFileLists:
+          - "${PODS_ROOT}/Target Support Files/Pods-BridgeKitExpoBrownfield/Pods-BridgeKitExpoBrownfield-resources-${CONFIGURATION}-output-files.xcfilelist"
+        showEnvVarsInLog: false
+
+    dependencies:
+      - target: BridgeKitDemoSupport
+      - sdk: JavaScriptCore.framework
+
+  BridgeKitDemoSupport:
+    type: library.static
+    platform: iOS
+    deploymentTarget: "15.1"
+
+    sources:
+      - path: BridgeKitExpoBrownfield/Generated
+        excludes:
+          - "bridgekit.lock"
+      - path: BridgeKitExpoBrownfield/bridgekit
+
+    settings:
+      base:
+        PRODUCT_NAME: BridgeKitDemoSupport
+        DEFINES_MODULE: YES
+        SWIFT_VERSION: "5.0"
+
+        # Required only for Swift files that import BridgeKit/Nitro.
+        # Keeping it out of the app target avoids breaking ExpoModulesCore.
+        SWIFT_OBJC_INTEROP_MODE: objcxx
+        HEADER_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(PODS_ROOT)/Headers/Private/NitroModules"
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-lc++"
+        CLANG_ENABLE_MODULES: YES
+        ENABLE_USER_SCRIPT_SANDBOXING: "NO"

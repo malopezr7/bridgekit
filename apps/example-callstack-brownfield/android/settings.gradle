@@ -1,0 +1,50 @@
+pluginManagement {
+    def resolveNodePackageDir = { String packageName ->
+        def output = new ByteArrayOutputStream()
+        def error = new ByteArrayOutputStream()
+        def process = ["node", "--print", "require.resolve('${packageName}/package.json')"]
+            .execute(null, settingsDir.parentFile)
+        process.consumeProcessOutput(output, error)
+        if (process.waitFor() != 0) {
+            throw new GradleException("Could not resolve ${packageName} from ${settingsDir.parentFile}: ${error}")
+        }
+        return new File(output.toString().trim()).parentFile.absolutePath
+    }
+
+    includeBuild(resolveNodePackageDir("@react-native/gradle-plugin"))
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    id("com.facebook.react.settings")
+}
+
+extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
+    ex.autolinkLibrariesFromCommand()
+}
+
+rootProject.name = 'BridgeKitCallstackBrownfield'
+
+// RN library module — packaged into an AAR via brownfield CLI.
+include ':reactnativeapp'
+
+// Native host app — depends on the AAR from mavenLocal().
+include ':host'
+
+def resolveNodePackageDir = { String packageName ->
+    def output = new ByteArrayOutputStream()
+    def error = new ByteArrayOutputStream()
+    def process = ["node", "--print", "require.resolve('${packageName}/package.json')"]
+        .execute(null, settingsDir.parentFile)
+    process.consumeProcessOutput(output, error)
+    if (process.waitFor() != 0) {
+        throw new GradleException("Could not resolve ${packageName} from ${settingsDir.parentFile}: ${error}")
+    }
+    return new File(output.toString().trim()).parentFile.absolutePath
+}
+
+includeBuild(resolveNodePackageDir("@react-native/gradle-plugin"))

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:name=".MainApplication"
+        android:label="@string/app_name"
+        android:allowBackup="false"
+        android:theme="@style/AppTheme"
+        android:supportsRtl="true">
+
+        <!--
+            NATIVE launcher: this is the "existing native app" screen.
+            Users land here first, then tap a button to open the RN screen.
+        -->
+        <activity
+            android:name=".NativeHomeActivity"
+            android:label="@string/app_name"
+            android:exported="true"
+            android:theme="@style/AppTheme">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+            React Native host activity: presents the BridgeKit RN demo screen.
+            configChanges + windowSoftInputMode match the bare RN host convention.
+        -->
+        <activity
+            android:name=".ReactScreenActivity"
+            android:label="BridgeKit RN Demo"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:exported="false" />
+
+    </application>
+</manifest>

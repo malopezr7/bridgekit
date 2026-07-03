@@ -1,0 +1,49 @@
+{
+  "descriptorVersion": 1,
+  "contracts": {
+    "bridgekit.demo-feature": {
+      "hash": "a6c0d910",
+      "members": {
+        "methods.getGreeting": "372547b8"
+      }
+    },
+    "bridgekit.demo-host": {
+      "hash": "dceb75e0",
+      "members": {
+        "methods.increment": "5f97d680",
+        "methods.ping": "289cf580",
+        "methods.say": "3bb327c0",
+        "state.counter": "b4c77128",
+        "streams.echoes": "872b3628",
+        "streams.ticker": "678db3f8"
+      }
+    },
+    "bridgekit.demo-jsinfo": {
+      "hash": "360492b0",
+      "members": {
+        "methods.getReactNativeVersion": "37784868",
+        "methods.getUserLevel": "a158b626",
+        "methods.getUserSegments": "540320f8",
+        "streams.clockTicks": "678db3f8"
+      }
+    },
+    "bridgekit.demo-reverse": {
+      "hash": "acb5aa97",
+      "members": {
+        "methods.greetFromJs": "372547b8",
+        "methods.onNativeEvent": "5a86fd27",
+        "state.jsStatus": "8becf540",
+        "streams.jsCounter": "678db3f8"
+      }
+    },
+    "bridgekit.localhost": {
+      "hash": "7d0b554f",
+      "members": {
+        "methods.getMotto": "71ff3fa0",
+        "methods.greet": "372547b8",
+        "state.mood": "23062cf8"
+      }
+    }
+  },
+  "platform": "kotlin"
+}

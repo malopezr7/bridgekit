@@ -1,0 +1,80 @@
+apply plugin: "com.android.application"
+apply plugin: "org.jetbrains.kotlin.android"
+apply plugin: "org.jetbrains.kotlin.plugin.compose"
+apply plugin: "com.facebook.react"
+
+react {
+    // node_modules is hoisted at the monorepo root (pnpm nodeLinker: hoisted), so the
+    // RN Gradle Plugin resolves react-native, codegen and the CLI from there automatically.
+    // RN 0.83 ships hermesc in the standalone hermes-compiler package, not react-native/sdks.
+    hermesCommand = "$rootDir/../../../node_modules/hermes-compiler/hermesc/%OS-BIN%/hermesc"
+
+    // Pulls every autolinked native module (BridgeKit, Nitro) into the app.
+    // Expo modules are discovered separately by expo-autolinking (applied via settings.gradle
+    // useExpoModules() → afterAndroidApplicationProject hook — no explicit apply needed here).
+    autolinkLibrariesWithApp()
+}
+
+android {
+    ndkVersion rootProject.ext.ndkVersion
+    buildToolsVersion rootProject.ext.buildToolsVersion
+    compileSdk rootProject.ext.compileSdkVersion
+
+    namespace "com.bridgekit.expobrownfield"
+    defaultConfig {
+        applicationId "com.bridgekit.expobrownfield"
+        minSdk rootProject.ext.minSdkVersion
+        targetSdk rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "1.0"
+    }
+
+    signingConfigs {
+        debug {
+            storeFile file('debug.keystore')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+        release {
+            signingConfig signingConfigs.debug
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+        }
+    }
+
+    buildFeatures {
+        compose true
+    }
+
+    composeOptions {
+        kotlinCompilerExtensionVersion "1.5.14"
+    }
+}
+
+dependencies {
+    // React Native — versions are pinned by the React Native Gradle Plugin.
+    // BridgeKit and react-native-nitro-modules are linked via autolinkLibrariesWithApp().
+    implementation("com.facebook.react:react-android")
+    implementation("com.facebook.react:hermes-android")
+
+    // Jetpack Compose for the native home screen.
+    implementation(platform("androidx.compose:compose-bom:2024.06.00"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.activity:activity-compose:1.9.0")
+
+    // Material Components supplies the XML window theme (Theme.MaterialComponents.*)
+    // the native launcher Activity uses before Compose takes over the UI.
+    implementation("com.google.android.material:material:1.12.0")
+
+    // Compose tooling (debug only)
+    debugImplementation("androidx.compose.ui:ui-tooling")
+}

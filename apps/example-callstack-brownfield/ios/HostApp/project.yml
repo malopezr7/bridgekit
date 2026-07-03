@@ -1,0 +1,117 @@
+name: HostApp
+
+# xcodegen spec for the standalone native host app.
+#
+# This project has NO CocoaPods dependency — it imports pre-built XCFrameworks
+# produced by `pnpm package:ios` (brownfield package:ios).
+#
+# BUILD SEQUENCE (full, from scratch):
+#   1. From apps/example-callstack-brownfield/:
+#        pnpm install                        # hoist workspace deps
+#        cd ios && xcodegen generate --spec project.yml   # generate RN workspace project
+#        pod install                         # resolve BridgeKit + NitroModules pods
+#   2. From apps/example-callstack-brownfield/:
+#        pnpm package:ios                    # runs: brownfield package:ios --scheme ReactNativeFramework --configuration Release
+#        # Outputs: ios/.brownfield/package/build/
+#        #   ReactNativeFramework.xcframework
+#        #   ReactBrownfield.xcframework
+#        #   hermesvm.xcframework   (RN >= 0.82)
+#   3. From apps/example-callstack-brownfield/ios/HostApp/:
+#        xcodegen generate --spec project.yml  # generate HostApp.xcodeproj
+#        open HostApp.xcodeproj
+#        # In Xcode: File > Add Package Dependencies... OR drag the three xcframeworks
+#        # from ios/.brownfield/package/build/ into the HostApp target's Frameworks.
+#        # (They are referenced as local paths in this spec via the xcframeworks section.)
+#
+# NOTE on XCFramework paths: the paths below assume package:ios output at the default
+# location ios/.brownfield/package/build/.  Adjust XCFRAMEWORKS_DIR if you relocate them.
+
+options:
+  bundleIdPrefix: com.bridgekit
+  deploymentTarget:
+    iOS: "15.1"
+  defaultConfig: Debug
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+
+targets:
+  HostApp:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.1"
+
+    sources:
+      - path: .
+        excludes:
+          # Exclude this project.yml itself and README
+          - "project.yml"
+          - "README-hostapp.md"
+          # Exclude lock file
+          - "**/*.lock"
+
+    resources:
+      - LaunchScreen.storyboard
+      - Assets.xcassets
+      - PrivacyInfo.xcprivacy
+
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.bridgekit.callstackbrownfield.hostapp
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_FILE: Info.plist
+
+        # HostApp is plain Swift + UIKit — no C++ interop needed here.
+        # BridgeKit types are exposed by ReactNativeFramework.xcframework.
+
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-ObjC"
+
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/Frameworks"
+
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_BITCODE: NO
+
+        # Path to the xcframeworks produced by brownfield package:ios.
+        # Used by the manual "Add Files" step documented above.
+        # XCFRAMEWORKS_DIR: "$(SRCROOT)/../.brownfield/package/build"
+
+      configs:
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+
+    # ---------------------------------------------------------------------------
+    # XCFramework dependencies
+    # These are the three artifacts produced by `brownfield package:ios`.
+    # xcodegen supports `framework:` dependencies. The paths are relative to the
+    # project.yml location (ios/HostApp/).
+    #
+    # IMPORTANT — MANUAL STEP REQUIRED:
+    #   After running `pnpm package:ios`, drag these three xcframeworks into
+    #   HostApp > Targets > HostApp > Frameworks, Libraries, and Embedded Content.
+    #   Set each to "Embed & Sign".
+    #
+    #   Alternatively, run: xcodegen generate (after package:ios completes) and
+    #   these framework: entries will be wired automatically.
+    #
+    # Verified output filenames from Callstack brownfield docs for RN >= 0.82:
+    #   ReactNativeFramework.xcframework  — your framework (BridgeKit + bundle)
+    #   ReactBrownfield.xcframework       — @callstack/react-native-brownfield runtime
+    #   hermesvm.xcframework              — Hermes JS engine (RN >= 0.82 produces this separately)
+    # Source: Context7 /callstack/react-native-brownfield, "Package React Native App as XCFramework"
+    # ---------------------------------------------------------------------------
+    dependencies:
+      - framework: ../.brownfield/package/build/ReactNativeFramework.xcframework
+        embed: true
+      - framework: ../.brownfield/package/build/ReactBrownfield.xcframework
+        embed: true
+      - framework: ../.brownfield/package/build/hermesvm.xcframework
+        embed: true

@@ -1,0 +1,32 @@
+{
+  "name": "bridgekit-example-expo-brownfield",
+  "version": "0.0.1",
+  "private": true,
+  "description": "BridgeKit example: React Native embedded in an existing native app via Expo (brownfield, integrated approach)",
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "typecheck": "tsc --noEmit",
+    "generate": "node ../../packages/cli/dist/index.js generate --contracts \"src/demo/contracts/*.contract.ts\" --out-dir android/app/src/main/java/com/bridgekit/expobrownfield/generated --platform kotlin",
+    "generate:ios": "node ../../packages/cli/dist/index.js generate --contracts \"src/demo/contracts/*.contract.ts\" --out-dir ios/BridgeKitExpoBrownfield/Generated --platform swift"
+  },
+  "dependencies": {
+    "@malopezr7/bridgekit": "workspace:*",
+    "expo": "~55.0.26",
+    "expo-modules-autolinking": "55.0.24",
+    "expo-modules-core": "55.0.25",
+    "react": "19.2.0",
+    "react-native": "0.83.6",
+    "react-native-nitro-modules": "0.35.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.28.3",
+    "@react-native/codegen": "0.83.6",
+    "@types/react": "^19.0.0",
+    "babel-preset-expo": "~55.0.22",
+    "typescript": "5.9.2"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  }
+}

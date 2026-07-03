@@ -1,0 +1,41 @@
+{
+  "name": "bridgekit-example-callstack-brownfield",
+  "version": "0.0.1",
+  "private": true,
+  "description": "BridgeKit example: React Native packaged into an existing native app via @callstack/react-native-brownfield (XCFramework / AAR, no Node in the host)",
+  "scripts": {
+    "start": "react-native start --reset-cache",
+    "typecheck": "tsc --noEmit",
+    "package:ios": "brownfield package:ios --scheme ReactNativeFramework --configuration Release",
+    "package:android": "brownfield package:android --variant Release --module-name reactnativeapp",
+    "publish:android": "brownfield publish:android --module-name reactnativeapp",
+    "generate": "node ../../packages/cli/dist/index.js generate --contracts \"src/demo/contracts/*.contract.ts\" --out-dir android/reactnativeapp/src/main/java/com/bridgekit/callstackbrownfield/generated --platform kotlin",
+    "generate:ios": "node ../../packages/cli/dist/index.js generate --contracts \"src/demo/contracts/*.contract.ts\" --out-dir ios/ReactNativeFramework/Generated --platform swift"
+  },
+  "dependencies": {
+    "@callstack/react-native-brownfield": "3.12.0",
+    "@malopezr7/bridgekit": "workspace:*",
+    "react": "19.2.0",
+    "react-native": "0.83.6",
+    "react-native-nitro-modules": "0.35.0"
+  },
+  "devDependencies": {
+    "@babel/core": "7.28.3",
+    "@babel/preset-env": "7.28.3",
+    "@babel/runtime": "7.28.3",
+    "@react-native-community/cli": "^20.1.3",
+    "@react-native-community/cli-platform-android": "^20.1.3",
+    "@react-native-community/cli-platform-ios": "^20.1.3",
+    "@react-native/babel-preset": "0.83.6",
+    "@react-native/codegen": "0.83.6",
+    "@react-native/metro-config": "0.83.6",
+    "@react-native/typescript-config": "0.83.6",
+    "@types/react": "^19.0.0",
+    "typescript": "5.9.2",
+    "@react-native/gradle-plugin": "0.83.6",
+    "hermes-compiler": "0.14.1"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  }
+}

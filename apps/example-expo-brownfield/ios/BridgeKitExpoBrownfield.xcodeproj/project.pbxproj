@@ -1,0 +1,750 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		02F2657366FADDE294236DC8 /* BridgekitLocalhostContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99AB5546D7654EEA622C93EB /* BridgekitLocalhostContract.swift */; };
+		282E95BB0B823CC343CB9130 /* BridgekitDemoReverseContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92EC54AD3E6C25551F62160 /* BridgekitDemoReverseContract.swift */; };
+		31ADEAF4B9B6A6EDF635A9BF /* BridgekitDemoInitializer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E2553CCDBF192B5A8163E85 /* BridgekitDemoInitializer.swift */; };
+		4A2032F318B928919A28F7C5 /* HomeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E8197FEAF694C1A4DD5B3A1 /* HomeViewController.swift */; };
+		6A99DE6ED6095B960FEA4CFF /* BridgekitDemoJsinfoContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30BA428A2C76F31D37E90EBC /* BridgekitDemoJsinfoContract.swift */; };
+		70F78C729EC2EDFE526F6283 /* BridgekitDemoFeatureContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = 570F5E65F60831411C8DBDD8 /* BridgekitDemoFeatureContract.swift */; };
+		7CCA3DC2D2A45ACF0955F25C /* libBridgeKitDemoSupport.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 1480CA7539C0A0EA9098DE6E /* libBridgeKitDemoSupport.a */; };
+		7E770A2456CB9B3D7B9C1A51 /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = E81B6FB11EB2616062446D77 /* ExpoModulesProvider.swift */; };
+		A1B804918E90C8E6139D0F13 /* libPods-BridgeKitDemoSupport.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 2CBDF0EEDD06EFAE0894FD14 /* libPods-BridgeKitDemoSupport.a */; };
+		B0EA53A622B6DF91CB76BDED /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 6F07B0BAE3CD84F93023CA81 /* PrivacyInfo.xcprivacy */; };
+		B129E055450FAB948F5E5FEA /* libPods-BridgeKitExpoBrownfield.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 78A48F44675F29D594DE30EE /* libPods-BridgeKitExpoBrownfield.a */; };
+		B75A1084000A996264101A61 /* BridgeKitDemoSupportBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 0E07E5E2D8DB2697C1E80EBB /* BridgeKitDemoSupportBridge.m */; };
+		BC85A01383F99CAE519D8FB1 /* ReactNativeFactory.mm in Sources */ = {isa = PBXBuildFile; fileRef = 10DAB3597045C487D343851A /* ReactNativeFactory.mm */; };
+		C19E5DEBB1C971D1CE175AB4 /* BridgeKitDemoSupportInitializer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 013008AFFEA8005AFA37E290 /* BridgeKitDemoSupportInitializer.swift */; };
+		C65C2CD2EE3AA01E6005E3EC /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = CCB9816E65CFA42B33FE44FE /* LaunchScreen.storyboard */; };
+		C677F0DC8E8C654747B49D56 /* JavaScriptCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 22E3DA61F2A6DBF824FA31EA /* JavaScriptCore.framework */; };
+		D9B5DA929496963F116766A8 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAF8583ADFC420BD74BE5227 /* AppDelegate.swift */; };
+		DF02B996E1F10F4B3E876621 /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 1D6D4D38653A67C538A49908 /* Images.xcassets */; };
+		E1EA18CA7558BD495F38E997 /* ReactViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B995F28BB5857D6036E2F0D /* ReactViewController.swift */; };
+		F8A1A6BB457BFA0A0689C47C /* BridgekitDemoHostContract.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0365C6DB2433BFA0FFE1A28D /* BridgekitDemoHostContract.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		1FA1DC67A721C6B7B2C0983F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4393C3BD3C6ADCB278A288B2 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 18456966E38D37F0529BA5E3;
+			remoteInfo = BridgeKitDemoSupport;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		013008AFFEA8005AFA37E290 /* BridgeKitDemoSupportInitializer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeKitDemoSupportInitializer.swift; sourceTree = "<group>"; };
+		0365C6DB2433BFA0FFE1A28D /* BridgekitDemoHostContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgekitDemoHostContract.swift; sourceTree = "<group>"; };
+		04DE5D267BE69E23A123E48C /* BridgeKitExpoBrownfield.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = BridgeKitExpoBrownfield.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		0E07E5E2D8DB2697C1E80EBB /* BridgeKitDemoSupportBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = BridgeKitDemoSupportBridge.m; sourceTree = "<group>"; };
+		10DAB3597045C487D343851A /* ReactNativeFactory.mm */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.objcpp; path = ReactNativeFactory.mm; sourceTree = "<group>"; };
+		1480CA7539C0A0EA9098DE6E /* libBridgeKitDemoSupport.a */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = archive.ar; path = libBridgeKitDemoSupport.a; sourceTree = BUILT_PRODUCTS_DIR; };
+		1D6D4D38653A67C538A49908 /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Images.xcassets; sourceTree = "<group>"; };
+		22E3DA61F2A6DBF824FA31EA /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
+		27AA9540FC14AC857F39221E /* Pods-BridgeKitDemoSupport.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-BridgeKitDemoSupport.release.xcconfig"; path = "Target Support Files/Pods-BridgeKitDemoSupport/Pods-BridgeKitDemoSupport.release.xcconfig"; sourceTree = "<group>"; };
+		2CBDF0EEDD06EFAE0894FD14 /* libPods-BridgeKitDemoSupport.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-BridgeKitDemoSupport.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		2E8A7A0C6B1CD838BA361C7C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		30BA428A2C76F31D37E90EBC /* BridgekitDemoJsinfoContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgekitDemoJsinfoContract.swift; sourceTree = "<group>"; };
+		570F5E65F60831411C8DBDD8 /* BridgekitDemoFeatureContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgekitDemoFeatureContract.swift; sourceTree = "<group>"; };
+		5E2553CCDBF192B5A8163E85 /* BridgekitDemoInitializer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgekitDemoInitializer.swift; sourceTree = "<group>"; };
+		6E8197FEAF694C1A4DD5B3A1 /* HomeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeViewController.swift; sourceTree = "<group>"; };
+		6F07B0BAE3CD84F93023CA81 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		78A48F44675F29D594DE30EE /* libPods-BridgeKitExpoBrownfield.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-BridgeKitExpoBrownfield.a"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7B995F28BB5857D6036E2F0D /* ReactViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReactViewController.swift; sourceTree = "<group>"; };
+		8E28E2EC09C36A6A0BCF6F62 /* BridgeKitDemoSupportBridge.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = BridgeKitDemoSupportBridge.h; sourceTree = "<group>"; };
+		99AB5546D7654EEA622C93EB /* BridgekitLocalhostContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgekitLocalhostContract.swift; sourceTree = "<group>"; };
+		9C6D33EEC091D85BFB04D31F /* ReactNativeFactory.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ReactNativeFactory.h; sourceTree = "<group>"; };
+		CCB9816E65CFA42B33FE44FE /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
+		D0D95772F4E605B0B74ACFC3 /* BridgeKitExpoBrownfield-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "BridgeKitExpoBrownfield-Bridging-Header.h"; sourceTree = "<group>"; };
+		D42EEA88C7161272ACFBEB42 /* Pods-BridgeKitExpoBrownfield.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-BridgeKitExpoBrownfield.debug.xcconfig"; path = "Target Support Files/Pods-BridgeKitExpoBrownfield/Pods-BridgeKitExpoBrownfield.debug.xcconfig"; sourceTree = "<group>"; };
+		E81B6FB11EB2616062446D77 /* ExpoModulesProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExpoModulesProvider.swift; path = "Pods/Target Support Files/Pods-BridgeKitExpoBrownfield/ExpoModulesProvider.swift"; sourceTree = "<group>"; };
+		EA9EB533D7CCCEF8E669279B /* Pods-BridgeKitDemoSupport.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-BridgeKitDemoSupport.debug.xcconfig"; path = "Target Support Files/Pods-BridgeKitDemoSupport/Pods-BridgeKitDemoSupport.debug.xcconfig"; sourceTree = "<group>"; };
+		EAF8583ADFC420BD74BE5227 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		F92EC54AD3E6C25551F62160 /* BridgekitDemoReverseContract.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgekitDemoReverseContract.swift; sourceTree = "<group>"; };
+		FDC6ECD3EB661B3DB46B09DC /* Pods-BridgeKitExpoBrownfield.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-BridgeKitExpoBrownfield.release.xcconfig"; path = "Target Support Files/Pods-BridgeKitExpoBrownfield/Pods-BridgeKitExpoBrownfield.release.xcconfig"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		B11F88EE9A388BC3F6919217 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1B804918E90C8E6139D0F13 /* libPods-BridgeKitDemoSupport.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D670DC3D8A0E28478F0F7815 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7CCA3DC2D2A45ACF0955F25C /* libBridgeKitDemoSupport.a in Frameworks */,
+				C677F0DC8E8C654747B49D56 /* JavaScriptCore.framework in Frameworks */,
+				B129E055450FAB948F5E5FEA /* libPods-BridgeKitExpoBrownfield.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0D8FEA25BB33277E083CCBA7 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				04DE5D267BE69E23A123E48C /* BridgeKitExpoBrownfield.app */,
+				1480CA7539C0A0EA9098DE6E /* libBridgeKitDemoSupport.a */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		145E50D36CE3795C5D1BA95E /* bridgekit */ = {
+			isa = PBXGroup;
+			children = (
+				5E2553CCDBF192B5A8163E85 /* BridgekitDemoInitializer.swift */,
+				013008AFFEA8005AFA37E290 /* BridgeKitDemoSupportInitializer.swift */,
+			);
+			name = bridgekit;
+			path = BridgeKitExpoBrownfield/bridgekit;
+			sourceTree = "<group>";
+		};
+		37F8AED46B92F639E5D0882A /* BridgeKitExpoBrownfield */ = {
+			isa = PBXGroup;
+			children = (
+				EAF8583ADFC420BD74BE5227 /* AppDelegate.swift */,
+				8E28E2EC09C36A6A0BCF6F62 /* BridgeKitDemoSupportBridge.h */,
+				0E07E5E2D8DB2697C1E80EBB /* BridgeKitDemoSupportBridge.m */,
+				D0D95772F4E605B0B74ACFC3 /* BridgeKitExpoBrownfield-Bridging-Header.h */,
+				6E8197FEAF694C1A4DD5B3A1 /* HomeViewController.swift */,
+				1D6D4D38653A67C538A49908 /* Images.xcassets */,
+				2E8A7A0C6B1CD838BA361C7C /* Info.plist */,
+				CCB9816E65CFA42B33FE44FE /* LaunchScreen.storyboard */,
+				6F07B0BAE3CD84F93023CA81 /* PrivacyInfo.xcprivacy */,
+				9C6D33EEC091D85BFB04D31F /* ReactNativeFactory.h */,
+				10DAB3597045C487D343851A /* ReactNativeFactory.mm */,
+				7B995F28BB5857D6036E2F0D /* ReactViewController.swift */,
+			);
+			path = BridgeKitExpoBrownfield;
+			sourceTree = "<group>";
+		};
+		419F5500BCE07F86911ED37D /* ExpoModulesProviders */ = {
+			isa = PBXGroup;
+			children = (
+				A4064BF6812323F355D7EB1A /* BridgeKitExpoBrownfield */,
+			);
+			name = ExpoModulesProviders;
+			sourceTree = "<group>";
+		};
+		4CAF3F262AFFA415CAA5B7F1 /* Generated */ = {
+			isa = PBXGroup;
+			children = (
+				570F5E65F60831411C8DBDD8 /* BridgekitDemoFeatureContract.swift */,
+				0365C6DB2433BFA0FFE1A28D /* BridgekitDemoHostContract.swift */,
+				30BA428A2C76F31D37E90EBC /* BridgekitDemoJsinfoContract.swift */,
+				F92EC54AD3E6C25551F62160 /* BridgekitDemoReverseContract.swift */,
+				99AB5546D7654EEA622C93EB /* BridgekitLocalhostContract.swift */,
+			);
+			name = Generated;
+			path = BridgeKitExpoBrownfield/Generated;
+			sourceTree = "<group>";
+		};
+		A4064BF6812323F355D7EB1A /* BridgeKitExpoBrownfield */ = {
+			isa = PBXGroup;
+			children = (
+				E81B6FB11EB2616062446D77 /* ExpoModulesProvider.swift */,
+			);
+			name = BridgeKitExpoBrownfield;
+			sourceTree = "<group>";
+		};
+		A42BA26E38706AB2C9D78736 /* Pods */ = {
+			isa = PBXGroup;
+			children = (
+				EA9EB533D7CCCEF8E669279B /* Pods-BridgeKitDemoSupport.debug.xcconfig */,
+				27AA9540FC14AC857F39221E /* Pods-BridgeKitDemoSupport.release.xcconfig */,
+				D42EEA88C7161272ACFBEB42 /* Pods-BridgeKitExpoBrownfield.debug.xcconfig */,
+				FDC6ECD3EB661B3DB46B09DC /* Pods-BridgeKitExpoBrownfield.release.xcconfig */,
+			);
+			name = Pods;
+			path = Pods;
+			sourceTree = "<group>";
+		};
+		E0731B6942920A89DD20CBDB /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				22E3DA61F2A6DBF824FA31EA /* JavaScriptCore.framework */,
+				2CBDF0EEDD06EFAE0894FD14 /* libPods-BridgeKitDemoSupport.a */,
+				78A48F44675F29D594DE30EE /* libPods-BridgeKitExpoBrownfield.a */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		E81F60CFDA11752E0CF3755A = {
+			isa = PBXGroup;
+			children = (
+				145E50D36CE3795C5D1BA95E /* bridgekit */,
+				37F8AED46B92F639E5D0882A /* BridgeKitExpoBrownfield */,
+				4CAF3F262AFFA415CAA5B7F1 /* Generated */,
+				E0731B6942920A89DD20CBDB /* Frameworks */,
+				0D8FEA25BB33277E083CCBA7 /* Products */,
+				A42BA26E38706AB2C9D78736 /* Pods */,
+				419F5500BCE07F86911ED37D /* ExpoModulesProviders */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		07B33A6CA05B9659AF9E74D5 /* BridgeKitExpoBrownfield */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 118A614AB8142953F50D8C72 /* Build configuration list for PBXNativeTarget "BridgeKitExpoBrownfield" */;
+			buildPhases = (
+				DDAC08334E86A1B80F7E43B7 /* [CP] Check Pods Manifest.lock */,
+				3523FC19C4746DA483A97CAD /* [Expo] Configure project */,
+				B0531E41AED4839B4BFECDE4 /* Sources */,
+				8B11F947C64C38B4EB1AF32E /* Resources */,
+				D670DC3D8A0E28478F0F7815 /* Frameworks */,
+				4294F78C9FCA81535FFFDCF4 /* Bundle React Native code and images */,
+				675BC50455E0BA2CCDFA48F8 /* [CP] Embed Pods Frameworks */,
+				45936036EA866B122A8CF176 /* [CP] Copy Pods Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9B6B10F11F85A5B37F3AF113 /* PBXTargetDependency */,
+			);
+			name = BridgeKitExpoBrownfield;
+			productName = BridgeKitExpoBrownfield;
+			productReference = 04DE5D267BE69E23A123E48C /* BridgeKitExpoBrownfield.app */;
+			productType = "com.apple.product-type.application";
+		};
+		18456966E38D37F0529BA5E3 /* BridgeKitDemoSupport */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E15166B6CF772AB0905B639D /* Build configuration list for PBXNativeTarget "BridgeKitDemoSupport" */;
+			buildPhases = (
+				0D181CA31DC5ACED0849ED08 /* [CP] Check Pods Manifest.lock */,
+				39A0F47284AA70A80608772E /* Sources */,
+				DFE113F8A777661937888751 /* Copy Swift Objective-C Interface Header */,
+				B11F88EE9A388BC3F6919217 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = BridgeKitDemoSupport;
+			productName = BridgeKitDemoSupport;
+			productReference = 1480CA7539C0A0EA9098DE6E /* libBridgeKitDemoSupport.a */;
+			productType = "com.apple.product-type.library.static";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		4393C3BD3C6ADCB278A288B2 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 054E4B11480E0091A379E300 /* Build configuration list for PBXProject "BridgeKitExpoBrownfield" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = E81F60CFDA11752E0CF3755A;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 0D8FEA25BB33277E083CCBA7 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				18456966E38D37F0529BA5E3 /* BridgeKitDemoSupport */,
+				07B33A6CA05B9659AF9E74D5 /* BridgeKitExpoBrownfield */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		8B11F947C64C38B4EB1AF32E /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DF02B996E1F10F4B3E876621 /* Images.xcassets in Resources */,
+				C65C2CD2EE3AA01E6005E3EC /* LaunchScreen.storyboard in Resources */,
+				B0EA53A622B6DF91CB76BDED /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		0D181CA31DC5ACED0849ED08 /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-BridgeKitDemoSupport-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+			showEnvVarsInLog = 0;
+		};
+		3523FC19C4746DA483A97CAD /* [Expo] Configure project */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/.xcode.env",
+				"$(SRCROOT)/.xcode.env.local",
+				"$(SRCROOT)/Pods/Target Support Files/Pods-BridgeKitExpoBrownfield/expo-configure-project.sh",
+			);
+			name = "[Expo] Configure project";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(SRCROOT)/Pods/Target Support Files/Pods-BridgeKitExpoBrownfield/ExpoModulesProvider.swift",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# This script configures Expo modules and generates the modules provider file.\nbash -l -c \"./Pods/Target\\ Support\\ Files/Pods-BridgeKitExpoBrownfield/expo-configure-project.sh\"\n";
+		};
+		4294F78C9FCA81535FFFDCF4 /* Bundle React Native code and images */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/.xcode.env.local",
+				"$(SRCROOT)/.xcode.env",
+			);
+			name = "Bundle React Native code and images";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nWITH_ENVIRONMENT=\"${REACT_NATIVE_PATH}/scripts/xcode/with-environment.sh\"\nREACT_NATIVE_XCODE=\"${REACT_NATIVE_PATH}/scripts/react-native-xcode.sh\"\n/bin/sh -c \"\\\"${WITH_ENVIRONMENT}\\\" \\\"${REACT_NATIVE_XCODE}\\\"\"\n";
+		};
+		45936036EA866B122A8CF176 /* [CP] Copy Pods Resources */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-BridgeKitExpoBrownfield/Pods-BridgeKitExpoBrownfield-resources-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Copy Pods Resources";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-BridgeKitExpoBrownfield/Pods-BridgeKitExpoBrownfield-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-BridgeKitExpoBrownfield/Pods-BridgeKitExpoBrownfield-resources.sh\"\n";
+		};
+		675BC50455E0BA2CCDFA48F8 /* [CP] Embed Pods Frameworks */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-BridgeKitExpoBrownfield/Pods-BridgeKitExpoBrownfield-frameworks-${CONFIGURATION}-input-files.xcfilelist",
+			);
+			name = "[CP] Embed Pods Frameworks";
+			outputFileListPaths = (
+				"${PODS_ROOT}/Target Support Files/Pods-BridgeKitExpoBrownfield/Pods-BridgeKitExpoBrownfield-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-BridgeKitExpoBrownfield/Pods-BridgeKitExpoBrownfield-frameworks.sh\"\n";
+		};
+		DDAC08334E86A1B80F7E43B7 /* [CP] Check Pods Manifest.lock */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"${PODS_PODFILE_DIR_PATH}/Podfile.lock",
+				"${PODS_ROOT}/Manifest.lock",
+			);
+			name = "[CP] Check Pods Manifest.lock";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/Pods-BridgeKitExpoBrownfield-checkManifestLockResult.txt",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+		};
+		DFE113F8A777661937888751 /* Copy Swift Objective-C Interface Header */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(DERIVED_SOURCES_DIR)/$(SWIFT_OBJC_INTERFACE_HEADER_NAME)",
+			);
+			name = "Copy Swift Objective-C Interface Header";
+			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/include/$(PRODUCT_MODULE_NAME)/$(SWIFT_OBJC_INTERFACE_HEADER_NAME)",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "ditto \"${SCRIPT_INPUT_FILE_0}\" \"${SCRIPT_OUTPUT_FILE_0}\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		39A0F47284AA70A80608772E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C19E5DEBB1C971D1CE175AB4 /* BridgeKitDemoSupportInitializer.swift in Sources */,
+				70F78C729EC2EDFE526F6283 /* BridgekitDemoFeatureContract.swift in Sources */,
+				F8A1A6BB457BFA0A0689C47C /* BridgekitDemoHostContract.swift in Sources */,
+				31ADEAF4B9B6A6EDF635A9BF /* BridgekitDemoInitializer.swift in Sources */,
+				6A99DE6ED6095B960FEA4CFF /* BridgekitDemoJsinfoContract.swift in Sources */,
+				282E95BB0B823CC343CB9130 /* BridgekitDemoReverseContract.swift in Sources */,
+				02F2657366FADDE294236DC8 /* BridgekitLocalhostContract.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B0531E41AED4839B4BFECDE4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D9B5DA929496963F116766A8 /* AppDelegate.swift in Sources */,
+				B75A1084000A996264101A61 /* BridgeKitDemoSupportBridge.m in Sources */,
+				4A2032F318B928919A28F7C5 /* HomeViewController.swift in Sources */,
+				BC85A01383F99CAE519D8FB1 /* ReactNativeFactory.mm in Sources */,
+				E1EA18CA7558BD495F38E997 /* ReactViewController.swift in Sources */,
+				7E770A2456CB9B3D7B9C1A51 /* ExpoModulesProvider.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		9B6B10F11F85A5B37F3AF113 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 18456966E38D37F0529BA5E3 /* BridgeKitDemoSupport */;
+			targetProxy = 1FA1DC67A721C6B7B2C0983F /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		07C636498328B4CEBEF4DBA8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				OTHER_CFLAGS = "$(inherited)";
+				OTHER_CPLUSPLUSFLAGS = "$(inherited)";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../../node_modules/.pnpm/react-native@0.83.6_@babel+core@7.28.3_@react-native-community+cli@20.1.3_typescript@5._fb28abd1f3f7c3bb4b79d9ed09fbebce/node_modules/react-native";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				USE_HERMES = true;
+			};
+			name = Release;
+		};
+		28B3E9C757FF24813C87D938 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = D42EEA88C7161272ACFBEB42 /* Pods-BridgeKitExpoBrownfield.debug.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_BITCODE = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				HEADER_SEARCH_PATHS = "$(inherited)";
+				INFOPLIST_FILE = BridgeKitExpoBrownfield/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+					"-lc++",
+					"-ObjC",
+				);
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
+				PRODUCT_BUNDLE_IDENTIFIER = com.bridgekit.expobrownfield;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "BridgeKitExpoBrownfield/BridgeKitExpoBrownfield-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		54ECD646804D10559BAA6046 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				OTHER_CFLAGS = "$(inherited)";
+				OTHER_CPLUSPLUSFLAGS = "$(inherited)";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../../node_modules/.pnpm/react-native@0.83.6_@babel+core@7.28.3_@react-native-community+cli@20.1.3_typescript@5._fb28abd1f3f7c3bb4b79d9ed09fbebce/node_modules/react-native";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				USE_HERMES = true;
+			};
+			name = Debug;
+		};
+		A1977D282B392C6149234615 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = FDC6ECD3EB661B3DB46B09DC /* Pods-BridgeKitExpoBrownfield.release.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_BITCODE = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				HEADER_SEARCH_PATHS = "$(inherited)";
+				INFOPLIST_FILE = BridgeKitExpoBrownfield/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-ObjC",
+					"-lc++",
+					"-ObjC",
+				);
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
+				PRODUCT_BUNDLE_IDENTIFIER = com.bridgekit.expobrownfield;
+				SDKROOT = iphoneos;
+				SWIFT_OBJC_BRIDGING_HEADER = "BridgeKitExpoBrownfield/BridgeKitExpoBrownfield-Bridging-Header.h";
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		C2CDD738440237D2F4A4A72F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = EA9EB533D7CCCEF8E669279B /* Pods-BridgeKitDemoSupport.debug.xcconfig */;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				DEFINES_MODULE = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PODS_ROOT)/Headers/Private/NitroModules",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lc++",
+				);
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_DEBUG";
+				PRODUCT_BUNDLE_IDENTIFIER = com.bridgekit.BridgeKitDemoSupport;
+				PRODUCT_NAME = BridgeKitDemoSupport;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_OBJC_INTEROP_MODE = objcxx;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		FB2CE622F6B5A412D322DFC8 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 27AA9540FC14AC857F39221E /* Pods-BridgeKitDemoSupport.release.xcconfig */;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				DEFINES_MODULE = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PODS_ROOT)/Headers/Private/NitroModules",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lc++",
+				);
+				OTHER_SWIFT_FLAGS = "$(inherited) -D EXPO_CONFIGURATION_RELEASE";
+				PRODUCT_BUNDLE_IDENTIFIER = com.bridgekit.BridgeKitDemoSupport;
+				PRODUCT_NAME = BridgeKitDemoSupport;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_OBJC_INTEROP_MODE = objcxx;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		054E4B11480E0091A379E300 /* Build configuration list for PBXProject "BridgeKitExpoBrownfield" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				54ECD646804D10559BAA6046 /* Debug */,
+				07C636498328B4CEBEF4DBA8 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		118A614AB8142953F50D8C72 /* Build configuration list for PBXNativeTarget "BridgeKitExpoBrownfield" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				28B3E9C757FF24813C87D938 /* Debug */,
+				A1977D282B392C6149234615 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E15166B6CF772AB0905B639D /* Build configuration list for PBXNativeTarget "BridgeKitDemoSupport" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C2CDD738440237D2F4A4A72F /* Debug */,
+				FB2CE622F6B5A412D322DFC8 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 4393C3BD3C6ADCB278A288B2 /* Project object */;
+}

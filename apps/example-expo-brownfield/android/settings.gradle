@@ -1,0 +1,54 @@
+import java.io.File
+
+pluginManagement {
+    // node_modules is hoisted at the monorepo root (pnpm nodeLinker: hoisted): three levels up.
+    includeBuild("../../../node_modules/@react-native/gradle-plugin")
+
+    // Resolve the Expo autolinking Gradle plugin via node so it works regardless
+    // of where pnpm hoists expo-modules-autolinking.
+    def expoPluginsPath = new File(
+        providers.exec {
+            workingDir(rootDir)
+            commandLine(
+                "node",
+                "--print",
+                // pnpm: expo is symlinked into the example's own node_modules (NOT the
+                // monorepo root), so resolve from android/'s cwd without a paths override.
+                "require.resolve('expo-modules-autolinking/package.json')"
+            )
+        }.standardOutput.asText.get().trim(),
+        "../android/expo-gradle-plugin"
+    ).absolutePath
+    includeBuild(expoPluginsPath)
+
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    id("com.facebook.react.settings")
+    id("expo-autolinking-settings")
+}
+
+// Configure expo autolinking: point it to the JS project root (one level up from android/).
+expoAutolinking.projectRoot = new File(rootDir, "..")
+
+// Wire autolinking for react-native modules using Expo's config command.
+extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
+    ex.autolinkLibrariesFromCommand(expoAutolinking.rnConfigCommand)
+}
+
+// Let expo-modules-autolinking discover and link all Expo modules.
+expoAutolinking.useExpoModules()
+
+// React Native Gradle Plugin — use the SAME path as the includeBuild in
+// pluginManagement above so Gradle dedupes it instead of failing on a duplicate
+// build path (expoAutolinking.reactNativeGradlePlugin points at the raw .pnpm dir,
+// which is the same plugin via a different path → conflict). Mirrors the bare app.
+includeBuild("../../../node_modules/@react-native/gradle-plugin")
+
+rootProject.name = 'BridgeKitExpoBrownfield'
+include ':app'

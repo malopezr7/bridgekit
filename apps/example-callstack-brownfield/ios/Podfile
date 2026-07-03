@@ -1,0 +1,64 @@
+# Resolve react_native_pods.rb with node to support pnpm/hoisted workspaces.
+# Pattern from apps/example/ios/Podfile (source-of-truth bare host).
+require Pod::Executable.execute_command('node', ['-p',
+  'require.resolve(
+    "react-native/scripts/react_native_pods.rb",
+    {paths: [process.argv[1]]},
+  )', __dir__]).strip
+
+platform :ios, min_ios_version_supported
+install! 'cocoapods',
+  :deterministic_uuids => false
+
+prepare_react_native_project!
+
+# Static linking is REQUIRED for XCFramework packaging.
+# Verified: Context7 /callstack/react-native-brownfield, "Configure CocoaPods for Static Linking",
+# docs/getting-started/ios.mdx — use_frameworks! :linkage => :static.
+linkage = ENV['USE_FRAMEWORKS']
+if linkage != nil
+  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
+  use_frameworks! :linkage => linkage.to_sym
+else
+  use_frameworks! :linkage => :static
+end
+
+# The outer target drives autolinking — it must call use_native_modules! so that
+# BridgeKit + react-native-nitro-modules are resolved and pulled into CocoaPods.
+# The inner ReactNativeFramework target inherits everything via `inherit! :complete`.
+#
+# Verified: Context7 /callstack/react-native-brownfield, "Add Framework Target to Podfile",
+# docs/getting-started/ios.mdx:
+#   target '<project_name>' do
+#     target '<framework_target_name>' do
+#       inherit! :complete
+#     end
+#   end
+#
+# NOTE: There is no separate RN app target in this workspace — the framework IS the
+# producible artifact. We use a thin "RNAppHost" shell target as the outer autolinking
+# anchor; it will not be shipped. Only ReactNativeFramework is built for packaging.
+
+target 'RNAppHost' do
+  config = use_native_modules!
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+
+  # ReactNativeFramework inherits the complete pod graph from the outer target.
+  # This ensures BridgeKit, NitroModules, ReactBrownfield, hermesvm etc. are all
+  # available inside the framework — which is what the brownfield packager builds.
+  target 'ReactNativeFramework' do
+    inherit! :complete
+  end
+
+  post_install do |installer|
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+    )
+  end
+end

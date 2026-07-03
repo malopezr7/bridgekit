@@ -1,0 +1,195 @@
+name: BridgeKitCallstackBrownfield
+
+# xcodegen 2.x project spec
+# Run from the package root:  xcodegen generate --spec ios/project.yml
+# Then from ios/:             pod install
+# Then package XCFramework:  pnpm package:ios   (runs brownfield package:ios)
+# Then open HostApp.xcodeproj (separate native project) and add the xcframeworks.
+#
+# See ios/README.md for the full build sequence.
+
+options:
+  bundleIdPrefix: com.bridgekit
+  deploymentTarget:
+    iOS: "15.1"
+  defaultConfig: Debug
+  # Avoids xcodegen wiping CocoaPods-injected script phases on re-run.
+  # Pod install re-injects its phases after xcodegen generates the project.
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+
+# ---------------------------------------------------------------------------
+# Target 1: ReactNativeFramework
+#   The self-contained RN artifact that gets packaged into an XCFramework by
+#   `brownfield package:ios --scheme ReactNativeFramework --configuration Release`.
+#
+#   Sources:
+#     - ReactNativeFramework.swift  (public interface + @_exported import ReactBrownfield)
+#     - bridgekit/BridgekitDemoInitializer.swift  (BridgeKit native providers)
+#     - Generated/*.swift  (codegen contract glue, pre-existing)
+#
+#   Build Settings rationale (mirrors Callstack docs + bare host patterns):
+#     BUILD_LIBRARY_FOR_DISTRIBUTION=YES  — required for XCFramework/module stability
+#     ENABLE_MODULE_VERIFIER=NO           — avoids false errors on RN/C++ headers
+#     SKIP_INSTALL=NO                     — xcodebuild -create-xcframework needs the .framework
+#     ENABLE_USER_SCRIPT_SANDBOXING=NO    — CocoaPods + brownfield script phases need FS access
+#     SWIFT_OBJC_INTEROP_MODE=objcxx      — required for BridgeKit (Nitro uses C++20/ObjC++)
+#     HEADER_SEARCH_PATHS += NitroModules private headers  (matches bare host project.pbxproj)
+# ---------------------------------------------------------------------------
+
+targets:
+  ReactNativeFramework:
+    type: framework
+    platform: iOS
+    deploymentTarget: "15.1"
+
+    sources:
+      - path: ReactNativeFramework
+        excludes:
+          # Exclude lock file (data, not Swift source)
+          - "Generated/bridgekit.lock"
+
+    settings:
+      base:
+        PRODUCT_NAME: ReactNativeFramework
+        PRODUCT_BUNDLE_IDENTIFIER: com.bridgekit.callstackbrownfield.framework
+
+        # XCFramework packaging requirements
+        BUILD_LIBRARY_FOR_DISTRIBUTION: YES
+        SKIP_INSTALL: NO
+        ENABLE_MODULE_VERIFIER: NO
+
+        # Required: CocoaPods + brownfield CLI script phases need filesystem access
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+
+        # Required for BridgeKit / Nitro Modules C++ interop
+        # Matches apps/example/ios project.pbxproj and apps/example-expo-brownfield/ios/project.yml
+        SWIFT_OBJC_INTEROP_MODE: objcxx
+
+        HEADER_SEARCH_PATHS:
+          - "$(inherited)"
+          - "$(PODS_ROOT)/Headers/Private/NitroModules"
+
+        OTHER_LDFLAGS:
+          - "$(inherited)"
+          - "-ObjC"
+          - "-lc++"
+
+        LD_RUNPATH_SEARCH_PATHS:
+          - "$(inherited)"
+          - "@executable_path/Frameworks"
+          - "@loader_path/Frameworks"
+
+        CLANG_ENABLE_MODULES: YES
+        ENABLE_BITCODE: NO
+
+      configs:
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+
+    # Script phases for the framework target.
+    # The brownfield packager (brownfield package:ios) uses the scheme's build phases
+    # to bundle JS. The "Bundle React Native code and images" phase must be here.
+    # CocoaPods will inject additional phases on pod install; these slots ensure
+    # xcodegen doesn't remove them on re-gen.
+    preBuildScripts:
+      - name: "[CP] Check Pods Manifest.lock"
+        shell: /bin/sh
+        script: |
+          diff "${PODS_PODFILE_DIR_PATH}/Podfile.lock" "${PODS_ROOT}/Manifest.lock" > /dev/null
+          if [ $? != 0 ] ; then
+            echo "error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation." >&2
+            exit 1
+          fi
+          echo "SUCCESS" > "${SCRIPT_OUTPUT_FILE_0}"
+        inputFiles: []
+        outputFiles:
+          - "$(DERIVED_FILE_DIR)/Pods-ReactNativeFramework-checkManifestLockResult.txt"
+        showEnvVarsInLog: false
+
+    postBuildScripts:
+      # Bundle React Native code and images.
+      # This phase is REQUIRED by the brownfield CLI — it bundles the JS + assets
+      # into the framework so the XCFramework is self-contained.
+      # Script pattern matches apps/example-expo-brownfield/ios/project.yml (same RN 0.83 base).
+      - name: "Bundle React Native code and images"
+        shell: /bin/sh
+        script: |
+          set -e
+          WITH_ENVIRONMENT="${REACT_NATIVE_PATH}/scripts/xcode/with-environment.sh"
+          REACT_NATIVE_XCODE="${REACT_NATIVE_PATH}/scripts/react-native-xcode.sh"
+          /bin/sh -c "\"${WITH_ENVIRONMENT}\" \"${REACT_NATIVE_XCODE}\""
+        inputFiles:
+          - "$(SRCROOT)/.xcode.env.local"
+          - "$(SRCROOT)/.xcode.env"
+        outputFiles: []
+
+      # [CP] Embed Pods Frameworks — CocoaPods re-injects this; placeholder keeps the slot.
+      - name: "[CP] Embed Pods Frameworks"
+        shell: /bin/sh
+        script: |
+          "${PODS_ROOT}/Target Support Files/Pods-ReactNativeFramework/Pods-ReactNativeFramework-frameworks.sh"
+        inputFileLists:
+          - "${PODS_ROOT}/Target Support Files/Pods-ReactNativeFramework/Pods-ReactNativeFramework-frameworks-${CONFIGURATION}-input-files.xcfilelist"
+        outputFileLists:
+          - "${PODS_ROOT}/Target Support Files/Pods-ReactNativeFramework/Pods-ReactNativeFramework-frameworks-${CONFIGURATION}-output-files.xcfilelist"
+        showEnvVarsInLog: false
+
+      # [CP] Copy Pods Resources
+      - name: "[CP] Copy Pods Resources"
+        shell: /bin/sh
+        script: |
+          "${PODS_ROOT}/Target Support Files/Pods-ReactNativeFramework/Pods-ReactNativeFramework-resources.sh"
+        inputFileLists:
+          - "${PODS_ROOT}/Target Support Files/Pods-ReactNativeFramework/Pods-ReactNativeFramework-resources-${CONFIGURATION}-input-files.xcfilelist"
+        outputFileLists:
+          - "${PODS_ROOT}/Target Support Files/Pods-ReactNativeFramework/Pods-ReactNativeFramework-resources-${CONFIGURATION}-output-files.xcfilelist"
+        showEnvVarsInLog: false
+
+  # ---------------------------------------------------------------------------
+  # Target 2: RNAppHost
+  #   Thin shell target used ONLY as the outer autolinking anchor for CocoaPods.
+  #   It makes use_native_modules! work and gives the Podfile a concrete app target
+  #   to resolve the pod graph into. The framework inherits everything from it via
+  #   `inherit! :complete` in the Podfile.
+  #
+  #   This target is NOT intended to be built or shipped; it exists solely so that
+  #   CocoaPods resolves the full RN + BridgeKit + NitroModules pod graph.
+  #
+  #   The packager builds ReactNativeFramework, not RNAppHost.
+  # ---------------------------------------------------------------------------
+  RNAppHost:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.1"
+
+    # Minimal source — just a placeholder AppDelegate so Xcode doesn't complain.
+    sources:
+      - path: RNAppHost
+
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.bridgekit.callstackbrownfield.rnapphost
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        INFOPLIST_FILE: RNAppHost/Info.plist
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_BITCODE: NO
+
+# ---------------------------------------------------------------------------
+# HostApp is a SEPARATE standalone Xcode project (not part of this workspace).
+# It lives at ios/HostApp/ and imports the xcframeworks produced by the package step.
+# See ios/HostApp/HostApp.xcodeproj (hand-created or generated separately).
+#
+# Rationale: the host app must have NO dependency on Node.js or CocoaPods — it
+# imports pre-built binary xcframeworks only.  Mixing it into this xcodegen spec
+# would couple it to pod install, defeating the purpose.
+#
+# The HostApp project.yml is documented in ios/HostApp/README-hostapp.md.
+# ---------------------------------------------------------------------------

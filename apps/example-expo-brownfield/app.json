@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "BridgeKit Expo Brownfield",
+    "slug": "bridgekit-expo-brownfield",
+    "version": "1.0.0",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "com.bridgekit.expobrownfield"
+    },
+    "android": {
+      "package": "com.bridgekit.expobrownfield"
+    }
+  }
+}
