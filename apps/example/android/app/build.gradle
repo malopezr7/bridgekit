@@ -3,9 +3,7 @@ apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
 react {
-    // node_modules is hoisted at the monorepo root (pnpm nodeLinker: hoisted), so the
-    // RN Gradle Plugin must be pointed at the workspace root instead of the app package.
-    root = file("../../../..")
+    // node_modules is hoisted at the monorepo root (pnpm nodeLinker: hoisted).
     reactNativeDir = file("../../../../node_modules/react-native")
     codegenDir = file("../../../../node_modules/@react-native/codegen")
 
