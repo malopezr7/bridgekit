@@ -1,11 +1,9 @@
 declare const __DEV__: boolean | undefined;
-declare const process:
-  | {
-      readonly env?: {
-        readonly NODE_ENV?: string;
-      };
-    }
-  | undefined;
+declare const process: {
+  readonly env: {
+    readonly NODE_ENV?: string;
+  };
+};
 
 export function isBridgeKitDev(): boolean {
   if (typeof __DEV__ === 'boolean') return __DEV__;
