@@ -1,12 +1,47 @@
 # @malopezr7/bridgekit
 
 Typed, bidirectional communication between React Native and native code via a **Marker API**.
-One TypeScript contract definition drives JS types, runtime metadata, and generated Kotlin.
+One TypeScript contract definition drives JS types, runtime metadata, and generated Kotlin/Swift.
 
-Platform support: **Android implemented**. iOS is deferred — the runtime throws a legible error on iOS
-construction (see `defaultInstance.native.ts`). Web uses an in-memory loopback (no native transport).
+Built on [Nitro Modules](https://nitro.margelo.com) for the native transport.
 
-See the source and tests for the full architecture.
+## Platform support
+
+| Platform | Status | Transport |
+| -------- | ------ | --------- |
+| Android  | ✅ Supported | Nitro (Kotlin runtime) |
+| iOS      | ✅ Supported | Nitro (Swift runtime) |
+| Web      | ✅ Supported | In-memory loopback (no native code) |
+
+> Beta. The wire protocol is locked and the Android/iOS runtimes are at parity, but the
+> public API may still change before `1.0`.
+
+## Installation
+
+```sh
+# while in beta, install the @beta tag
+pnpm add @malopezr7/bridgekit@beta react-native-nitro-modules
+
+# codegen CLI (dev dependency)
+pnpm add -D @malopezr7/bridgekit-cli@beta
+```
+
+BridgeKit is a Nitro module. After installing:
+
+- **iOS** — `cd ios && pod install`
+- **Android** — autolinking handles it; no manual steps.
+
+**Peer dependencies:** `react`, `react-native`, `react-native-nitro-modules`.
+Built and tested against React Native `0.83` and `react-native-nitro-modules` `0.35`.
+
+## Entry points
+
+| Import | Contents |
+| ------ | -------- |
+| `@malopezr7/bridgekit` | Runtime + React hooks + contract layer (everything) |
+| `@malopezr7/bridgekit/contract` | Contract layer only — zero side effects, safe in Node/Jest/web |
+| `@malopezr7/bridgekit/react` | React hooks (`useBridge`, `useBridgeState`, …) |
+| `@malopezr7/bridgekit/test` | Testing helpers (`createTestBridge`, `mockBridge`) |
 
 ---
 
@@ -40,15 +75,24 @@ Marker reference:
 - `Stream<Value>()` / `Stream<Value, Params>()` — typed observable flow
 - `State<Value>(initial)` — observable bidirectional state
 
-### 2. Generate Kotlin bindings
+### 2. Generate native bindings
+
+The codegen lives in [`@malopezr7/bridgekit-cli`](../cli). Emit Kotlin and/or Swift from the
+same contract:
 
 ```bash
+# Android (Kotlin) — default platform
 bridgekit generate \
   --contracts 'src/**/*.contract.ts' \
   --out-dir android/src/main/java/com/myapp/bridgekit/generated
+
+# iOS (Swift)
+bridgekit generate --platform swift \
+  --contracts 'src/**/*.contract.ts' \
+  --out-dir ios/MyApp/bridgekit/generated
 ```
 
-This produces `ConnectHostContract.kt` — interface, data classes, codecs, and a contract object.
+This produces typed interfaces, data classes, codecs, and a contract object per platform.
 
 ### 3. Provide from native (Kotlin)
 
@@ -191,3 +235,9 @@ const state = BridgeKit.default.dump();
 ```
 
 On Android: `BridgeKit.default.dump()` logs to Logcat under the `BridgeKit` tag.
+
+---
+
+## License
+
+MIT © [malopezr7](https://github.com/malopezr7)
