@@ -1,10 +1,45 @@
 {
   "name": "@malopezr7/bridgekit-cli",
-  "version": "0.0.0",
-  "type": "module",
+  "version": "0.0.1-beta.0",
+  "description": "Code-generation CLI for BridgeKit — emits Kotlin & Swift bindings from TypeScript contracts",
+  "author": "malopezr7 <malopezr7@gmail.com> (https://github.com/malopezr7)",
   "license": "MIT",
+  "type": "module",
+  "homepage": "https://github.com/malopezr7/bridgekit/tree/main/packages/cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/malopezr7/bridgekit.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/malopezr7/bridgekit/issues"
+  },
+  "keywords": [
+    "react-native",
+    "bridgekit",
+    "codegen",
+    "kotlin",
+    "swift",
+    "cli"
+  ],
+  "engines": {
+    "node": ">=22.6.0"
+  },
   "bin": {
     "bridgekit": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepack": "tsc",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "chalk": "4.1.2"
@@ -12,11 +47,5 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "typescript": "5.9.2"
-  },
-  "scripts": {
-    "build": "tsc"
-  },
-  "files": [
-    "dist"
-  ]
+  }
 }
