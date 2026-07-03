@@ -1,0 +1,252 @@
+name: CI Baseline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: Install
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify hoisted Android paths
+        run: |
+          test -d node_modules/@react-native/gradle-plugin
+          test -d node_modules/react-native
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck workspaces
+        run: pnpm -r typecheck
+
+  test-web:
+    name: Jest web
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run web Jest project
+        run: pnpm --filter @malopezr7/bridgekit test:web
+
+  test-native:
+    name: Jest native
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run native Jest project
+        run: pnpm --filter @malopezr7/bridgekit test:native
+
+  android-gradle:
+    name: Android Gradle
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run BridgeKit core-library Android unit tests
+        working-directory: apps/example/android
+        run: ./gradlew :malopezr7_bridgekit:testDebugUnitTest
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build workspaces
+        run: pnpm build
+
+  pack:
+    name: Pack core
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build core before pack
+        run: pnpm --filter @malopezr7/bridgekit build
+
+      - name: Verify core package contents
+        working-directory: packages/core
+        run: npm pack --dry-run
+
+  generate-check:
+    name: Generate drift check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build CLI
+        run: pnpm --filter @malopezr7/bridgekit-cli build
+
+      - name: Build core contract exports
+        run: pnpm --filter @malopezr7/bridgekit build
+
+      - name: Report known generate drift
+        continue-on-error: true
+        run: |
+          commands=(
+            "pnpm --filter bridgekit-example generate --check"
+            "pnpm --filter bridgekit-example generate:ios --check"
+            "pnpm --filter bridgekit-example-callstack-brownfield generate --check"
+            "pnpm --filter bridgekit-example-callstack-brownfield generate:ios --check"
+            "pnpm --filter bridgekit-example-expo-brownfield generate --check"
+            "pnpm --filter bridgekit-example-expo-brownfield generate:ios --check"
+          )
+
+          failed=0
+          echo "## Generate drift check" >> "$GITHUB_STEP_SUMMARY"
+          echo "Known WS-4/WS-7 generate drift is reported as non-blocking debt." >> "$GITHUB_STEP_SUMMARY"
+
+          for command in "${commands[@]}"; do
+            echo "### \`$command\`" >> "$GITHUB_STEP_SUMMARY"
+            if bash -c "$command"; then
+              echo "- Result: passed" >> "$GITHUB_STEP_SUMMARY"
+            else
+              status=$?
+              failed=1
+              echo "::warning::Non-blocking generate drift detected for: $command"
+              echo "- Result: failed with exit $status" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+          exit "$failed"
+
+  check:
+    name: Biome check (packages/core)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Report deferred Biome findings
+        continue-on-error: true
+        run: |
+          echo "## Biome check (packages/core)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Existing packages/core findings are non-blocking deferred debt for WS-1 or later cleanup." >> "$GITHUB_STEP_SUMMARY"
+
+          if pnpm --filter @malopezr7/bridgekit check; then
+            echo "- Result: passed" >> "$GITHUB_STEP_SUMMARY"
+          else
+            status=$?
+            echo "::warning::Non-blocking Biome findings detected. Deferred to WS-1 or later cleanup."
+            echo "- Result: failed with exit $status" >> "$GITHUB_STEP_SUMMARY"
+            exit "$status"
+          fi

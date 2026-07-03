@@ -276,7 +276,7 @@ export class BridgeKitJs {
                 .then((res) => {
                   if (!res.ok) {
                     diagnostics.incrementFiresDropped();
-      if (isBridgeKitDev()) {
+                    if (isBridgeKitDev()) {
                       console.warn(`[bridgekit] fire ${desc.id}.${prop} failed: ${res.code}`);
                     }
                   }

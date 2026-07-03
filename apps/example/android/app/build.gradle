@@ -3,8 +3,10 @@ apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
 react {
-    // node_modules is hoisted at the monorepo root (pnpm nodeLinker: hoisted), so the
-    // RN Gradle Plugin resolves react-native, codegen and the CLI from there automatically.
+    // node_modules is hoisted at the monorepo root (pnpm nodeLinker: hoisted).
+    reactNativeDir = file("../../../../node_modules/react-native")
+    codegenDir = file("../../../../node_modules/@react-native/codegen")
+
     // RN 0.83 ships hermesc in the standalone hermes-compiler package, not react-native/sdks.
     hermesCommand = "$rootDir/../../../node_modules/hermes-compiler/hermesc/%OS-BIN%/hermesc"
 
