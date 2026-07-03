@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -105,6 +109,11 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Install dependencies
@@ -182,12 +191,12 @@ jobs:
         continue-on-error: true
         run: |
           commands=(
-            "pnpm --filter bridgekit-example generate -- --check"
-            "pnpm --filter bridgekit-example generate:ios -- --check"
-            "pnpm --filter bridgekit-example-callstack-brownfield generate -- --check"
-            "pnpm --filter bridgekit-example-callstack-brownfield generate:ios -- --check"
-            "pnpm --filter bridgekit-example-expo-brownfield generate -- --check"
-            "pnpm --filter bridgekit-example-expo-brownfield generate:ios -- --check"
+            "pnpm --filter bridgekit-example generate --check"
+            "pnpm --filter bridgekit-example generate:ios --check"
+            "pnpm --filter bridgekit-example-callstack-brownfield generate --check"
+            "pnpm --filter bridgekit-example-callstack-brownfield generate:ios --check"
+            "pnpm --filter bridgekit-example-expo-brownfield generate --check"
+            "pnpm --filter bridgekit-example-expo-brownfield generate:ios --check"
           )
 
           failed=0
@@ -209,7 +218,7 @@ jobs:
           exit "$failed"
 
   check:
-    name: Biome check
+    name: Biome check (packages/core)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -227,8 +236,8 @@ jobs:
       - name: Report deferred Biome findings
         continue-on-error: true
         run: |
-          echo "## Biome check" >> "$GITHUB_STEP_SUMMARY"
-          echo "Existing findings are non-blocking deferred debt for WS-1 or later cleanup." >> "$GITHUB_STEP_SUMMARY"
+          echo "## Biome check (packages/core)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Existing packages/core findings are non-blocking deferred debt for WS-1 or later cleanup." >> "$GITHUB_STEP_SUMMARY"
 
           if pnpm --filter @malopezr7/bridgekit check; then
             echo "- Result: passed" >> "$GITHUB_STEP_SUMMARY"
