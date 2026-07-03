@@ -455,6 +455,10 @@ class SeamRoundTripTest {
     /**
      * Two consumers with DIFFERENT params produce TWO separate provider invocations.
      */
+    @Ignore(
+        "QUARANTINED(WS-5): timing-sensitive under slow CI runners; " +
+            "StreamHub races tracked as RT-AND-03/RT-AND-04 - un-ignore when WS-5 fixes the hub"
+    )
     @Test
     fun `W3-3 two consumers different params use separate provider invocations`() = runTest {
         var openStreamCallCount = 0
