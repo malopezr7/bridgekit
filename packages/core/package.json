@@ -75,6 +75,7 @@
     "nitro.json",
     "*.podspec",
     "README.md",
+    "LICENSE",
     "!**/__tests__",
     "!**/__fixtures__",
     "!**/__mocks__",
