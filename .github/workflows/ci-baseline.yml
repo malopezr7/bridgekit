@@ -144,7 +144,7 @@ jobs:
         run: pnpm build
 
   pack:
-    name: Pack core
+    name: Pack packages
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -165,7 +165,21 @@ jobs:
 
       - name: Verify core package contents
         working-directory: packages/core
-        run: npm pack --dry-run
+        run: npm pack --dry-run --ignore-scripts=false
+
+      - name: Verify publish tarball contents
+        run: |
+          tmp="$(mktemp -d)"
+          pnpm --filter @malopezr7/bridgekit build
+          core_tarball="$(cd packages/core && npm pack --pack-destination "$tmp" 2>/dev/null | tail -1)"
+          tar -tzf "$tmp/$core_tarball" | grep -Fx "package/dist/commonjs/index.js"
+          tar -tzf "$tmp/$core_tarball" | grep -Fx "package/dist/typescript/index.d.ts"
+          tar -tzf "$tmp/$core_tarball" | grep -Fx "package/LICENSE"
+
+          pnpm --filter @malopezr7/bridgekit-cli build
+          cli_tarball="$(cd packages/cli && npm pack --pack-destination "$tmp" 2>/dev/null | tail -1)"
+          tar -tzf "$tmp/$cli_tarball" | grep -Fx "package/dist/index.js"
+          tar -tzf "$tmp/$cli_tarball" | grep -Fx "package/LICENSE"
 
   generate-check:
     name: Generate drift check
