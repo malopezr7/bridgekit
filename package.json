@@ -1,6 +1,7 @@
 {
   "name": "bridgekit",
   "private": true,
+  "license": "MIT",
   "packageManager": "pnpm@10.34.4",
   "scripts": {
     "build": "pnpm -r build",
