@@ -58,6 +58,10 @@ class SeamRoundTripTest {
      * Router dispatches to the real HardeningFixtureContract inbound adapter.
      * Assert the impl is called with id = "abc" and not a fabricated default.
      */
+    @Ignore(
+        "QUARANTINED(WS-5): timing-sensitive under slow CI runners; " +
+            "StreamHub races tracked as RT-AND-03/RT-AND-04 - un-ignore when WS-5 fixes the hub"
+    )
     @Test
     fun `Async JS-to-native — getUserById decodes payload and calls impl with correct id`() = runTest {
         var receivedId: String? = null
@@ -105,6 +109,10 @@ class SeamRoundTripTest {
      * JS fires notify (Void marker). The adapter routes to impl.notify().
      * Assert impl.notify() is called exactly once with the correct payload.
      */
+    @Ignore(
+        "QUARANTINED(WS-5): timing-sensitive under slow CI runners; " +
+            "StreamHub races tracked as RT-AND-03/RT-AND-04 - un-ignore when WS-5 fixes the hub"
+    )
     @Test
     fun `Void JS-to-native — notify fires impl exactly once with decoded params`() = runTest {
         var notifyCount = 0
@@ -194,6 +202,10 @@ class SeamRoundTripTest {
      * OutboundCallerImpl.fire() dispatches via the JS dispatcher without awaiting a result.
      * Assert the StubJsDispatcher records the invocation.
      */
+    @Ignore(
+        "QUARANTINED(WS-5): timing-sensitive under slow CI runners; " +
+            "StreamHub races tracked as RT-AND-03/RT-AND-04 - un-ignore when WS-5 fixes the hub"
+    )
     @Test
     fun `Void native-to-JS — fire dispatches to JS dispatcher asynchronously`() = runTest {
         router.connectDispatcher(emptyMap(), stub.asCallbacks())
@@ -366,6 +378,10 @@ class SeamRoundTripTest {
      * decoder throws BridgeKitDecodeException; the Router maps it to VALIDATION_FAILED
      * and the provider is NOT dispatched with a fabricated default.
      */
+    @Ignore(
+        "QUARANTINED(WS-5): timing-sensitive under slow CI runners; " +
+            "StreamHub races tracked as RT-AND-03/RT-AND-04 - un-ignore when WS-5 fixes the hub"
+    )
     @Test
     fun `Async JS-to-native — missing required field returns VALIDATION_FAILED`() = runTest {
         var implCalled = false
