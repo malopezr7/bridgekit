@@ -9,8 +9,12 @@ declare const process:
 
 export function isBridgeKitDev(): boolean {
   if (typeof __DEV__ === 'boolean') return __DEV__;
-  if (typeof process !== 'undefined' && typeof process.env !== 'undefined') {
-    return process.env.NODE_ENV !== 'production';
+  try {
+    if (typeof process.env.NODE_ENV === 'string') {
+      return process.env.NODE_ENV !== 'production';
+    }
+  } catch {
+    // No process global and no bundler substitution - fall through.
   }
   return false;
 }

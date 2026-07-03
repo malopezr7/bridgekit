@@ -25,6 +25,14 @@ function setNodeEnv(value: string | undefined) {
   });
 }
 
+function setProcessEnvWithoutNodeEnv() {
+  Object.defineProperty(globalThis, 'process', {
+    configurable: true,
+    value: { env: {} },
+    writable: true,
+  });
+}
+
 describe('isBridgeKitDev', () => {
   afterEach(() => {
     setDev(originalDev);
@@ -63,6 +71,13 @@ describe('isBridgeKitDev', () => {
   test('assumes production when neither __DEV__ nor process are available', () => {
     setDev(undefined);
     Reflect.deleteProperty(globalThis, 'process');
+
+    expect(isBridgeKitDev()).toBe(false);
+  });
+
+  test('assumes production when process.env exists without NODE_ENV', () => {
+    setDev(undefined);
+    setProcessEnvWithoutNodeEnv();
 
     expect(isBridgeKitDev()).toBe(false);
   });
