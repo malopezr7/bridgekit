@@ -61,6 +61,7 @@
     "src",
     "dist",
     "android/src",
+    "!android/src/test",
     "android/build.gradle.kts",
     "android/CMakeLists.txt",
     "android/fix-prefab.gradle",
