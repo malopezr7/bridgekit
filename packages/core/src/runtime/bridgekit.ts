@@ -10,6 +10,7 @@ import type { AnySchema } from '../contract/schema';
 import { nextCorrelationId } from './correlationId';
 import { diagnostics } from './diagnostics';
 import { Dispatcher } from './dispatcher';
+import { isBridgeKitDev } from './env';
 import {
   invokeLocalAsync,
   invokeLocalFire,
@@ -21,17 +22,6 @@ import { GLOBAL_SCOPE, Registry } from './registry';
 import type { StateMirror } from './stateMirror';
 import { LocalStateMirror, MirrorRegistry } from './stateMirror';
 import type { BridgeTransport } from './transport';
-
-// ---- helpers ---------------------------------------------------------------
-
-function _isDev(): boolean {
-  try {
-    if (typeof __DEV__ === 'boolean') return __DEV__;
-  } catch {
-    // ignore ReferenceError
-  }
-  return process.env.NODE_ENV !== 'production';
-}
 
 /**
  * Encode method params for transport.
@@ -286,7 +276,7 @@ export class BridgeKitJs {
                 .then((res) => {
                   if (!res.ok) {
                     diagnostics.incrementFiresDropped();
-                    if (_isDev()) {
+      if (isBridgeKitDev()) {
                       console.warn(`[bridgekit] fire ${desc.id}.${prop} failed: ${res.code}`);
                     }
                   }

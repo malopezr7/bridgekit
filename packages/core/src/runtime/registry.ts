@@ -4,17 +4,7 @@
 import type { BridgeContract } from '../contract/contract';
 import type { BridgeScope } from '../contract/protocol';
 import { diagnostics } from './diagnostics';
-
-// ---- __DEV__ guard --------------------------------------------------------
-
-function isDev(): boolean {
-  try {
-    if (typeof __DEV__ === 'boolean') return __DEV__;
-  } catch {
-    // ignore ReferenceError
-  }
-  return process.env.NODE_ENV !== 'production';
-}
+import { isBridgeKitDev } from './env';
 
 // ---- scope serialization --------------------------------------------------
 
@@ -101,7 +91,7 @@ export class Registry {
 
     const existing = this._entries.get(entryKey);
     if (existing?.binding.isLive) {
-      if (isDev()) {
+      if (isBridgeKitDev()) {
         console.warn(
           `[bridgekit] provide(${contractId}, ${scopeKey}): superseding existing binding.`,
         );
