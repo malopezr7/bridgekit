@@ -1,20 +1,16 @@
 declare const __DEV__: boolean | undefined;
-
-interface BridgeKitGlobal {
-  readonly process?: {
-    readonly env?: {
-      readonly NODE_ENV?: string;
-    };
-  };
-}
+declare const process:
+  | {
+      readonly env?: {
+        readonly NODE_ENV?: string;
+      };
+    }
+  | undefined;
 
 export function isBridgeKitDev(): boolean {
-  try {
-    if (typeof __DEV__ === 'boolean') return __DEV__;
-  } catch {
-    // __DEV__ is only injected by React Native runtimes.
+  if (typeof __DEV__ === 'boolean') return __DEV__;
+  if (typeof process !== 'undefined' && typeof process.env !== 'undefined') {
+    return process.env.NODE_ENV !== 'production';
   }
-
-  const nodeEnv = (globalThis as BridgeKitGlobal).process?.env?.NODE_ENV;
-  return nodeEnv !== 'production';
+  return false;
 }
