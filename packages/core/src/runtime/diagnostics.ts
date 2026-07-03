@@ -2,15 +2,7 @@
 // Diagnostics — dev-mode structured trace + counters.
 // ---------------------------------------------------------------------------
 
-function isDev(): boolean {
-  // __DEV__ is injected by Metro/React Native; fallback to NODE_ENV for Node/Jest
-  try {
-    if (typeof __DEV__ === 'boolean') return __DEV__;
-  } catch {
-    // ignore ReferenceError in environments where __DEV__ is not defined
-  }
-  return process.env.NODE_ENV !== 'production';
-}
+import { isBridgeKitDev } from './env';
 
 // ---- trace event -----------------------------------------------------------
 
@@ -38,7 +30,7 @@ interface Counters {
 // ---- DiagnosticsImpl -------------------------------------------------------
 
 class DiagnosticsImpl {
-  private _enabled: boolean = isDev();
+  private _enabled: boolean = isBridgeKitDev();
   private _seq = 0;
   private _counters: Counters = { calls: 0, errors: 0, firesDropped: 0 };
   private _openStreams = 0;
@@ -101,7 +93,7 @@ class DiagnosticsImpl {
   private _warned = new Set<string>();
 
   warnOnce(key: string, message: string): void {
-    if (!isDev()) return;
+    if (!isBridgeKitDev()) return;
     if (this._warned.has(key)) return;
     this._warned.add(key);
     // eslint-disable-next-line no-console

@@ -30,6 +30,7 @@
     "@react-native/codegen": "0.83.6",
     "@react-native/metro-config": "0.83.6",
     "@react-native/typescript-config": "0.83.6",
+    "@types/jest": "^29.5.13",
     "@types/react": "^19.0.0",
     "typescript": "5.9.2",
     "@react-native/gradle-plugin": "0.83.6",

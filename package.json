@@ -1,7 +1,7 @@
 {
   "name": "bridgekit",
   "private": true,
-  "packageManager": "pnpm@10.0.0",
+  "packageManager": "pnpm@10.34.4",
   "scripts": {
     "build": "pnpm -r build",
     "check": "pnpm -r check",

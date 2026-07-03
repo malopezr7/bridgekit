@@ -49,6 +49,7 @@ export { createTestBridge, mockBridge } from './testing/index';
 // ---- Default instance (Nitro-backed) ---------------------------------------
 
 import { BridgeKitJs } from './runtime/bridgekit';
+import { isBridgeKitDev } from './runtime/env';
 import { NitroBridgeTransport } from './runtime/nitroTransport';
 
 const REGISTRY_SYMBOL = Symbol.for('com.bridgekit.registry');
@@ -57,12 +58,6 @@ const PACKAGE_VERSION = '83.0.0';
 interface GlobalRegistry {
   instance: BridgeKitJs;
   version: string;
-}
-
-declare const __DEV__: boolean | undefined;
-
-function _isDev(): boolean {
-  return typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production';
 }
 
 let _nativeDefault: BridgeKitJs | null = null;
@@ -84,7 +79,7 @@ export function getDefaultBridgeKit(): BridgeKitJs {
       `[bridgekit] Duplicate @malopezr7/bridgekit detected. ` +
       `Already loaded version: ${existing.version}, this copy: ${PACKAGE_VERSION}. ` +
       `Ensure @malopezr7/bridgekit is deduplicated in your bundle.`;
-    if (_isDev()) {
+    if (isBridgeKitDev()) {
       throw new Error(msg);
     } else {
       console.warn(msg);
