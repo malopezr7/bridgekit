@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -193,11 +193,12 @@ class StreamHubTest {
 
         // Wait for the upstream to start collecting so emit() will be received
         assertTrue("Upstream must start within 2s", upstreamActiveLatch.await(2, TimeUnit.SECONDS))
-        kotlinx.coroutines.runBlocking {
-            withTimeout(2_000) {
+        val subscribed = kotlinx.coroutines.runBlocking {
+            withTimeoutOrNull(2_000) {
                 upstreamSource.subscriptionCount.first { it > 0 }
             }
         }
+        assertNotNull("upstream never subscribed within 2s", subscribed)
 
         // Emit a value — entry.sharedFlow (replay=1) buffers it; early subscriber receives it
         kotlinx.coroutines.runBlocking { upstreamSource.emit("value-before-late-attach") }
