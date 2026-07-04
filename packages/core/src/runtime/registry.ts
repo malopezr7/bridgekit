@@ -51,6 +51,7 @@ interface ReplacingWaiter {
 
 interface ReplacingTombstone {
   contractId: string;
+  owner: Binding;
   pendingCallers: ReplacingWaiter[];
   graceTimer: ReturnType<typeof setTimeout>;
 }
@@ -155,7 +156,7 @@ export class Registry {
       close: (reason?: 'replacing' | 'final') => {
         if (!binding.isLive) {
           if (reason === 'final') {
-            this._finalizeReplacingTombstone(entryKey);
+            this._finalizeReplacingTombstone(entryKey, binding);
           }
           return;
         }
@@ -165,8 +166,10 @@ export class Registry {
         if (reason === 'replacing') {
           const pendingCallers: ReplacingTombstone['pendingCallers'] = [];
           const graceTimer = setTimeout(() => {
+            const tombstone = this._replacingTombstones.get(entryKey);
+            if (!tombstone) return;
             this._replacingTombstones.delete(entryKey);
-            const pending = pendingCallers.splice(0);
+            const pending = tombstone.pendingCallers.splice(0);
             for (const w of pending) {
               if (this.resolve(contractId, w.requestedScope)) {
                 w.resolve();
@@ -177,7 +180,12 @@ export class Registry {
           }, DEFAULT_GRACE_WINDOW_MS);
           // unref so the timer does not block Node.js process exit / test runner.
           (graceTimer as unknown as { unref?: () => void }).unref?.();
-          this._replacingTombstones.set(entryKey, { contractId, pendingCallers, graceTimer });
+          this._replacingTombstones.set(entryKey, {
+            contractId,
+            owner: binding,
+            pendingCallers,
+            graceTimer,
+          });
         } else {
           // final: fail immediately
           this._finalizeReplacingTombstone(entryKey);
@@ -401,16 +409,17 @@ export class Registry {
         this._replacingTombstones.delete(key);
         clearTimeout(tombstone.graceTimer);
       } else if (pending.length > 0) {
-        tombstone.pendingCallers = pending;
+        tombstone.pendingCallers.splice(0, tombstone.pendingCallers.length, ...pending);
       } else {
-        tombstone.pendingCallers = [];
+        tombstone.pendingCallers.splice(0);
       }
     }
   }
 
-  private _finalizeReplacingTombstone(entryKey: string): void {
+  private _finalizeReplacingTombstone(entryKey: string, owner?: Binding): void {
     const tombstone = this._replacingTombstones.get(entryKey);
     if (!tombstone) return;
+    if (owner && tombstone.owner !== owner) return;
     this._replacingTombstones.delete(entryKey);
     clearTimeout(tombstone.graceTimer);
     const pending = tombstone.pendingCallers.splice(0);

@@ -298,6 +298,63 @@ describe('S5 replacing grace window', () => {
     });
   });
 
+  test('Parked invoke after unrelated provide rejects when replacing grace expires', async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const binding = bk.provide(GraceContract, { ping: async () => 'old' });
+    binding.close('replacing');
+
+    bk.provide(StreamContract, { items: () => streamSource<string>(() => () => {}) });
+
+    let result: unknown;
+    invokePing(transport).then((value) => {
+      result = value;
+    });
+
+    jest.advanceTimersByTime(1500);
+    await flushMicrotasks();
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'CONTRACT_NOT_PROVIDED',
+    });
+  });
+
+  test('Partial wake after unrelated provide leaves remaining parked invoke to reject on grace expiry', async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const binding = bk.provide(FallbackGraceContract, { ping: async () => 'global-old' });
+    binding.close('replacing');
+    bk.provide(StreamContract, { items: () => streamSource<string>(() => () => {}) });
+
+    let globalResult: unknown;
+    const featureInvocation = invokePingInScope(transport, FEATURE_SCOPE);
+    invokePingInScope(transport, GLOBAL_SCOPE).then((value) => {
+      globalResult = value;
+    });
+    await flushMicrotasks();
+
+    bk.provide(
+      FallbackGraceContract,
+      { ping: async () => 'feature-replacement' },
+      { scope: FEATURE_SCOPE },
+    );
+    await expect(featureInvocation).resolves.toEqual({ ok: true, value: 'feature-replacement' });
+    expect(globalResult).toBeUndefined();
+
+    jest.advanceTimersByTime(1500);
+    await flushMicrotasks();
+
+    expect(globalResult).toMatchObject({
+      ok: false,
+      code: 'CONTRACT_NOT_PROVIDED',
+    });
+  });
+
   test('Invoke parks on instance tombstone and wakes when global fallback is provided', async () => {
     const transport = new LoopbackTransport();
     const bk = new BridgeKitJs(transport);
@@ -616,6 +673,57 @@ describe('S5 replacing grace window', () => {
       code: 'CONTRACT_NOT_PROVIDED',
     });
     expect(settled).toBe(true);
+  });
+
+  test("stale superseded binding close('final') does not reject a newer replacing grace waiter", async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const staleBinding = bk.provide(GraceContract, { ping: async () => 'stale' });
+    const ownerBinding = bk.provide(GraceContract, { ping: async () => 'owner' });
+    ownerBinding.close('replacing');
+
+    let result: unknown;
+    const invocation = invokePing(transport).then((value) => {
+      result = value;
+      return value;
+    });
+    await flushMicrotasks();
+
+    staleBinding.close('final');
+    await flushMicrotasks();
+    expect(result).toBeUndefined();
+
+    bk.provide(GraceContract, { ping: async () => 'replacement' });
+    await expect(invocation).resolves.toEqual({ ok: true, value: 'replacement' });
+    expect(result).toEqual({ ok: true, value: 'replacement' });
+  });
+
+  test("stale owner of cleared tombstone cannot close('final') a newer replacing tombstone", async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const firstBinding = bk.provide(GraceContract, { ping: async () => 'first' });
+    firstBinding.close('replacing');
+    const secondBinding = bk.provide(GraceContract, { ping: async () => 'second' });
+    secondBinding.close('replacing');
+
+    let result: unknown;
+    const invocation = invokePing(transport).then((value) => {
+      result = value;
+      return value;
+    });
+    await flushMicrotasks();
+
+    firstBinding.close('final');
+    await flushMicrotasks();
+    expect(result).toBeUndefined();
+
+    bk.provide(GraceContract, { ping: async () => 'third' });
+    await expect(invocation).resolves.toEqual({ ok: true, value: 'third' });
+    expect(result).toEqual({ ok: true, value: 'third' });
   });
 
   test("closeAll('final') clears replacing tombstones and rejects parked callers immediately", async () => {
