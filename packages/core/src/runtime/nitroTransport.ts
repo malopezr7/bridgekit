@@ -169,8 +169,11 @@ export class NitroBridgeTransport implements BridgeTransport {
       },
     ) as unknown as Record<string, unknown>;
 
-    // Parse { epoch: number, snapshot: AnyMap[] }
-    const epoch = (result.epoch as number | undefined) ?? 1;
+    // Parse { epoch: number, snapshot: AnyMap[] }.
+    // Native uses epoch 0 as the pre-connection sentinel; preserve that sentinel
+    // when old or malformed native payloads omit epoch instead of masking to 1.
+    const rawEpoch = result.epoch;
+    const epoch = typeof rawEpoch === 'number' && Number.isFinite(rawEpoch) ? rawEpoch : 0;
     this._epoch = epoch;
 
     const rawSnapshot = (result.snapshot as unknown[] | undefined) ?? [];

@@ -18,7 +18,7 @@ import {
   openLocalStream,
 } from './localInvoker';
 import type { Binding } from './registry';
-import { GLOBAL_SCOPE, Registry } from './registry';
+import { GLOBAL_SCOPE, Registry, serializeScope } from './registry';
 import type { StateMirror } from './stateMirror';
 import { LocalStateMirror, MirrorRegistry } from './stateMirror';
 import type { BridgeTransport } from './transport';
@@ -129,6 +129,42 @@ export interface BridgeCallOpts {
   signal?: AbortSignal;
 }
 
+interface ProviderRecord<TShape = unknown> {
+  contract: BridgeContract<TShape>;
+  impl: Partial<TShape>;
+  scope: BridgeScope;
+  binding: Binding | null;
+  facade: ProviderFacade | null;
+  stateValues: Map<string, unknown>;
+}
+
+type ProviderFacade = Binding & { _replaceBinding(binding: Binding): void };
+
+function createProviderFacade(binding: Binding): ProviderFacade {
+  let current = binding;
+  return {
+    contractId: binding.contractId,
+    scope: binding.scope,
+    scopeKey: binding.scopeKey,
+    impl: binding.impl,
+    get isLive() {
+      return current.isLive;
+    },
+    set isLive(value: boolean) {
+      current.isLive = value;
+    },
+    setState(key: string, value: unknown) {
+      current.setState(key, value);
+    },
+    close(reason?: 'replacing' | 'final') {
+      current.close(reason);
+    },
+    _replaceBinding(next: Binding) {
+      current = next;
+    },
+  };
+}
+
 // ---- BridgeKitJs ----------------------------------------------------------
 
 export class BridgeKitJs {
@@ -136,8 +172,11 @@ export class BridgeKitJs {
   private readonly _mirrors: MirrorRegistry;
   private readonly _dispatcher: Dispatcher;
   private readonly _contracts = new Map<string, BridgeContract<unknown>>();
+  private readonly _providerRecords = new Map<string, ProviderRecord>();
   private _epoch = 0;
   private _connected = false;
+  private _closingForEpochSwap = false;
+  private _replayingProviders = false;
 
   constructor(private readonly _transport: BridgeTransport) {
     this.registry = new Registry();
@@ -153,11 +192,20 @@ export class BridgeKitJs {
    * producers, mirrors, or observers leak across epoch boundaries (W2-1).
    */
   connect(): void {
-    if (this._connected) {
+    const wasConnected = this._connected;
+    const replayRecords = wasConnected ? Array.from(this._providerRecords.values()) : [];
+    let quietDetached = new Set<string>();
+
+    if (wasConnected) {
       // Reconnect: clean up prior-epoch resources before re-wiring.
       this._dispatcher.closeAllProducers();
-      this._mirrors.detachAll();
-      this.registry.closeAll('final');
+      quietDetached = this._mirrors.detachAll({ notify: false });
+      this._closingForEpochSwap = true;
+      try {
+        this.registry.closeAll('replacing');
+      } finally {
+        this._closingForEpochSwap = false;
+      }
     }
 
     this._dispatcher.setTransport(this._transport);
@@ -171,9 +219,28 @@ export class BridgeKitJs {
         hash: '',
       } as unknown as BridgeContract<unknown>;
       this._mirrors.getOrCreate(stub, entry.key, entry.scope, entry.value).hydrate(entry.value);
+      quietDetached.delete(this._mirrors.keyFor(entry.contractId, entry.key, entry.scope));
     }
 
     this._mirrors.attachAll(this._transport);
+
+    this._replayingProviders = true;
+    try {
+      for (const record of replayRecords) {
+        this.provide(record.contract, record.impl, { scope: record.scope });
+      }
+    } finally {
+      this._replayingProviders = false;
+    }
+    for (const record of replayRecords) {
+      if (!record.binding?.isLive) continue;
+      for (const key of Object.keys(record.contract.descriptor.state)) {
+        quietDetached.delete(
+          this._mirrors.keyFor(record.contract.descriptor.id, key, record.scope),
+        );
+      }
+    }
+    this._mirrors.notifyNotProvided(quietDetached);
   }
 
   /**
@@ -186,7 +253,37 @@ export class BridgeKitJs {
   ): Binding {
     this._contracts.set(contract.descriptor.id, contract as BridgeContract<unknown>);
     const scope = opts?.scope ?? _ambientScope;
+    const recordKey = `${contract.descriptor.id}|${serializeScope(scope)}`;
+    let record = this._providerRecords.get(recordKey);
+    const isReplay = this._replayingProviders;
+    const resetStateValues = (target: ProviderRecord) => {
+      target.stateValues.clear();
+      for (const [key, stateDesc] of Object.entries(contract.descriptor.state)) {
+        target.stateValues.set(key, 'initial' in stateDesc ? stateDesc.initial : undefined);
+      }
+    };
+    if (!record) {
+      record = {
+        contract: contract as BridgeContract<unknown>,
+        impl: impl as Partial<unknown>,
+        scope,
+        binding: null,
+        facade: null,
+        stateValues: new Map(),
+      };
+      resetStateValues(record);
+      this._providerRecords.set(recordKey, record);
+    } else {
+      record.contract = contract as BridgeContract<unknown>;
+      record.impl = impl as Partial<unknown>;
+      record.scope = scope;
+      if (!isReplay) {
+        resetStateValues(record);
+        record.facade = null;
+      }
+    }
     const binding = this.registry.provide(contract, impl, { scope });
+    record.binding = binding;
 
     const transport = this._transport;
     const wrappedBinding = binding as Binding & { _statePatched: boolean };
@@ -196,6 +293,7 @@ export class BridgeKitJs {
       const originalClose = binding.close.bind(binding);
 
       binding.setState = (key: string, value: unknown) => {
+        if (!binding.isLive && record.binding !== binding) return;
         const stateDesc = contract.descriptor.state[key];
         if (stateDesc !== undefined && 'value' in stateDesc && stateDesc.value) {
           const result = validate(stateDesc.value, value);
@@ -207,6 +305,7 @@ export class BridgeKitJs {
             );
           }
         }
+        record.stateValues.set(key, value);
         originalSetState(key, value);
         transport.pushProviderState(contract.descriptor.id, scope, key, value);
       };
@@ -217,6 +316,13 @@ export class BridgeKitJs {
         const wasLive = binding.isLive;
         originalClose(reason);
         if (!wasLive) return; // stale close: no-op on transport
+        if (this._closingForEpochSwap) {
+          // Internal epoch swap: the provider record survives and is replayed into
+          // the new epoch. Public close('replacing') below remains a real unregister.
+          return;
+        }
+        record.binding = null;
+        this._providerRecords.delete(recordKey);
         for (const key of Object.keys(contract.descriptor.state)) {
           transport.pushProviderState(contract.descriptor.id, scope, key, undefined);
         }
@@ -224,10 +330,17 @@ export class BridgeKitJs {
         transport.announceUnprovided(contract.descriptor.id, scope);
       };
 
-      // Push initial state values so native readers see the seed.
+      // Push preserved provider-owned state so reconnect replay keeps registry,
+      // native transport, and existing local mirrors coherent across epochs.
       for (const [key, stateDesc] of Object.entries(contract.descriptor.state)) {
-        const initial = 'initial' in stateDesc ? stateDesc.initial : undefined;
-        transport.pushProviderState(contract.descriptor.id, scope, key, initial);
+        const value = record.stateValues.has(key)
+          ? record.stateValues.get(key)
+          : 'initial' in stateDesc
+            ? stateDesc.initial
+            : undefined;
+        record.stateValues.set(key, value);
+        originalSetState(key, value);
+        transport.pushProviderState(contract.descriptor.id, scope, key, value);
       }
 
       // Explicit provide announcement — covers stateless contracts that send no stateWrite.
@@ -235,7 +348,14 @@ export class BridgeKitJs {
       transport.announceProvided(contract.descriptor.id, scope);
     }
 
-    return binding;
+    if (record.facade && isReplay) {
+      record.facade._replaceBinding(binding);
+    }
+    if (!record.facade) {
+      record.facade = createProviderFacade(binding);
+    }
+
+    return record.facade;
   }
 
   /**

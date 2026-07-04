@@ -113,6 +113,17 @@ describe('connect', () => {
     expect(result.snapshot).toEqual([]);
   });
 
+  it('Absent/malformed epoch falls back to 0', () => {
+    const { host } = getMocks();
+    const transport = new NitroBridgeTransport();
+
+    host.connectDispatcher.mockReturnValueOnce({ snapshot: [] });
+    expect(transport.connect(makeDispatcher()).epoch).toBe(0);
+
+    host.connectDispatcher.mockReturnValueOnce({ epoch: 'not-a-number', snapshot: [] });
+    expect(transport.connect(makeDispatcher()).epoch).toBe(0);
+  });
+
   it('Native single-wrap fixture hydrates value', () => {
     const { host } = getMocks();
     host.connectDispatcher.mockReturnValue({

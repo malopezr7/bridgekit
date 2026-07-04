@@ -201,6 +201,30 @@ describe('useBridge proxy stability', () => {
 
     expect(() => unmount()).not.toThrow();
   });
+
+  test('Hook provider survives reconnect', () => {
+    const bk = getDefaultBridgeKit();
+    const contract = defineContract('hooks.reconnect.provider', {
+      methods: {
+        ping: Async(t.string()),
+      },
+    });
+
+    const { unmount } = renderHook(() => useProvideBridge(contract, { ping: async () => 'pong' }), {
+      wrapper: makeScopeWrapper(),
+    });
+
+    expect(bk.isProvided(contract)).toBe(true);
+
+    act(() => {
+      bk.connect();
+    });
+
+    expect(bk.isProvided(contract)).toBe(true);
+
+    unmount();
+    expect(bk.isProvided(contract)).toBe(false);
+  });
 });
 
 describe('ContractHook real subscription', () => {
