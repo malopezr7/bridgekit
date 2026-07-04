@@ -158,6 +158,38 @@ class ReadinessTest {
         assertFalse(waiter.await())
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `Final close that lost removal race does not poison replacement`() = runTest {
+        val staleEntry = bindingEntry("replacement.contract", Scope.Global)
+        router.registerBinding(staleEntry)
+        staleEntry.close(CloseReason.Final)
+
+        val replacement = bindingEntry("replacement.contract", Scope.Global)
+        router.registerBinding(replacement)
+        router.removeBinding(staleEntry)
+
+        replacement.close(CloseReason.Replacing)
+        router.removeBinding(replacement)
+
+        val waiter = async {
+            router.awaitProvided(
+                contractId = "replacement.contract",
+                scope = Scope.Global,
+                timeoutMs = 200,
+            )
+        }
+        runCurrent()
+
+        assertFalse(
+            "A stale Final close with removed=false must not make later waits fail fast",
+            waiter.isCompleted,
+        )
+        advanceTimeBy(200)
+        runCurrent()
+        assertFalse(waiter.await())
+    }
+
     private fun provideEnv(contractId: String, scope: Scope): Map<String, Any?> = mapOf(
         "op" to "provide",
         "contractId" to contractId,

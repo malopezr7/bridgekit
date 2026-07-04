@@ -313,50 +313,48 @@ internal class Router(
         val scope = parseScopeEnv(env)
         val op = env["op"] as? String
 
-        // D1 epoch guard: reject stale stateWrite (including provide/unprovide ops) before
-        // any side-effect. epochEnv == 0L = pre-connection sentinel, do NOT reject.
-        val epochEnv = (env["epoch"] as? Number)?.toLong() ?: 0L
-        val currentEpochAtWrite = epoch
-        if (epochEnv != 0L && epochEnv < currentEpochAtWrite) {
-            return errEnv("BRIDGE_NOT_READY", "Stale epoch: request epoch=$epochEnv current=$currentEpochAtWrite", contractId)
-        }
+        return synchronized(lock) {
+            // D1 epoch guard: reject stale stateWrite (including provide/unprovide ops)
+            // atomically with the mutation. epochEnv == 0L = pre-connection sentinel,
+            // do NOT reject.
+            val epochEnv = (env["epoch"] as? Number)?.toLong() ?: 0L
+            val currentEpochAtWrite = epoch
+            if (epochEnv != 0L && epochEnv < currentEpochAtWrite) {
+                return@synchronized errEnv("BRIDGE_NOT_READY", "Stale epoch: request epoch=$epochEnv current=$currentEpochAtWrite", contractId)
+            }
 
-        // Branch on op='provide' / op='unprovide' BEFORE touching the state store.
-        // These are explicit readiness announcements sent by JS runtime at provide()/close()
-        // time, reusing the existing BridgeState.write Nitro channel.
-        when (op) {
-            "provide" -> {
-                // A JS contract is now available. Mark it and unpark any native waiters.
-                // Do NOT write state — there is no state payload in a provide envelope.
-                synchronized(lock) {
+            // Branch on op='provide' / op='unprovide' BEFORE touching the state store.
+            // These are explicit readiness announcements sent by JS runtime at provide()/close()
+            // time, reusing the existing BridgeState.write Nitro channel.
+            when (op) {
+                "provide" -> {
+                    // A JS contract is now available. Mark it and unpark any native waiters.
+                    // Do NOT write state — there is no state payload in a provide envelope.
                     val nativeOwns = resolveBinding(contractId, scope) != null
                     if (!nativeOwns) {
                         markJsProvided(contractId, scope)
                         parkBuffer.unparkProvided(contractId, scope)
                     }
+                    return@synchronized okEnv(null)
                 }
-                return okEnv(null)
-            }
-            "unprovide" -> {
-                // A JS contract is gone. Remove from the provided set.
-                // Also let StateStore apply the Replacing→Unprovided grace window for state.
-                synchronized(lock) {
+                "unprovide" -> {
+                    // A JS contract is gone. Remove from the provided set.
+                    // Also let StateStore apply the Replacing→Unprovided grace window for state.
                     jsProvidedContracts.remove(providedKey(contractId, scope))
                     stateStore.markJsContractsUnprovided(setOf(contractId))
+                    return@synchronized okEnv(null)
                 }
-                return okEnv(null)
             }
-        }
 
-        // -- existing stateWrite path (op='stateWrite' or absent) -----------------
-        val stateKey = env["member"] as? String ?: return errEnv("VALIDATION_FAILED", "Missing member/stateKey")
-        val valueWrapped = env["payload"] as? Map<*, *>
-        @Suppress("UNCHECKED_CAST")
-        val value = (valueWrapped as? Map<String, Any?>)?.get("v")
+            // -- existing stateWrite path (op='stateWrite' or absent) -----------------
+            val stateKey = env["member"] as? String
+                ?: return@synchronized errEnv("VALIDATION_FAILED", "Missing member/stateKey")
+            val valueWrapped = env["payload"] as? Map<*, *>
+            @Suppress("UNCHECKED_CAST")
+            val value = (valueWrapped as? Map<String, Any?>)?.get("v")
 
-        // If native does NOT own this binding, JS is the provider.
-        // Record it so isProvided / awaitProvided are truthful, and unpark any waiters.
-        return synchronized(lock) {
+            // If native does NOT own this binding, JS is the provider.
+            // Record it so isProvided / awaitProvided are truthful, and unpark any waiters.
             val nativeOwns = resolveBinding(contractId, scope) != null
             if (!nativeOwns) {
                 markJsProvided(contractId, scope)
@@ -432,7 +430,7 @@ internal class Router(
             val removed = bindings.remove(key, entry)
             stateStore.markUnprovided(entry.contractId, entry.scope)
             entry.cancelAllStreamJobs()
-            if (entry.closeReason == CloseReason.Final) {
+            if (removed && entry.closeReason == CloseReason.Final) {
                 finalClosedBindings.add(key)
             }
             callbacks = jsCallbacks

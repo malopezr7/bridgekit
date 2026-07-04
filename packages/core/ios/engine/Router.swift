@@ -552,7 +552,7 @@ internal final class Router {
         if removed { bindings.removeValue(forKey: key) }
         let goneSnapshots = stateStore.markUnprovided(contractId: entry.contractId, scope: entry.scope)
         entry.cancelAllStreamJobs()
-        if entry.closeReason == .final_ {
+        if removed && entry.closeReason == .final_ {
             finalClosedBindings.insert(key)
         }
         let callbacks = jsCallbacks
