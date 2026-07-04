@@ -144,7 +144,7 @@ jobs:
         run: pnpm build
 
   pack:
-    name: Pack core
+    name: Pack packages
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -165,7 +165,27 @@ jobs:
 
       - name: Verify core package contents
         working-directory: packages/core
-        run: npm pack --dry-run
+        run: npm pack --dry-run --ignore-scripts=false
+
+      - name: Verify publish tarball contents
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          core_tarball="$(cd packages/core && npm pack --json --pack-destination "$tmp" | node -e "const c=require('fs').readFileSync(0,'utf8');const i=c.lastIndexOf('\n[');process.stdout.write(JSON.parse(c.slice(i>=0?i+1:c.indexOf('[')))[0].filename)")"
+          tar -tzf "$tmp/$core_tarball" > "$tmp/core-list.txt"
+          grep -Fx "package/dist/commonjs/index.js" "$tmp/core-list.txt"
+          grep -Fx "package/dist/typescript/index.d.ts" "$tmp/core-list.txt"
+          grep -Fx "package/LICENSE" "$tmp/core-list.txt"
+          grep -Fx "package/android/build.gradle.kts" "$tmp/core-list.txt"
+          grep -q "package/android/src/main" "$tmp/core-list.txt"
+          if grep -q "android/src/test" "$tmp/core-list.txt"; then
+            exit 1
+          fi
+
+          cli_tarball="$(cd packages/cli && npm pack --json --pack-destination "$tmp" | node -e "const c=require('fs').readFileSync(0,'utf8');const i=c.lastIndexOf('\n[');process.stdout.write(JSON.parse(c.slice(i>=0?i+1:c.indexOf('[')))[0].filename)")"
+          tar -tzf "$tmp/$cli_tarball" > "$tmp/cli-list.txt"
+          grep -Fx "package/dist/index.js" "$tmp/cli-list.txt"
+          grep -Fx "package/LICENSE" "$tmp/cli-list.txt"
 
   generate-check:
     name: Generate drift check

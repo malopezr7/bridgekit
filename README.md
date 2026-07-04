@@ -50,6 +50,13 @@ Kotlin **and** Swift bindings — interfaces, data classes, and codecs.
 | [`@malopezr7/bridgekit`](packages/core) | The library: contract layer, JS runtime, React hooks, and the native Android/iOS modules. |
 | [`@malopezr7/bridgekit-cli`](packages/cli) | Code generation — emits Kotlin & Swift bindings from your TypeScript contracts. |
 
+## Version policy
+
+The first stable major tracks React Native minor compatibility. For example,
+`83.x.x` targets RN 0.83. Patch and minor releases inside that major can add
+BridgeKit fixes or compatible features without changing the tracked React Native
+minor line.
+
 ## Install
 
 ```sh
