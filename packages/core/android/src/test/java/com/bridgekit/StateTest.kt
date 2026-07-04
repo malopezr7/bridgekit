@@ -155,6 +155,41 @@ class StateTest {
         assertEquals("hello", wrapped?.get("v"))
     }
 
+    @Test
+    fun `Register remove binding emits post-mutation epoch delta`() {
+        val dispatcher = StubJsDispatcher()
+        router.connectDispatcher(emptyMap(), dispatcher.asCallbacks())
+        val defn = stubDefinition("native.delta")
+        val entry = makeEntry(defn, Scope.Feature("catalog"), StateCapturingAdapter("myKey", "init"))
+
+        router.registerBinding(entry)
+        router.removeBinding(entry)
+
+        assertEquals(2, dispatcher.stateWrites.size)
+        assertEquals(
+            mapOf(
+                "op" to "provide",
+                "contractId" to "native.delta",
+                "scope" to mapOf("kind" to "feature", "feature" to "catalog"),
+                "epoch" to router.currentEpoch(),
+                "member" to "",
+                "correlationId" to "",
+            ),
+            dispatcher.stateWrites[0],
+        )
+        assertEquals(
+            mapOf(
+                "op" to "unprovide",
+                "contractId" to "native.delta",
+                "scope" to mapOf("kind" to "feature", "feature" to "catalog"),
+                "epoch" to router.currentEpoch(),
+                "member" to "",
+                "correlationId" to "",
+            ),
+            dispatcher.stateWrites[1],
+        )
+    }
+
     // ---- W2-3: Replacing grace window -----------------------------------------
 
     @OptIn(ExperimentalCoroutinesApi::class)

@@ -61,6 +61,23 @@ internal class ParkBuffer {
     }
 
     /**
+     * Unpark waiters whose requested scope can be satisfied by [providedScope].
+     * Mirrors resolution order: instance → feature → global.
+     */
+    fun unparkProvided(contractId: String, providedScope: Scope) {
+        val providedScopeKey = providedScope.serialize()
+        val matchingKeys = waiters.keys.filter { key ->
+            key.contractId == contractId && candidateScopes(Scope.deserialize(key.scopeKey)).any { it.serialize() == providedScopeKey }
+        }
+        for (key in matchingKeys) {
+            val list = waiters.remove(key) ?: continue
+            for (deferred in list) {
+                deferred.complete(true)
+            }
+        }
+    }
+
+    /**
      * Fail all waiters for (contractId, scope) with false — called on timeout or close.
      */
     fun failAll(contractId: String, scope: Scope) {
@@ -89,5 +106,11 @@ internal class ParkBuffer {
         return entries.joinToString(separator = "\n") { (k, v) ->
             "parked|${k.contractId}|${k.scopeKey}|count=${v.size}"
         }
+    }
+
+    private fun candidateScopes(scope: Scope): List<Scope> = when (scope) {
+        is Scope.Instance -> listOf(scope, Scope.Feature(scope.feature), Scope.Global)
+        is Scope.Feature -> listOf(scope, Scope.Global)
+        is Scope.Global -> listOf(Scope.Global)
     }
 }
