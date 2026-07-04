@@ -96,7 +96,8 @@ export class StateMirror<T> {
 
   /** Called on epoch change — detach and mark stale (value kept accessible). */
   detachTransport(opts?: { notify?: boolean }): boolean {
-    const before = this._snapshot;
+    const beforeValue = this._value;
+    const beforeStatus = this._status;
     if (this._obsId !== null && this._transport) {
       try {
         this._transport.stateUnobserve(this._obsId);
@@ -113,11 +114,14 @@ export class StateMirror<T> {
     } else {
       this._status = 'unprovided';
     }
-    this._updateSnapshot();
-    if (opts?.notify !== false) {
+    const changed = !Object.is(beforeValue, this._value) || beforeStatus !== this._status;
+    if (changed) {
+      this._updateSnapshot();
+    }
+    if (changed && opts?.notify !== false) {
       this._notify();
     }
-    return before !== this._snapshot;
+    return changed;
   }
 
   notifyIfNotProvided(): void {

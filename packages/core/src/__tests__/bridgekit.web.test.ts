@@ -1031,6 +1031,35 @@ describe('W2-1: providers and mirrors cleaned up on reconnect', () => {
     });
   });
 
+  test('superseded provider setState is ignored and does not poison reconnect replay', () => {
+    const transport = new RecordingReconnectTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    const stale = bk.provide(TestContract, { ping: async () => 'a' });
+    const current = bk.provide(TestContract, { ping: async () => 'b' });
+    current.setState('count', 5);
+    transport.writes = [];
+
+    stale.setState('count', 99);
+    bk.connect();
+
+    expect(bk.registry.getState(TestContract.descriptor.id, GLOBAL_SCOPE, 'count')).toBe(5);
+    expect(transport.writes).not.toContainEqual({
+      op: 'state:count',
+      epoch: 1,
+      contractId: TestContract.descriptor.id,
+      key: 'count',
+      value: 99,
+    });
+    expect(transport.writes).toContainEqual({
+      op: 'state:count',
+      epoch: 2,
+      contractId: TestContract.descriptor.id,
+      key: 'count',
+      value: 5,
+    });
+  });
+
   test('all registry bindings from prior epoch are replayed after reconnect', () => {
     const transport = new LoopbackTransport();
     const bk = new BridgeKitJs(transport);
@@ -1103,7 +1132,7 @@ describe('W2-1: providers and mirrors cleaned up on reconnect', () => {
   test('Epoch before state hydration', () => {
     class SnapshotTransport extends RecordingReconnectTransport {
       connect(_dispatcher: JsDispatcher): ConnectResult {
-        this.epoch = 5;
+        this.epoch += 5;
         return {
           epoch: this.epoch,
           snapshot: [
@@ -1127,7 +1156,7 @@ describe('W2-1: providers and mirrors cleaned up on reconnect', () => {
     bk.connect();
 
     expect(transport.writes.length).toBeGreaterThan(0);
-    expect(transport.writes.every((write) => write.epoch === 5)).toBe(true);
+    expect(transport.writes.every((write) => write.epoch === 10)).toBe(true);
   });
 
   test('quiet reconnect detach notifies subscribers when snapshot does not rehydrate mirror', () => {
@@ -1165,6 +1194,64 @@ describe('W2-1: providers and mirrors cleaned up on reconnect', () => {
     bk.connect();
 
     expect(observations).toContainEqual({ value: 42, status: 'stale' });
+    unsubscribe();
+  });
+
+  test('quiet reconnect detach notifies a never-provided mirror at most once', () => {
+    const transport = new RecordingReconnectTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const mirror = bk.state(TestContract, 'count');
+    const observations: Array<{ value: unknown; status: string }> = [];
+    const unsubscribe = mirror.subscribe((value) => observations.push(value));
+
+    bk.connect();
+    bk.connect();
+    bk.connect();
+
+    expect(observations.filter((value) => value.status === 'unprovided')).toHaveLength(1);
+    unsubscribe();
+  });
+
+  test('quiet reconnect detach does not emit stale for a mirror owned by a replayed live provider', () => {
+    class ObservableReconnectTransport extends RecordingReconnectTransport {
+      private observer: ((value: unknown) => void) | null = null;
+
+      constructor() {
+        super();
+        this.stateObserve = jest.fn(
+          (
+            _env: Parameters<BridgeTransport['stateObserve']>[0],
+            onChange: (value: unknown) => void,
+          ) => {
+            this.observer = onChange;
+            return 'obs';
+          },
+        );
+      }
+
+      notify(value: unknown) {
+        this.observer?.(value);
+      }
+    }
+
+    const transport = new ObservableReconnectTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const mirror = bk.state(TestContract, 'count');
+    const observations: Array<{ value: unknown; status: string }> = [];
+    const unsubscribe = mirror.subscribe((value) => observations.push(value));
+    const binding = bk.provide(TestContract, { ping: async () => 'pong' });
+    binding.setState('count', 42);
+    transport.notify(42);
+    observations.length = 0;
+
+    bk.connect();
+
+    expect(bk.registry.getState(TestContract.descriptor.id, GLOBAL_SCOPE, 'count')).toBe(42);
+    expect(observations).not.toContainEqual({ value: 42, status: 'stale' });
     unsubscribe();
   });
 

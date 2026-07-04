@@ -232,6 +232,14 @@ export class BridgeKitJs {
     } finally {
       this._replayingProviders = false;
     }
+    for (const record of replayRecords) {
+      if (!record.binding?.isLive) continue;
+      for (const key of Object.keys(record.contract.descriptor.state)) {
+        quietDetached.delete(
+          this._mirrors.keyFor(record.contract.descriptor.id, key, record.scope),
+        );
+      }
+    }
     this._mirrors.notifyNotProvided(quietDetached);
   }
 
@@ -285,6 +293,7 @@ export class BridgeKitJs {
       const originalClose = binding.close.bind(binding);
 
       binding.setState = (key: string, value: unknown) => {
+        if (!binding.isLive && record.binding !== binding) return;
         const stateDesc = contract.descriptor.state[key];
         if (stateDesc !== undefined && 'value' in stateDesc && stateDesc.value) {
           const result = validate(stateDesc.value, value);
