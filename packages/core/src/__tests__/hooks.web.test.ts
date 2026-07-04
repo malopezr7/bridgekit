@@ -223,6 +223,7 @@ describe('useBridge proxy stability', () => {
     expect(bk.isProvided(contract)).toBe(true);
 
     unmount();
+    expect(bk.isProvided(contract)).toBe(false);
   });
 });
 

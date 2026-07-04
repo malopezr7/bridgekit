@@ -928,7 +928,13 @@ describe('QW-3: timeout timer and AbortSignal listener cleanup on call completio
 describe('W2-1: providers and mirrors cleaned up on reconnect', () => {
   class RecordingReconnectTransport implements BridgeTransport {
     epoch = 0;
-    writes: Array<{ op: string; epoch: number; contractId: string }> = [];
+    writes: Array<{
+      op: string;
+      epoch: number;
+      contractId: string;
+      key?: string;
+      value?: unknown;
+    }> = [];
 
     connect(_dispatcher: JsDispatcher): ConnectResult {
       this.epoch += 1;
@@ -954,8 +960,13 @@ describe('W2-1: providers and mirrors cleaned up on reconnect', () => {
       this.writes.push({ op: env.op, epoch: env.epoch, contractId: env.contractId });
       return { ok: true } as const;
     }
-    pushProviderState(contractId: string, _scope: Parameters<BridgeTransport['pushProviderState']>[1], key: string, _value: unknown) {
-      this.writes.push({ op: `state:${key}`, epoch: this.epoch, contractId });
+    pushProviderState(
+      contractId: string,
+      _scope: Parameters<BridgeTransport['pushProviderState']>[1],
+      key: string,
+      _value: unknown,
+    ) {
+      this.writes.push({ op: `state:${key}`, epoch: this.epoch, contractId, key, value: _value });
     }
     announceProvided(contractId: string) {
       this.writes.push({ op: 'provide', epoch: this.epoch, contractId });
@@ -982,6 +993,44 @@ describe('W2-1: providers and mirrors cleaned up on reconnect', () => {
     });
   });
 
+  test('imperative provider handle unregisters the replayed binding after reconnect', () => {
+    const transport = new RecordingReconnectTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    const binding = bk.provide(TestContract, { ping: async () => 'pong' });
+
+    bk.connect();
+    transport.writes = [];
+    binding.close('final');
+
+    expect(bk.isProvided(TestContract)).toBe(false);
+    expect(transport.writes).toContainEqual({
+      op: 'unprovide',
+      epoch: 2,
+      contractId: TestContract.descriptor.id,
+    });
+  });
+
+  test('imperative provider handle setState updates current binding after reconnect', () => {
+    const transport = new RecordingReconnectTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    const binding = bk.provide(TestContract, { ping: async () => 'pong' });
+
+    bk.connect();
+    transport.writes = [];
+    binding.setState('count', 10);
+
+    expect(bk.registry.getState(TestContract.descriptor.id, GLOBAL_SCOPE, 'count')).toBe(10);
+    expect(transport.writes).toContainEqual({
+      op: 'state:count',
+      epoch: 2,
+      contractId: TestContract.descriptor.id,
+      key: 'count',
+      value: 10,
+    });
+  });
+
   test('all registry bindings from prior epoch are replayed after reconnect', () => {
     const transport = new LoopbackTransport();
     const bk = new BridgeKitJs(transport);
@@ -1003,10 +1052,10 @@ describe('W2-1: providers and mirrors cleaned up on reconnect', () => {
     // Reconnect (epoch N+1)
     bk.connect();
 
-    // Old handles are replaced, but active provider records are replayed into the new epoch.
-    expect(b1.isLive).toBe(false);
-    expect(b2.isLive).toBe(false);
-    expect(b3.isLive).toBe(false);
+    // Public handles are stable facades over the current epoch binding.
+    expect(b1.isLive).toBe(true);
+    expect(b2.isLive).toBe(true);
+    expect(b3.isLive).toBe(true);
     expect(bk.isProvided(TestContract)).toBe(true);
     expect(bk.isProvided(ScopeContract)).toBe(true);
     expect(bk.isProvided(ScopeContract, { scope: { kind: 'feature', feature: 'F' } })).toBe(true);
@@ -1077,7 +1126,125 @@ describe('W2-1: providers and mirrors cleaned up on reconnect', () => {
 
     bk.connect();
 
+    expect(transport.writes.length).toBeGreaterThan(0);
     expect(transport.writes.every((write) => write.epoch === 5)).toBe(true);
+  });
+
+  test('quiet reconnect detach notifies subscribers when snapshot does not rehydrate mirror', () => {
+    class ObservableReconnectTransport extends RecordingReconnectTransport {
+      private observer: ((value: unknown) => void) | null = null;
+
+      constructor() {
+        super();
+        this.stateObserve = jest.fn(
+          (
+            _env: Parameters<BridgeTransport['stateObserve']>[0],
+            onChange: (value: unknown) => void,
+          ) => {
+            this.observer = onChange;
+            return 'obs';
+          },
+        );
+      }
+
+      notify(value: unknown) {
+        this.observer?.(value);
+      }
+    }
+
+    const transport = new ObservableReconnectTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const mirror = bk.state(TestContract, 'count');
+    const observations: Array<{ value: unknown; status: string }> = [];
+    const unsubscribe = mirror.subscribe((value) => observations.push(value));
+    transport.notify(42);
+    observations.length = 0;
+
+    bk.connect();
+
+    expect(observations).toContainEqual({ value: 42, status: 'stale' });
+    unsubscribe();
+  });
+
+  test('first connect does not replay and supersede pre-connect provider handle', () => {
+    const transport = new RecordingReconnectTransport();
+    const bk = new BridgeKitJs(transport);
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const binding = bk.provide(TestContract, { ping: async () => 'pong' });
+
+    bk.connect();
+
+    expect(binding.isLive).toBe(true);
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('superseding existing binding'),
+    );
+    warnSpy.mockRestore();
+  });
+
+  test("user close('replacing') unregisters and announces unprovided", () => {
+    const transport = new RecordingReconnectTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    const binding = bk.provide(TestContract, { ping: async () => 'pong' });
+    transport.writes = [];
+
+    binding.close('replacing');
+
+    expect(bk.isProvided(TestContract)).toBe(false);
+    expect(transport.writes).toContainEqual({
+      op: 'unprovide',
+      epoch: 1,
+      contractId: TestContract.descriptor.id,
+    });
+  });
+
+  test("user close('replacing') does not resurrect provider on reconnect", () => {
+    const transport = new RecordingReconnectTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    const binding = bk.provide(TestContract, { ping: async () => 'pong' });
+
+    binding.close('replacing');
+    bk.connect();
+
+    expect(bk.isProvided(TestContract)).toBe(false);
+  });
+
+  test('replayed provider preserves last state and pushes it to the new epoch', () => {
+    const transport = new RecordingReconnectTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    const binding = bk.provide(TestContract, { ping: async () => 'pong' });
+    binding.setState('count', 10);
+    transport.writes = [];
+
+    bk.connect();
+
+    expect(bk.registry.getState(TestContract.descriptor.id, GLOBAL_SCOPE, 'count')).toBe(10);
+    expect(transport.writes).toContainEqual({
+      op: 'state:count',
+      epoch: 2,
+      contractId: TestContract.descriptor.id,
+      key: 'count',
+      value: 10,
+    });
+  });
+
+  test('provider record keys use canonical scope serialization', () => {
+    const transport = new RecordingReconnectTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    const scopeA = { kind: 'instance' as const, feature: 'F', instance: 'I' };
+    const scopeB = { instance: 'I', feature: 'F', kind: 'instance' as const };
+    bk.provide(ScopeContract, { whoami: async () => 'two' }, { scope: scopeB });
+    const current = bk.provide(ScopeContract, { whoami: async () => 'one' }, { scope: scopeA });
+
+    current.close('final');
+    bk.connect();
+
+    expect(bk.isProvided(ScopeContract, { scope: scopeB })).toBe(false);
   });
 
   test('mirrors detach from prior epoch: old obs is cancelled on reconnect', () => {

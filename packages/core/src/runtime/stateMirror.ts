@@ -95,7 +95,8 @@ export class StateMirror<T> {
   }
 
   /** Called on epoch change — detach and mark stale (value kept accessible). */
-  detachTransport(opts?: { notify?: boolean }): void {
+  detachTransport(opts?: { notify?: boolean }): boolean {
+    const before = this._snapshot;
     if (this._obsId !== null && this._transport) {
       try {
         this._transport.stateUnobserve(this._obsId);
@@ -114,6 +115,13 @@ export class StateMirror<T> {
     }
     this._updateSnapshot();
     if (opts?.notify !== false) {
+      this._notify();
+    }
+    return before !== this._snapshot;
+  }
+
+  notifyIfNotProvided(): void {
+    if (this._status !== 'provided') {
       this._notify();
     }
   }
@@ -218,7 +226,9 @@ export class LocalStateMirror<T> {
   attachTransport(_transport: BridgeTransport): void {}
 
   /** No-op: local mirrors don't use transport. */
-  detachTransport(): void {}
+  detachTransport(): boolean {
+    return false;
+  }
 
   /** Not called for local mirrors (snapshot hydration is native-only). */
   hydrate(_value: T): void {}
@@ -240,14 +250,17 @@ export class MirrorRegistry {
     return `${contractId}|${key}|${scopeKey}`;
   }
 
+  keyFor(contractId: string, key: string, scope: BridgeScope): string {
+    return this._key(contractId, key, serializeScope(scope));
+  }
+
   getOrCreate<T>(
     contract: BridgeContract<unknown>,
     key: string,
     scope: BridgeScope,
     initial: T,
   ): StateMirror<T> {
-    const scopeKey = serializeScope(scope);
-    const k = this._key(contract.descriptor.id, key, scopeKey);
+    const k = this.keyFor(contract.descriptor.id, key, scope);
     if (!this._mirrors.has(k)) {
       this._mirrors.set(
         k,
@@ -270,9 +283,19 @@ export class MirrorRegistry {
     }
   }
 
-  detachAll(opts?: { notify?: boolean }): void {
-    for (const mirror of this._mirrors.values()) {
-      mirror.detachTransport(opts);
+  detachAll(opts?: { notify?: boolean }): Set<string> {
+    const changed = new Set<string>();
+    for (const [key, mirror] of this._mirrors.entries()) {
+      if (mirror.detachTransport(opts)) {
+        changed.add(key);
+      }
+    }
+    return changed;
+  }
+
+  notifyNotProvided(keys: Iterable<string>): void {
+    for (const key of keys) {
+      this._mirrors.get(key)?.notifyIfNotProvided();
     }
   }
 
