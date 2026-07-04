@@ -513,3 +513,82 @@ describe('local-first: scope resolution', () => {
     expect(transport.invokeCalls).toBe(1);
   });
 });
+
+// ===========================================================================
+// 7. Readiness waiter fallback
+// ===========================================================================
+
+describe('local-first: readiness waiter scope fallback', () => {
+  test('Fallback-aware waiter wakes', async () => {
+    const { bk } = makeBk();
+    const instanceScope = {
+      kind: 'instance' as const,
+      feature: 'readinessFeature',
+      instance: 'instanceA',
+    };
+    const featureScope = { kind: 'feature' as const, feature: 'readinessFeature' };
+
+    const waiter = bk.awaitProvided(ScopedContract, { scope: instanceScope, timeoutMs: 50 });
+
+    bk.provide(ScopedContract, { who: async () => 'feature-ready' }, { scope: featureScope });
+
+    await expect(waiter).resolves.toBeUndefined();
+  });
+
+  test('JS-only lookup order uses nearest fallback', async () => {
+    const { bk, transport } = makeBk({ shouldThrow: true });
+    const instanceScope = {
+      kind: 'instance' as const,
+      feature: 'lookupFeature',
+      instance: 'instanceA',
+    };
+    const featureScope = { kind: 'feature' as const, feature: 'lookupFeature' };
+
+    bk.provide(ScopedContract, { who: async () => 'global-impl' }, { scope: GLOBAL_SCOPE });
+    bk.provide(ScopedContract, { who: async () => 'feature-impl' }, { scope: featureScope });
+
+    const proxy = bk.bridge(ScopedContract, { scope: instanceScope });
+    const result = await (proxy as Record<string, () => Promise<string>>).who();
+
+    expect(result).toBe('feature-impl');
+    expect(transport.invokeCalls).toBe(0);
+
+    // Pin the READINESS lookup path too (not just invoke): an instance-scoped
+    // readiness query must resolve via the nearest fallback provider.
+    await expect(
+      bk.awaitProvided(ScopedContract, { scope: instanceScope, timeoutMs: 50 }),
+    ).resolves.toBeUndefined();
+  });
+
+  test('Loopback stays pure JS', async () => {
+    const { bk, transport } = makeBk({ shouldThrow: true });
+    const instanceScope = {
+      kind: 'instance' as const,
+      feature: 'loopbackFeature',
+      instance: 'instanceA',
+    };
+
+    const waiter = bk.awaitProvided(ScopedContract, { scope: instanceScope, timeoutMs: 50 });
+
+    bk.provide(ScopedContract, { who: async () => 'loopback-global' }, { scope: GLOBAL_SCOPE });
+
+    await expect(waiter).resolves.toBeUndefined();
+    expect(bk.isProvided(ScopedContract, { scope: instanceScope })).toBe(true);
+    expect(transport.invokeCalls).toBe(0);
+    expect(transport.invokeSyncCalls).toBe(0);
+    expect(transport.openStreamCalls).toBe(0);
+    expect(transport.stateObserveCalls).toBe(0);
+  });
+
+  test('does not wake waiters for unrelated scopes', async () => {
+    const { bk } = makeBk();
+    const waitingScope = { kind: 'feature' as const, feature: 'waitingFeature' };
+    const unrelatedScope = { kind: 'feature' as const, feature: 'unrelatedFeature' };
+
+    const waiter = bk.awaitProvided(ScopedContract, { scope: waitingScope, timeoutMs: 20 });
+
+    bk.provide(ScopedContract, { who: async () => 'unrelated' }, { scope: unrelatedScope });
+
+    await expect(waiter).rejects.toThrow('CONTRACT_NOT_PROVIDED');
+  });
+});
