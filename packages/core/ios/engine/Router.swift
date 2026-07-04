@@ -106,6 +106,10 @@ internal final class Router {
 
     private var jsProvidedContracts: Set<String> = []
 
+    private func providedKey(contractId: String, scope: Scope) -> String {
+        bindingKey(contractId: contractId, scope: scope)
+    }
+
     // MARK: StateStore
 
     internal let stateStore: StateStore
@@ -220,6 +224,9 @@ internal final class Router {
         epochInfo: [String: Any?],
         callbacks: JsDispatcherCallbacks
     ) -> [String: Any?] {
+        let snapshot: [[String: Any?]]
+        let nativeProvided: [[String: Any?]]
+
         lock.lock()
 
         epochCounter += 1
@@ -250,20 +257,23 @@ internal final class Router {
 
         parkBuffer.failAllPending()
 
-        let goneSnapshots = stateStore.markJsContractsUnprovided(jsProvidedContracts)
+        let goneSnapshots = stateStore.markJsContractsUnprovided(Set(jsProvidedContracts.map { contractId(fromProvidedKey: $0) }))
+        jsProvidedContracts.removeAll()
         stateStore.clearObserversForEpoch(newEpoch - 1)
         jsCallbacks = callbacks
+
+        snapshot = buildNativeStateSnapshotLocked()
+        nativeProvided = buildNativeProvidedLocked()
 
         lock.unlock()
 
         // Notify observers OUTSIDE lock.
         stateStore.notifyGoneSnapshots(goneSnapshots)
 
-        let snapshot = buildNativeStateSnapshot()
-
         return [
             "epoch": newEpoch,
-            "snapshot": snapshot
+            "snapshot": snapshot,
+            "nativeProvided": nativeProvided
         ]
     }
 
@@ -433,15 +443,15 @@ internal final class Router {
         if op == "provide" {
             let nativeOwns = resolveBinding(contractId: contractId, scope: scope) != nil
             if !nativeOwns {
-                markJsProvided(contractId)
-                parkBuffer.unpark(contractId: contractId, scope: scope)
+                markJsProvided(contractId, scope: scope)
+                parkBuffer.unparkProvided(contractId: contractId, providedScope: scope)
             }
             lock.unlock()
             return Self.okEnv(nil)
         }
 
         if op == "unprovide" {
-            jsProvidedContracts.remove(contractId)
+            jsProvidedContracts.remove(providedKey(contractId: contractId, scope: scope))
             let goneSnapshots = stateStore.markJsContractsUnprovided([contractId])
             lock.unlock()
             // Notify outside lock.
@@ -459,8 +469,8 @@ internal final class Router {
 
         let nativeOwns = resolveBinding(contractId: contractId, scope: scope) != nil
         if !nativeOwns {
-            markJsProvided(contractId)
-            parkBuffer.unpark(contractId: contractId, scope: scope)
+            markJsProvided(contractId, scope: scope)
+            parkBuffer.unparkProvided(contractId: contractId, providedScope: scope)
         }
         let result = stateStore.writeFromJs(
             contractId: contractId, scope: scope, stateKey: stateKey,
@@ -488,7 +498,12 @@ internal final class Router {
         for (stateKey, initial) in entry.adapter.stateInitials {
             stateStore.seedNativeState(contractId: entry.contractId, scope: entry.scope, stateKey: stateKey, initial: initial)
         }
+        parkBuffer.unparkProvided(contractId: entry.contractId, providedScope: entry.scope)
+        let callbacks = jsCallbacks
+        let delta = readinessDelta(op: "provide", contractId: entry.contractId, scope: entry.scope, epoch: epochCounter)
         lock.unlock()
+
+        callbacks?.onStateWrite(delta)
 
         // Subscribe to each provider state stream. One Task per stream, stored in the
         // binding so they cancel on binding.close(). Acquire the lock to write state and
@@ -513,9 +528,6 @@ internal final class Router {
             lock.unlock()
         }
 
-        lock.lock()
-        parkBuffer.unpark(contractId: entry.contractId, scope: entry.scope)
-        lock.unlock()
     }
 
     /// Resolve binding with instance→feature→global fallback. Called under lock.
@@ -533,19 +545,23 @@ internal final class Router {
     internal func removeBinding(_ entry: BindingEntry) {
         lock.lock()
         let key = bindingKey(contractId: entry.contractId, scope: entry.scope)
-        if bindings[key] === entry { bindings.removeValue(forKey: key) }
+        let removed = bindings[key] === entry
+        if removed { bindings.removeValue(forKey: key) }
         let goneSnapshots = stateStore.markUnprovided(contractId: entry.contractId, scope: entry.scope)
         entry.cancelAllStreamJobs()
+        let callbacks = jsCallbacks
+        let delta = removed ? readinessDelta(op: "unprovide", contractId: entry.contractId, scope: entry.scope, epoch: epochCounter) : nil
         lock.unlock()
         // Notify observers OUTSIDE lock.
         stateStore.notifyGoneSnapshots(goneSnapshots)
+        if let delta { callbacks?.onStateWrite(delta) }
     }
 
     /// Await until (contractId, scope) is provided, with timeout.
     internal func awaitProvided(contractId: String, scope: Scope, timeoutMs: UInt64) async -> Bool {
         lock.lock()
         if resolveBinding(contractId: contractId, scope: scope) != nil { lock.unlock(); return true }
-        if jsProvidedContracts.contains(contractId) { lock.unlock(); return true }
+        if isJsProvided(contractId: contractId, scope: scope) { lock.unlock(); return true }
 
         return await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
             let once = OnceContinuationResult<Bool>(cont)
@@ -571,12 +587,17 @@ internal final class Router {
     internal func isProvided(contractId: String, scope: Scope) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return resolveBinding(contractId: contractId, scope: scope) != nil
-            || jsProvidedContracts.contains(contractId)
+            || isJsProvided(contractId: contractId, scope: scope)
     }
 
     internal func markJsProvided(_ contractId: String) {
         // Called under lock.
-        jsProvidedContracts.insert(contractId)
+        markJsProvided(contractId, scope: .global)
+    }
+
+    internal func markJsProvided(_ contractId: String, scope: Scope) {
+        // Called under lock.
+        jsProvidedContracts.insert(providedKey(contractId: contractId, scope: scope))
     }
 
     // MARK: - Private helpers
@@ -639,14 +660,17 @@ internal final class Router {
 
     private func buildNativeStateSnapshot() -> [[String: Any?]] {
         lock.lock()
-        let liveBindings = bindings.values.filter { $0.isLive }
+        let snapshot = buildNativeStateSnapshotLocked()
         lock.unlock()
+        return snapshot
+    }
+
+    private func buildNativeStateSnapshotLocked() -> [[String: Any?]] {
+        let liveBindings = bindings.values.filter { $0.isLive }
         var snapshot: [[String: Any?]] = []
         for entry in liveBindings {
             for (stateKey, _) in entry.adapter.stateInitials {
-                lock.lock()
                 let bv = stateStore.read(contractId: entry.contractId, scope: entry.scope, stateKey: stateKey, initial: nil)
-                lock.unlock()
                 snapshot.append([
                     "contractId": entry.contractId,
                     "key": stateKey,
@@ -656,6 +680,47 @@ internal final class Router {
             }
         }
         return snapshot
+    }
+
+    private func buildNativeProvidedLocked() -> [[String: Any?]] {
+        bindings.values.filter { $0.isLive }.map { entry in
+            [
+                "contractId": entry.contractId,
+                "scope": Self.scopeToEnvMap(entry.scope)
+            ]
+        }
+    }
+
+    private func isJsProvided(contractId: String, scope: Scope) -> Bool {
+        candidateScopes(scope).contains { candidate in
+            jsProvidedContracts.contains(providedKey(contractId: contractId, scope: candidate))
+        }
+    }
+
+    private func candidateScopes(_ scope: Scope) -> [Scope] {
+        switch scope {
+        case .instance(let feature, _):
+            return [scope, .feature(feature), .global]
+        case .feature:
+            return [scope, .global]
+        case .global:
+            return [.global]
+        }
+    }
+
+    private func readinessDelta(op: String, contractId: String, scope: Scope, epoch: Int64) -> [String: Any?] {
+        [
+            "op": op,
+            "contractId": contractId,
+            "scope": Self.scopeToEnvMap(scope),
+            "epoch": epoch,
+            "member": "",
+            "correlationId": ""
+        ]
+    }
+
+    private func contractId(fromProvidedKey key: String) -> String {
+        String(key.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
     }
 
     /// Wire hash skew check (observe/strict modes).

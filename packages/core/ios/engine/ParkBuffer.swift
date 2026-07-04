@@ -52,6 +52,21 @@ internal final class ParkBuffer {
         }
     }
 
+    /// Resume waiters whose requested scope can be satisfied by the provided scope.
+    /// Mirrors Router resolution order: instance → feature → global.
+    internal func unparkProvided(contractId: String, providedScope: Scope) {
+        let providedScopeKey = providedScope.serialized()
+        let matchingKeys = waiters.keys.filter { key in
+            key.contractId == contractId && candidateScopes(Scope.deserialize(key.scopeKey)).contains { $0.serialized() == providedScopeKey }
+        }
+        for key in matchingKeys {
+            guard let list = waiters.removeValue(forKey: key) else { continue }
+            for cont in list {
+                cont.resume(returning: true)
+            }
+        }
+    }
+
     // MARK: - failAll (per-key)
 
     /// Fail all waiters for (contractId, scope) with `false`.
@@ -83,5 +98,16 @@ internal final class ParkBuffer {
         return entries.map { k, v in
             "parked|\(k.contractId)|\(k.scopeKey)|count=\(v.count)"
         }.joined(separator: "\n")
+    }
+
+    private func candidateScopes(_ scope: Scope) -> [Scope] {
+        switch scope {
+        case .instance(let feature, _):
+            return [scope, .feature(feature), .global]
+        case .feature:
+            return [scope, .global]
+        case .global:
+            return [.global]
+        }
     }
 }
