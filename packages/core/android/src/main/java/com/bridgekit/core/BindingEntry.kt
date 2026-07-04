@@ -27,12 +27,17 @@ internal class BindingEntry(
     private var _isLive = true
     override val isLive: Boolean get() = _isLive
 
+    @Volatile
+    internal var closeReason: CloseReason? = null
+        private set
+
     // ConcurrentHashMap — safe for concurrent put (JS/Nitro thread) vs
     // cancelAllStreamJobs (engine thread). Prevents ConcurrentModificationException.
     private val streamJobs = java.util.concurrent.ConcurrentHashMap<String, Job>()
 
     override fun close(reason: CloseReason) {
         if (!_isLive) return
+        closeReason = reason
         _isLive = false
         bindingScope.cancel("Binding closed: $reason")
     }

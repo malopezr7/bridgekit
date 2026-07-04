@@ -336,7 +336,7 @@ class SeamRoundTripTest {
         }
 
         assertTrue("State write must be delivered to observer", stub.stateWrites.isNotEmpty())
-        val stateWrite = stub.stateWrites[0]
+        val stateWrite = stub.stateWrites.first { it.containsKey("v") }
         assertEquals("active", stateWrite["v"])
     }
 

@@ -155,6 +155,37 @@ class StateTest {
         assertEquals("hello", wrapped?.get("v"))
     }
 
+    @Test
+    fun `Register remove binding emits post-mutation epoch delta`() {
+        val dispatcher = StubJsDispatcher()
+        router.connectDispatcher(emptyMap(), dispatcher.asCallbacks())
+        val defn = stubDefinition("native.delta")
+        val entry = makeEntry(defn, Scope.Feature("catalog"), StateCapturingAdapter("myKey", "init"))
+
+        router.registerBinding(entry)
+        router.removeBinding(entry)
+
+        assertEquals(2, dispatcher.stateWrites.size)
+        val provide = dispatcher.stateWrites[0]
+        assertEquals("provide", provide["op"])
+        assertEquals("native.delta", provide["contractId"])
+        assertEquals(mapOf("kind" to "feature", "feature" to "catalog"), provide["scope"])
+        assertEquals(router.currentEpoch(), provide["epoch"])
+        assertEquals("", provide["member"])
+        assertEquals("", provide["correlationId"])
+        assertTrue("provide delta must include seq", provide["seq"] is Number)
+
+        val unprovide = dispatcher.stateWrites[1]
+        assertEquals("unprovide", unprovide["op"])
+        assertEquals("native.delta", unprovide["contractId"])
+        assertEquals(mapOf("kind" to "feature", "feature" to "catalog"), unprovide["scope"])
+        assertEquals(router.currentEpoch(), unprovide["epoch"])
+        assertEquals("", unprovide["member"])
+        assertEquals("", unprovide["correlationId"])
+        assertTrue("unprovide delta must include seq", unprovide["seq"] is Number)
+        assertTrue((unprovide["seq"] as Number).toLong() > (provide["seq"] as Number).toLong())
+    }
+
     // ---- W2-3: Replacing grace window -----------------------------------------
 
     @OptIn(ExperimentalCoroutinesApi::class)

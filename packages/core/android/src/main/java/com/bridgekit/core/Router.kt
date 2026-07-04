@@ -54,6 +54,8 @@ internal class Router(
      *   true = ENFORCE: return INCOMPATIBLE_CONTRACT on mismatch without dispatching.
      */
     internal val strictHashCheck: Boolean = false,
+    // Coroutine scope for all stream pumps + state observations.
+    private var engineScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) : com.bridgekit.runtime.BridgeKitNativeDelegate {
 
     private val lock = Any()
@@ -68,6 +70,7 @@ internal class Router(
 
     private val epochCounter = AtomicLong(0)
     private val epoch: Long get() = epochCounter.get()
+    private var readinessSeq: Long = 0
 
     // ---- JS dispatcher ----------------------------------------------------------
 
@@ -83,14 +86,14 @@ internal class Router(
 
     private val streamPumpJobs = ConcurrentHashMap<String, Pair<Long, Job>>() // streamId → (epoch, job)
 
-    // coroutine scope for all stream pumps + state observations
-    private var engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
     private var streamHub = StreamHub(engineScope)
 
     // ---- JS-provided contract set (for epoch-swap markings) --------------------
 
     private val jsProvidedContracts = ConcurrentHashMap.newKeySet<String>()
+    private fun providedKey(contractId: String, scope: Scope) = bindingKey(contractId, scope)
+
+    private val finalClosedBindings = ConcurrentHashMap.newKeySet<String>()
 
     // ============================================================================
     // BridgeKitNativeDelegate implementation
@@ -149,9 +152,12 @@ internal class Router(
         epochInfo: Map<String, Any?>,
         callbacks: JsDispatcherCallbacks,
     ): Map<String, Any?> {
-        val newEpoch = epochCounter.incrementAndGet()
+        val newEpoch: Long
+        val snapshot: List<Map<String, Any?>>
+        val nativeProvided: List<Map<String, Any?>>
 
         synchronized(lock) {
+            newEpoch = epochCounter.incrementAndGet()
             // 1. Cancel prior-epoch stream pump jobs + StreamHub
             val priorEpochJobs = streamPumpJobs.values.filter { it.first < newEpoch }
             for ((_, job) in priorEpochJobs) job.cancel("Epoch swap: prior epoch $newEpoch")
@@ -177,23 +183,25 @@ internal class Router(
             // 3. Fail in-flight native→JS calls (park buffer for JS-provided)
             parkBuffer.failAllPending()
 
-            // 4. Mark all JS-provided contracts unprovided + clear state
-            stateStore.markJsContractsUnprovided(jsProvidedContracts.toSet())
+            // 4. Mark all JS-provided contracts unprovided + clear scoped readiness keys
+            stateStore.markJsContractsUnprovided(jsProvidedContracts.map { it.substringBefore("|") }.toSet())
+            jsProvidedContracts.clear()
 
             // 5. Remove stale state observers for previous epoch
             stateStore.clearObserversForEpoch(newEpoch - 1)
 
             // 6. Install new dispatcher
             jsCallbacks = callbacks
-        }
 
-        // Build state snapshot of all native-provided state entries
-        val snapshot = buildNativeStateSnapshot()
+            snapshot = buildNativeStateSnapshotLocked()
+            nativeProvided = buildNativeProvidedLocked()
+        }
 
         diagnostics.trace("connectDispatcher", "engine", epoch = newEpoch)
         return mapOf(
             "epoch" to newEpoch,
             "snapshot" to snapshot,
+            "nativeProvided" to nativeProvided,
         )
     }
 
@@ -305,51 +313,55 @@ internal class Router(
         val scope = parseScopeEnv(env)
         val op = env["op"] as? String
 
-        // D1 epoch guard: reject stale stateWrite (including provide/unprovide ops) before
-        // any side-effect. epochEnv == 0L = pre-connection sentinel, do NOT reject.
-        val epochEnv = (env["epoch"] as? Number)?.toLong() ?: 0L
-        val currentEpochAtWrite = epoch
-        if (epochEnv != 0L && epochEnv < currentEpochAtWrite) {
-            return errEnv("BRIDGE_NOT_READY", "Stale epoch: request epoch=$epochEnv current=$currentEpochAtWrite", contractId)
-        }
+        return synchronized(lock) {
+            // D1 epoch guard: reject stale stateWrite (including provide/unprovide ops)
+            // atomically with the mutation. epochEnv == 0L = pre-connection sentinel,
+            // do NOT reject.
+            val epochEnv = (env["epoch"] as? Number)?.toLong() ?: 0L
+            val currentEpochAtWrite = epoch
+            if (epochEnv != 0L && epochEnv < currentEpochAtWrite) {
+                return@synchronized errEnv("BRIDGE_NOT_READY", "Stale epoch: request epoch=$epochEnv current=$currentEpochAtWrite", contractId)
+            }
 
-        // Branch on op='provide' / op='unprovide' BEFORE touching the state store.
-        // These are explicit readiness announcements sent by JS runtime at provide()/close()
-        // time, reusing the existing BridgeState.write Nitro channel.
-        when (op) {
-            "provide" -> {
-                // A JS contract is now available. Mark it and unpark any native waiters.
-                // Do NOT write state — there is no state payload in a provide envelope.
-                val nativeOwns = resolveBinding(contractId, scope) != null
-                if (!nativeOwns) {
-                    markJsProvided(contractId)
-                    parkBuffer.unpark(contractId, scope)
+            // Branch on op='provide' / op='unprovide' BEFORE touching the state store.
+            // These are explicit readiness announcements sent by JS runtime at provide()/close()
+            // time, reusing the existing BridgeState.write Nitro channel.
+            when (op) {
+                "provide" -> {
+                    // A JS contract is now available. Mark it and unpark any native waiters.
+                    // Do NOT write state — there is no state payload in a provide envelope.
+                    val nativeOwns = resolveBinding(contractId, scope) != null
+                    if (!nativeOwns) {
+                        markJsProvided(contractId, scope)
+                        parkBuffer.unparkProvided(contractId, scope)
+                    }
+                    return@synchronized okEnv(null)
                 }
-                return okEnv(null)
+                "unprovide" -> {
+                    // A JS contract is gone. Remove from the provided set.
+                    // Also let StateStore apply the Replacing→Unprovided grace window for state.
+                    jsProvidedContracts.remove(providedKey(contractId, scope))
+                    stateStore.markJsContractsUnprovided(setOf(contractId))
+                    return@synchronized okEnv(null)
+                }
             }
-            "unprovide" -> {
-                // A JS contract is gone. Remove from the provided set.
-                // Also let StateStore apply the Replacing→Unprovided grace window for state.
-                jsProvidedContracts.remove(contractId)
-                stateStore.markJsContractsUnprovided(setOf(contractId))
-                return okEnv(null)
+
+            // -- existing stateWrite path (op='stateWrite' or absent) -----------------
+            val stateKey = env["member"] as? String
+                ?: return@synchronized errEnv("VALIDATION_FAILED", "Missing member/stateKey")
+            val valueWrapped = env["payload"] as? Map<*, *>
+            @Suppress("UNCHECKED_CAST")
+            val value = (valueWrapped as? Map<String, Any?>)?.get("v")
+
+            // If native does NOT own this binding, JS is the provider.
+            // Record it so isProvided / awaitProvided are truthful, and unpark any waiters.
+            val nativeOwns = resolveBinding(contractId, scope) != null
+            if (!nativeOwns) {
+                markJsProvided(contractId, scope)
+                parkBuffer.unparkProvided(contractId, scope)
             }
+            stateStore.writeFromJs(contractId, scope, stateKey, value, nativeOwns)
         }
-
-        // -- existing stateWrite path (op='stateWrite' or absent) -----------------
-        val stateKey = env["member"] as? String ?: return errEnv("VALIDATION_FAILED", "Missing member/stateKey")
-        val valueWrapped = env["payload"] as? Map<*, *>
-        @Suppress("UNCHECKED_CAST")
-        val value = (valueWrapped as? Map<String, Any?>)?.get("v")
-
-        // If native does NOT own this binding, JS is the provider.
-        // Record it so isProvided / awaitProvided are truthful, and unpark any waiters.
-        val nativeOwns = resolveBinding(contractId, scope) != null
-        if (!nativeOwns) {
-            markJsProvided(contractId)
-            parkBuffer.unpark(contractId, scope)
-        }
-        return stateStore.writeFromJs(contractId, scope, stateKey, value, nativeOwns)
     }
 
     // ============================================================================
@@ -362,15 +374,24 @@ internal class Router(
      * and replaced.
      */
     internal fun registerBinding(entry: BindingEntry) {
-        val key = bindingKey(entry.contractId, entry.scope)
-        val previous = bindings.put(key, entry)
-        if (previous != null && previous.isLive) {
-            previous.close(CloseReason.Replacing)
-            // Unpark waiters after a brief grace (handled by consumers via retry after replace)
-        }
-        // Seed state store with initial values
-        for ((stateKey, initial) in entry.adapter.stateInitials) {
-            stateStore.seedNativeState(entry.contractId, entry.scope, stateKey, initial)
+        val delta: Map<String, Any?>
+        val callbacks: JsDispatcherCallbacks?
+        synchronized(lock) {
+            val key = bindingKey(entry.contractId, entry.scope)
+            finalClosedBindings.remove(key)
+            val previous = bindings.put(key, entry)
+            if (previous != null && previous.isLive) {
+                previous.close(CloseReason.Replacing)
+                // Unpark waiters after a brief grace (handled by consumers via retry after replace)
+            }
+            // Seed state store with initial values
+            for ((stateKey, initial) in entry.adapter.stateInitials) {
+                stateStore.seedNativeState(entry.contractId, entry.scope, stateKey, initial)
+            }
+            // Unpark any waiting consumers whose fallback chain can resolve this binding.
+            parkBuffer.unparkProvided(entry.contractId, entry.scope)
+            callbacks = jsCallbacks
+            delta = readinessDeltaLocked("provide", entry.contractId, entry.scope, epoch)
         }
         // Subscribe to each provider state flow for change propagation
         for ((stateKey, stateFlow) in entry.adapter.stateFlows()) {
@@ -381,8 +402,7 @@ internal class Router(
             }
             entry.bindingScope.coroutineContext[Job]?.invokeOnCompletion { collectJob.cancel() }
         }
-        // Unpark any waiting consumers
-        parkBuffer.unpark(entry.contractId, entry.scope)
+        callbacks?.onStateWrite(delta)
         diagnostics.trace("provide", entry.contractId, scope = entry.scope.serialize(), epoch = epoch)
     }
 
@@ -403,10 +423,20 @@ internal class Router(
      * Remove a binding. Called by Binding.close().
      */
     internal fun removeBinding(entry: BindingEntry) {
-        val key = bindingKey(entry.contractId, entry.scope)
-        bindings.remove(key, entry)
-        stateStore.markUnprovided(entry.contractId, entry.scope)
-        entry.cancelAllStreamJobs()
+        val delta: Map<String, Any?>?
+        val callbacks: JsDispatcherCallbacks?
+        synchronized(lock) {
+            val key = bindingKey(entry.contractId, entry.scope)
+            val removed = bindings.remove(key, entry)
+            stateStore.markUnprovided(entry.contractId, entry.scope)
+            entry.cancelAllStreamJobs()
+            if (removed && entry.closeReason == CloseReason.Final) {
+                finalClosedBindings.add(key)
+            }
+            callbacks = jsCallbacks
+            delta = if (removed) readinessDeltaLocked("unprovide", entry.contractId, entry.scope, epoch) else null
+        }
+        if (delta != null) callbacks?.onStateWrite(delta)
     }
 
     /**
@@ -414,9 +444,12 @@ internal class Router(
      * Returns true if provided (native or JS), false if timed out.
      */
     internal suspend fun awaitProvided(contractId: String, scope: Scope, timeoutMs: Long): Boolean {
-        if (resolveBinding(contractId, scope) != null) return true
-        if (jsProvidedContracts.contains(contractId)) return true
-        val deferred = parkBuffer.park(contractId, scope) ?: return false
+        val deferred = synchronized(lock) {
+            if (resolveBinding(contractId, scope) != null) return true
+            if (isJsProvided(contractId, scope)) return true
+            if (isFinalClosed(contractId, scope)) return false
+            parkBuffer.park(contractId, scope)
+        } ?: return false
         return try {
             withTimeout(timeoutMs) { deferred.await() }
         } catch (_: TimeoutCancellationException) {
@@ -430,7 +463,7 @@ internal class Router(
      * (tracked via markJsProvided when JS calls provide() on the JS registry).
      */
     internal fun isProvided(contractId: String, scope: Scope): Boolean =
-        resolveBinding(contractId, scope) != null || jsProvidedContracts.contains(contractId)
+        synchronized(lock) { resolveBinding(contractId, scope) != null || isJsProvided(contractId, scope) }
 
     /**
      * Return the current epoch.
@@ -442,7 +475,11 @@ internal class Router(
      * Registered implicitly when a JS-directed invoke/stream/stateWrite arrives.
      */
     internal fun markJsProvided(contractId: String) {
-        jsProvidedContracts.add(contractId)
+        markJsProvided(contractId, Scope.Global)
+    }
+
+    internal fun markJsProvided(contractId: String, scope: Scope) {
+        jsProvidedContracts.add(providedKey(contractId, scope))
     }
 
     internal fun getJsCallbacks(): JsDispatcherCallbacks? = jsCallbacks
@@ -469,6 +506,9 @@ internal class Router(
         var binding = resolveBinding(contractId, scope)
 
         if (binding == null) {
+            if (isFinalClosed(contractId, scope)) {
+                return errEnv("CONTRACT_NOT_PROVIDED", "Contract '$contractId' not provided in scope ${scope.serialize()}", contractId, member, scope)
+            }
             val provided = awaitProvided(contractId, scope, readinessTimeoutMs)
             if (!provided) {
                 return errEnv(
@@ -501,6 +541,12 @@ internal class Router(
     }
 
     private fun buildNativeStateSnapshot(): List<Map<String, Any?>> {
+        synchronized(lock) {
+            return buildNativeStateSnapshotLocked()
+        }
+    }
+
+    private fun buildNativeStateSnapshotLocked(): List<Map<String, Any?>> {
         val snapshot = mutableListOf<Map<String, Any?>>()
         for ((_, entry) in bindings) {
             if (!entry.isLive) continue
@@ -517,6 +563,38 @@ internal class Router(
         }
         return snapshot
     }
+
+    private fun buildNativeProvidedLocked(): List<Map<String, Any?>> = bindings.values
+        .filter { it.isLive }
+        .map { entry ->
+            mapOf(
+                "contractId" to entry.contractId,
+                "scope" to scopeToEnvMap(entry.scope),
+            )
+        }
+
+    private fun isJsProvided(contractId: String, scope: Scope): Boolean = candidateScopes(scope)
+        .any { candidate -> jsProvidedContracts.contains(providedKey(contractId, candidate)) }
+
+    private fun isFinalClosed(contractId: String, scope: Scope): Boolean = synchronized(lock) {
+        candidateScopes(scope).any { candidate -> finalClosedBindings.contains(bindingKey(contractId, candidate)) }
+    }
+
+    private fun candidateScopes(scope: Scope): List<Scope> = when (scope) {
+        is Scope.Instance -> listOf(scope, Scope.Feature(scope.feature), Scope.Global)
+        is Scope.Feature -> listOf(scope, Scope.Global)
+        is Scope.Global -> listOf(Scope.Global)
+    }
+
+    private fun readinessDeltaLocked(op: String, contractId: String, scope: Scope, epoch: Long): Map<String, Any?> = mapOf(
+        "op" to op,
+        "contractId" to contractId,
+        "scope" to scopeToEnvMap(scope),
+        "epoch" to epoch,
+        "seq" to ++readinessSeq,
+        "member" to "",
+        "correlationId" to "",
+    )
 
     internal fun dump(): String = buildString {
         appendLine("epoch=$epoch bindings=${bindings.size} streamPumps=${streamPumpJobs.size}")

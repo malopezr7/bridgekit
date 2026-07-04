@@ -61,6 +61,39 @@ class EpochTest {
     }
 
     @Test
+    fun `Epoch swap clears JS-provided contracts`() {
+        router.connectDispatcher(emptyMap(), fakeCallbacks())
+        router.stateWrite(mapOf(
+            "op" to "provide",
+            "contractId" to "epoch.contract",
+            "scope" to mapOf("kind" to "global"),
+            "epoch" to router.currentEpoch(),
+        ))
+
+        assertTrue(router.isProvided("epoch.contract", Scope.Global))
+
+        router.connectDispatcher(emptyMap(), fakeCallbacks())
+
+        assertFalse(router.isProvided("epoch.contract", Scope.Global))
+    }
+
+    @Test
+    fun `connectDispatcher returns nativeProvided`() {
+        val defn = stubDefinitionWithState("native.contract", "myKey", initial = "hello")
+        val entry = makeEntry(defn, Scope.Feature("catalog"), StateCapturingAdapter("myKey", "hello"))
+        router.registerBinding(entry)
+
+        val result = router.connectDispatcher(emptyMap(), fakeCallbacks())
+
+        @Suppress("UNCHECKED_CAST")
+        val nativeProvided = result["nativeProvided"] as? List<Map<String, Any?>>
+        assertEquals(
+            listOf(mapOf("contractId" to "native.contract", "scope" to mapOf("kind" to "feature", "feature" to "catalog"))),
+            nativeProvided,
+        )
+    }
+
+    @Test
     fun `epoch swap transitions JS-provided state to Replacing grace window (W2-3)`() {
         val stateStore = StateStore()
         val router = Router(stateStore, ParkBuffer(), readinessTimeoutMs = 100, callTimeoutMs = 500)
