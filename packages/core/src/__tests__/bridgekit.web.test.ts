@@ -10,6 +10,7 @@ import { diagnostics } from '../runtime/diagnostics';
 import { Dispatcher } from '../runtime/dispatcher';
 import { LoopbackTransport } from '../runtime/loopbackTransport';
 import { GLOBAL_SCOPE, Registry, serializeScope, streamSource } from '../runtime/registry';
+import type { BridgeTransport, ConnectResult, JsDispatcher } from '../runtime/transport';
 import { createTestBridge, mockBridge } from '../testing/index';
 
 // ---- Test contracts --------------------------------------------------------
@@ -925,7 +926,63 @@ describe('QW-3: timeout timer and AbortSignal listener cleanup on call completio
 // ---- W2-1: Teardown on reconnect --------------------------------------------
 
 describe('W2-1: providers and mirrors cleaned up on reconnect', () => {
-  test('all registry bindings from prior epoch are closed after reconnect', () => {
+  class RecordingReconnectTransport implements BridgeTransport {
+    epoch = 0;
+    writes: Array<{ op: string; epoch: number; contractId: string }> = [];
+
+    connect(_dispatcher: JsDispatcher): ConnectResult {
+      this.epoch += 1;
+      return { epoch: this.epoch, snapshot: [] };
+    }
+
+    invoke = jest.fn<BridgeTransport['invoke']>().mockResolvedValue({ ok: true, value: undefined });
+    invokeSync = jest.fn<BridgeTransport['invokeSync']>().mockReturnValue({
+      ok: true,
+      value: undefined,
+    });
+    openStream = jest.fn<BridgeTransport['openStream']>().mockReturnValue('sid');
+    closeStream = jest.fn<BridgeTransport['closeStream']>();
+    emitFromJs = jest.fn<BridgeTransport['emitFromJs']>();
+    endFromJs = jest.fn<BridgeTransport['endFromJs']>();
+    stateRead = jest.fn<BridgeTransport['stateRead']>().mockReturnValue({
+      ok: true,
+      value: undefined,
+    });
+    stateObserve = jest.fn<BridgeTransport['stateObserve']>().mockReturnValue('obs');
+    stateUnobserve = jest.fn<BridgeTransport['stateUnobserve']>();
+    stateWrite(env: Parameters<BridgeTransport['stateWrite']>[0]) {
+      this.writes.push({ op: env.op, epoch: env.epoch, contractId: env.contractId });
+      return { ok: true } as const;
+    }
+    pushProviderState(contractId: string, _scope: Parameters<BridgeTransport['pushProviderState']>[1], key: string, _value: unknown) {
+      this.writes.push({ op: `state:${key}`, epoch: this.epoch, contractId });
+    }
+    announceProvided(contractId: string) {
+      this.writes.push({ op: 'provide', epoch: this.epoch, contractId });
+    }
+    announceUnprovided(contractId: string) {
+      this.writes.push({ op: 'unprovide', epoch: this.epoch, contractId });
+    }
+  }
+
+  test('imperative provider re-announces after reconnect', () => {
+    const transport = new RecordingReconnectTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    bk.provide(TestContract, { ping: async () => 'pong' });
+    transport.writes = [];
+
+    bk.connect();
+
+    expect(bk.isProvided(TestContract)).toBe(true);
+    expect(transport.writes).toContainEqual({
+      op: 'provide',
+      epoch: 2,
+      contractId: TestContract.descriptor.id,
+    });
+  });
+
+  test('all registry bindings from prior epoch are replayed after reconnect', () => {
     const transport = new LoopbackTransport();
     const bk = new BridgeKitJs(transport);
     bk.connect();
@@ -946,10 +1003,81 @@ describe('W2-1: providers and mirrors cleaned up on reconnect', () => {
     // Reconnect (epoch N+1)
     bk.connect();
 
-    // All prior bindings must be closed
+    // Old handles are replaced, but active provider records are replayed into the new epoch.
     expect(b1.isLive).toBe(false);
     expect(b2.isLive).toBe(false);
     expect(b3.isLive).toBe(false);
+    expect(bk.isProvided(TestContract)).toBe(true);
+    expect(bk.isProvided(ScopeContract)).toBe(true);
+    expect(bk.isProvided(ScopeContract, { scope: { kind: 'feature', feature: 'F' } })).toBe(true);
+  });
+
+  test('State hydration before attach', () => {
+    class SnapshotTransport extends LoopbackTransport {
+      private _connectCount = 0;
+
+      connect(dispatcher: JsDispatcher): ConnectResult {
+        const result = super.connect(dispatcher);
+        this._connectCount += 1;
+        return {
+          epoch: result.epoch,
+          snapshot:
+            this._connectCount === 2
+              ? [
+                  {
+                    contractId: TestContract.descriptor.id,
+                    key: 'count',
+                    scope: GLOBAL_SCOPE,
+                    value: 42,
+                  },
+                ]
+              : [],
+        };
+      }
+    }
+
+    const transport = new SnapshotTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    const mirror = bk.state(TestContract, 'count');
+    const observations: Array<{ value: unknown; status: string }> = [];
+    const unsubscribe = mirror.subscribe((value) => observations.push(value));
+
+    observations.length = 0;
+    bk.connect();
+
+    expect(observations[0]).toEqual({ value: 42, status: 'provided' });
+    expect(observations).not.toContainEqual({ value: 0, status: 'stale' });
+    unsubscribe();
+  });
+
+  test('Epoch before state hydration', () => {
+    class SnapshotTransport extends RecordingReconnectTransport {
+      connect(_dispatcher: JsDispatcher): ConnectResult {
+        this.epoch = 5;
+        return {
+          epoch: this.epoch,
+          snapshot: [
+            {
+              contractId: TestContract.descriptor.id,
+              key: 'count',
+              scope: GLOBAL_SCOPE,
+              value: 7,
+            },
+          ],
+        };
+      }
+    }
+
+    const transport = new SnapshotTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    bk.provide(TestContract, { ping: async () => 'pong' });
+    transport.writes = [];
+
+    bk.connect();
+
+    expect(transport.writes.every((write) => write.epoch === 5)).toBe(true);
   });
 
   test('mirrors detach from prior epoch: old obs is cancelled on reconnect', () => {
@@ -983,7 +1111,7 @@ describe('W2-1: providers and mirrors cleaned up on reconnect', () => {
     expect(received).toContain(99);
   });
 
-  test('new epoch starts with zero inherited providers', () => {
+  test('new epoch keeps replayed providers available', () => {
     const transport = new LoopbackTransport();
     const bk = new BridgeKitJs(transport);
     bk.connect();
@@ -993,9 +1121,9 @@ describe('W2-1: providers and mirrors cleaned up on reconnect', () => {
     // Reconnect
     bk.connect();
 
-    // Registry should have no live bindings after reconnect
+    // Registry should expose replayed live bindings after reconnect
     const resolved = bk.registry.resolve(TestContract.descriptor.id, GLOBAL_SCOPE);
-    expect(resolved).toBeUndefined();
+    expect(resolved?.binding.isLive).toBe(true);
   });
 });
 

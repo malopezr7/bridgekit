@@ -95,7 +95,7 @@ export class StateMirror<T> {
   }
 
   /** Called on epoch change — detach and mark stale (value kept accessible). */
-  detachTransport(): void {
+  detachTransport(opts?: { notify?: boolean }): void {
     if (this._obsId !== null && this._transport) {
       try {
         this._transport.stateUnobserve(this._obsId);
@@ -113,7 +113,9 @@ export class StateMirror<T> {
       this._status = 'unprovided';
     }
     this._updateSnapshot();
-    this._notify();
+    if (opts?.notify !== false) {
+      this._notify();
+    }
   }
 
   private _attachObserver(): void {
@@ -268,9 +270,9 @@ export class MirrorRegistry {
     }
   }
 
-  detachAll(): void {
+  detachAll(opts?: { notify?: boolean }): void {
     for (const mirror of this._mirrors.values()) {
-      mirror.detachTransport();
+      mirror.detachTransport(opts);
     }
   }
 

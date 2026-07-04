@@ -129,6 +129,12 @@ export interface BridgeCallOpts {
   signal?: AbortSignal;
 }
 
+interface ProviderRecord<TShape = unknown> {
+  contract: BridgeContract<TShape>;
+  impl: Partial<TShape>;
+  scope: BridgeScope;
+}
+
 // ---- BridgeKitJs ----------------------------------------------------------
 
 export class BridgeKitJs {
@@ -136,6 +142,7 @@ export class BridgeKitJs {
   private readonly _mirrors: MirrorRegistry;
   private readonly _dispatcher: Dispatcher;
   private readonly _contracts = new Map<string, BridgeContract<unknown>>();
+  private readonly _providerRecords = new Map<string, ProviderRecord>();
   private _epoch = 0;
   private _connected = false;
 
@@ -153,11 +160,13 @@ export class BridgeKitJs {
    * producers, mirrors, or observers leak across epoch boundaries (W2-1).
    */
   connect(): void {
+    const replayRecords = Array.from(this._providerRecords.values());
+
     if (this._connected) {
       // Reconnect: clean up prior-epoch resources before re-wiring.
       this._dispatcher.closeAllProducers();
-      this._mirrors.detachAll();
-      this.registry.closeAll('final');
+      this._mirrors.detachAll({ notify: false });
+      this.registry.closeAll('replacing');
     }
 
     this._dispatcher.setTransport(this._transport);
@@ -174,6 +183,10 @@ export class BridgeKitJs {
     }
 
     this._mirrors.attachAll(this._transport);
+
+    for (const record of replayRecords) {
+      this.provide(record.contract, record.impl, { scope: record.scope });
+    }
   }
 
   /**
@@ -186,6 +199,12 @@ export class BridgeKitJs {
   ): Binding {
     this._contracts.set(contract.descriptor.id, contract as BridgeContract<unknown>);
     const scope = opts?.scope ?? _ambientScope;
+    const recordKey = `${contract.descriptor.id}|${JSON.stringify(scope)}`;
+    this._providerRecords.set(recordKey, {
+      contract: contract as BridgeContract<unknown>,
+      impl: impl as Partial<unknown>,
+      scope,
+    });
     const binding = this.registry.provide(contract, impl, { scope });
 
     const transport = this._transport;
@@ -217,6 +236,16 @@ export class BridgeKitJs {
         const wasLive = binding.isLive;
         originalClose(reason);
         if (!wasLive) return; // stale close: no-op on transport
+        if (reason !== 'replacing') {
+          this._providerRecords.delete(recordKey);
+        }
+        if (reason === 'replacing') {
+          // Reconnect performs an epoch swap: native clears JS-provided readiness for
+          // the old epoch and this provider is replayed after Router install. Sending
+          // an old-epoch unprovide here would create a transient contract-wide state
+          // divergence until S5/S7 scope-key the native unprovide/readiness paths.
+          return;
+        }
         for (const key of Object.keys(contract.descriptor.state)) {
           transport.pushProviderState(contract.descriptor.id, scope, key, undefined);
         }
