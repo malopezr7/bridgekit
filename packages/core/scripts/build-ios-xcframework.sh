@@ -14,7 +14,16 @@ export LC_ALL=en_US.UTF-8
 ruby "$CORE_ROOT/scripts/create-ios-xcframework-project.rb"
 
 cd "$PROJECT_DIR"
-/opt/homebrew/bin/pod install
+# Resolve CocoaPods from PATH (CI runners install it outside /opt/homebrew).
+POD_BIN="$(command -v pod || true)"
+if [[ -z "$POD_BIN" && -x /opt/homebrew/bin/pod ]]; then
+  POD_BIN=/opt/homebrew/bin/pod
+fi
+if [[ -z "$POD_BIN" ]]; then
+  echo "error: CocoaPods (pod) not found in PATH" >&2
+  exit 1
+fi
+"$POD_BIN" install
 
 rm -rf "$ARCHIVES_DIR" "$XCFRAMEWORK" "$DERIVED_DATA"
 mkdir -p "$ARCHIVES_DIR"
