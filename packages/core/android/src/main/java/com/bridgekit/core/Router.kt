@@ -54,6 +54,8 @@ internal class Router(
      *   true = ENFORCE: return INCOMPATIBLE_CONTRACT on mismatch without dispatching.
      */
     internal val strictHashCheck: Boolean = false,
+    // Coroutine scope for all stream pumps + state observations.
+    private var engineScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) : com.bridgekit.runtime.BridgeKitNativeDelegate {
 
     private val lock = Any()
@@ -68,6 +70,7 @@ internal class Router(
 
     private val epochCounter = AtomicLong(0)
     private val epoch: Long get() = epochCounter.get()
+    private var readinessSeq: Long = 0
 
     // ---- JS dispatcher ----------------------------------------------------------
 
@@ -83,15 +86,14 @@ internal class Router(
 
     private val streamPumpJobs = ConcurrentHashMap<String, Pair<Long, Job>>() // streamId → (epoch, job)
 
-    // coroutine scope for all stream pumps + state observations
-    private var engineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
     private var streamHub = StreamHub(engineScope)
 
     // ---- JS-provided contract set (for epoch-swap markings) --------------------
 
     private val jsProvidedContracts = ConcurrentHashMap.newKeySet<String>()
     private fun providedKey(contractId: String, scope: Scope) = bindingKey(contractId, scope)
+
+    private val finalClosedBindings = ConcurrentHashMap.newKeySet<String>()
 
     // ============================================================================
     // BridgeKitNativeDelegate implementation
@@ -150,12 +152,12 @@ internal class Router(
         epochInfo: Map<String, Any?>,
         callbacks: JsDispatcherCallbacks,
     ): Map<String, Any?> {
-        val newEpoch = epochCounter.incrementAndGet()
-
+        val newEpoch: Long
         val snapshot: List<Map<String, Any?>>
         val nativeProvided: List<Map<String, Any?>>
 
         synchronized(lock) {
+            newEpoch = epochCounter.incrementAndGet()
             // 1. Cancel prior-epoch stream pump jobs + StreamHub
             val priorEpochJobs = streamPumpJobs.values.filter { it.first < newEpoch }
             for ((_, job) in priorEpochJobs) job.cancel("Epoch swap: prior epoch $newEpoch")
@@ -354,14 +356,14 @@ internal class Router(
 
         // If native does NOT own this binding, JS is the provider.
         // Record it so isProvided / awaitProvided are truthful, and unpark any waiters.
-        val nativeOwns = synchronized(lock) { resolveBinding(contractId, scope) != null }
-        if (!nativeOwns) {
-            synchronized(lock) {
+        return synchronized(lock) {
+            val nativeOwns = resolveBinding(contractId, scope) != null
+            if (!nativeOwns) {
                 markJsProvided(contractId, scope)
                 parkBuffer.unparkProvided(contractId, scope)
             }
+            stateStore.writeFromJs(contractId, scope, stateKey, value, nativeOwns)
         }
-        return stateStore.writeFromJs(contractId, scope, stateKey, value, nativeOwns)
     }
 
     // ============================================================================
@@ -378,6 +380,7 @@ internal class Router(
         val callbacks: JsDispatcherCallbacks?
         synchronized(lock) {
             val key = bindingKey(entry.contractId, entry.scope)
+            finalClosedBindings.remove(key)
             val previous = bindings.put(key, entry)
             if (previous != null && previous.isLive) {
                 previous.close(CloseReason.Replacing)
@@ -390,7 +393,7 @@ internal class Router(
             // Unpark any waiting consumers whose fallback chain can resolve this binding.
             parkBuffer.unparkProvided(entry.contractId, entry.scope)
             callbacks = jsCallbacks
-            delta = readinessDelta("provide", entry.contractId, entry.scope, epoch)
+            delta = readinessDeltaLocked("provide", entry.contractId, entry.scope, epoch)
         }
         // Subscribe to each provider state flow for change propagation
         for ((stateKey, stateFlow) in entry.adapter.stateFlows()) {
@@ -429,8 +432,11 @@ internal class Router(
             val removed = bindings.remove(key, entry)
             stateStore.markUnprovided(entry.contractId, entry.scope)
             entry.cancelAllStreamJobs()
+            if (entry.closeReason == CloseReason.Final) {
+                finalClosedBindings.add(key)
+            }
             callbacks = jsCallbacks
-            delta = if (removed) readinessDelta("unprovide", entry.contractId, entry.scope, epoch) else null
+            delta = if (removed) readinessDeltaLocked("unprovide", entry.contractId, entry.scope, epoch) else null
         }
         if (delta != null) callbacks?.onStateWrite(delta)
     }
@@ -443,6 +449,7 @@ internal class Router(
         val deferred = synchronized(lock) {
             if (resolveBinding(contractId, scope) != null) return true
             if (isJsProvided(contractId, scope)) return true
+            if (isFinalClosed(contractId, scope)) return false
             parkBuffer.park(contractId, scope)
         } ?: return false
         return try {
@@ -501,6 +508,9 @@ internal class Router(
         var binding = resolveBinding(contractId, scope)
 
         if (binding == null) {
+            if (isFinalClosed(contractId, scope)) {
+                return errEnv("CONTRACT_NOT_PROVIDED", "Contract '$contractId' not provided in scope ${scope.serialize()}", contractId, member, scope)
+            }
             val provided = awaitProvided(contractId, scope, readinessTimeoutMs)
             if (!provided) {
                 return errEnv(
@@ -568,17 +578,22 @@ internal class Router(
     private fun isJsProvided(contractId: String, scope: Scope): Boolean = candidateScopes(scope)
         .any { candidate -> jsProvidedContracts.contains(providedKey(contractId, candidate)) }
 
+    private fun isFinalClosed(contractId: String, scope: Scope): Boolean = synchronized(lock) {
+        candidateScopes(scope).any { candidate -> finalClosedBindings.contains(bindingKey(contractId, candidate)) }
+    }
+
     private fun candidateScopes(scope: Scope): List<Scope> = when (scope) {
         is Scope.Instance -> listOf(scope, Scope.Feature(scope.feature), Scope.Global)
         is Scope.Feature -> listOf(scope, Scope.Global)
         is Scope.Global -> listOf(Scope.Global)
     }
 
-    private fun readinessDelta(op: String, contractId: String, scope: Scope, epoch: Long): Map<String, Any?> = mapOf(
+    private fun readinessDeltaLocked(op: String, contractId: String, scope: Scope, epoch: Long): Map<String, Any?> = mapOf(
         "op" to op,
         "contractId" to contractId,
         "scope" to scopeToEnvMap(scope),
         "epoch" to epoch,
+        "seq" to ++readinessSeq,
         "member" to "",
         "correlationId" to "",
     )

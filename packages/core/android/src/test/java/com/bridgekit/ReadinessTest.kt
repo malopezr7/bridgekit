@@ -10,6 +10,7 @@ import com.bridgekit.runtime.BridgeContractDefinition
 import com.bridgekit.runtime.InboundContractAdapter
 import com.bridgekit.runtime.OutboundCaller
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
@@ -17,6 +18,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -63,6 +65,9 @@ class ReadinessTest {
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun `Android check-and-park is atomic`() = runTest {
+        // The lock-held check+park in Router.awaitProvided is review-verified in Router.kt.
+        // This regression pins the observable fallback-wake path: an instance waiter must
+        // be woken by a later global provider instead of timing out.
         val waiter = async {
             router.awaitProvided(
                 contractId = "atomic.contract",
@@ -79,21 +84,78 @@ class ReadinessTest {
     }
 
     @Test
-    fun `Native final fails immediately`() = runTest {
+    fun `Native readiness deltas carry strictly increasing seq`() {
+        val first = bindingEntry("seq.contract", Scope.Global)
+        router.registerBinding(first)
+        first.close(CloseReason.Final)
+        router.removeBinding(first)
+
+        val second = bindingEntry("seq.contract", Scope.Feature("catalog"))
+        router.registerBinding(second)
+
+        val deltas = jsDispatcher.stateWrites.toList()
+        assertEquals(3, deltas.size)
+        assertEquals(listOf("provide", "unprovide", "provide"), deltas.map { it["op"] })
+        val seqs = deltas.map { delta ->
+            val seq = delta["seq"] as? Number
+            assertTrue("readiness delta must contain seq", seq != null)
+            seq!!.toLong()
+        }
+        assertTrue(seqs.zipWithNext().all { (left, right) -> right > left })
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `Native final fails immediately without grace parking`() = runTest {
+        val controlledRouter = Router(
+            StateStore(),
+            ParkBuffer(),
+            readinessTimeoutMs = 200,
+            callTimeoutMs = 500,
+            engineScope = this,
+        )
+        controlledRouter.connectDispatcher(emptyMap(), jsDispatcher.asCallbacks())
         val entry = bindingEntry("final.contract", Scope.Global)
-        router.registerBinding(entry)
+        controlledRouter.registerBinding(entry)
 
         entry.close(CloseReason.Final)
-        router.removeBinding(entry)
+        controlledRouter.removeBinding(entry)
 
-        val result = router.invokeSync(mapOf(
+        val completed = CompletableDeferred<Map<String, Any?>>()
+        controlledRouter.invoke(mapOf(
             "contractId" to "final.contract",
             "member" to "ping",
             "scope" to scopeEnv(Scope.Global),
-        ))
+        )) { result -> completed.complete(result) }
+        runCurrent()
 
+        assertTrue("Final close must fail without parking for the grace window", completed.isCompleted)
+        val result = completed.await()
         assertEquals(false, result["ok"])
         assertEquals("CONTRACT_NOT_PROVIDED", result["code"])
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `Native final close does not wake parked waiters toward a dead provider`() = runTest {
+        val waiter = async {
+            router.awaitProvided(
+                contractId = "dead.contract",
+                scope = Scope.Global,
+                timeoutMs = 200,
+            )
+        }
+        runCurrent()
+
+        val deadEntry = bindingEntry("dead.contract", Scope.Global)
+        deadEntry.close(CloseReason.Final)
+        router.removeBinding(deadEntry)
+        runCurrent()
+
+        assertFalse("Final close must not wake parked waiters toward a dead provider", waiter.isCompleted)
+        advanceTimeBy(200)
+        runCurrent()
+        assertFalse(waiter.await())
     }
 
     private fun provideEnv(contractId: String, scope: Scope): Map<String, Any?> = mapOf(

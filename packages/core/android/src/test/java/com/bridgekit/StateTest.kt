@@ -166,28 +166,24 @@ class StateTest {
         router.removeBinding(entry)
 
         assertEquals(2, dispatcher.stateWrites.size)
-        assertEquals(
-            mapOf(
-                "op" to "provide",
-                "contractId" to "native.delta",
-                "scope" to mapOf("kind" to "feature", "feature" to "catalog"),
-                "epoch" to router.currentEpoch(),
-                "member" to "",
-                "correlationId" to "",
-            ),
-            dispatcher.stateWrites[0],
-        )
-        assertEquals(
-            mapOf(
-                "op" to "unprovide",
-                "contractId" to "native.delta",
-                "scope" to mapOf("kind" to "feature", "feature" to "catalog"),
-                "epoch" to router.currentEpoch(),
-                "member" to "",
-                "correlationId" to "",
-            ),
-            dispatcher.stateWrites[1],
-        )
+        val provide = dispatcher.stateWrites[0]
+        assertEquals("provide", provide["op"])
+        assertEquals("native.delta", provide["contractId"])
+        assertEquals(mapOf("kind" to "feature", "feature" to "catalog"), provide["scope"])
+        assertEquals(router.currentEpoch(), provide["epoch"])
+        assertEquals("", provide["member"])
+        assertEquals("", provide["correlationId"])
+        assertTrue("provide delta must include seq", provide["seq"] is Number)
+
+        val unprovide = dispatcher.stateWrites[1]
+        assertEquals("unprovide", unprovide["op"])
+        assertEquals("native.delta", unprovide["contractId"])
+        assertEquals(mapOf("kind" to "feature", "feature" to "catalog"), unprovide["scope"])
+        assertEquals(router.currentEpoch(), unprovide["epoch"])
+        assertEquals("", unprovide["member"])
+        assertEquals("", unprovide["correlationId"])
+        assertTrue("unprovide delta must include seq", unprovide["seq"] is Number)
+        assertTrue((unprovide["seq"] as Number).toLong() > (provide["seq"] as Number).toLong())
     }
 
     // ---- W2-3: Replacing grace window -----------------------------------------

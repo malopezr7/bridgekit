@@ -72,6 +72,7 @@ internal final class Router {
 
     // Incremented only inside connectDispatcher (under lock).
     private var epochCounter: Int64 = 0
+    private var readinessSeq: Int64 = 0
     internal func currentEpoch() -> Int64 {
         lock.lock(); defer { lock.unlock() }
         return epochCounter
@@ -105,6 +106,7 @@ internal final class Router {
     // MARK: JS-provided contract set (guarded by lock)
 
     private var jsProvidedContracts: Set<String> = []
+    private var finalClosedBindings: Set<String> = []
 
     private func providedKey(contractId: String, scope: Scope) -> String {
         bindingKey(contractId: contractId, scope: scope)
@@ -487,6 +489,7 @@ internal final class Router {
     internal func registerBinding(_ entry: BindingEntry) {
         lock.lock()
         let key = bindingKey(contractId: entry.contractId, scope: entry.scope)
+        finalClosedBindings.remove(key)
         let previous = bindings[key]
         bindings[key] = entry
 
@@ -549,6 +552,9 @@ internal final class Router {
         if removed { bindings.removeValue(forKey: key) }
         let goneSnapshots = stateStore.markUnprovided(contractId: entry.contractId, scope: entry.scope)
         entry.cancelAllStreamJobs()
+        if entry.closeReason == .final_ {
+            finalClosedBindings.insert(key)
+        }
         let callbacks = jsCallbacks
         let delta = removed ? readinessDelta(op: "unprovide", contractId: entry.contractId, scope: entry.scope, epoch: epochCounter) : nil
         lock.unlock()
@@ -562,6 +568,7 @@ internal final class Router {
         lock.lock()
         if resolveBinding(contractId: contractId, scope: scope) != nil { lock.unlock(); return true }
         if isJsProvided(contractId: contractId, scope: scope) { lock.unlock(); return true }
+        if isFinalClosed(contractId: contractId, scope: scope) { lock.unlock(); return false }
 
         return await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
             let once = OnceContinuationResult<Bool>(cont)
@@ -616,6 +623,9 @@ internal final class Router {
         lock.unlock()
 
         if binding == nil {
+            if isFinalClosed(contractId: contractId, scope: scope) {
+                return Self.errEnv("CONTRACT_NOT_PROVIDED", "Contract '\(contractId)' not provided", contractId, member, scope)
+            }
             let provided = await awaitProvided(contractId: contractId, scope: scope, timeoutMs: readinessTimeoutMs)
             if !provided {
                 return Self.errEnv(
@@ -697,6 +707,13 @@ internal final class Router {
         }
     }
 
+    private func isFinalClosed(contractId: String, scope: Scope) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        candidateScopes(scope).contains { candidate in
+            finalClosedBindings.contains(bindingKey(contractId: contractId, scope: candidate))
+        }
+    }
+
     private func candidateScopes(_ scope: Scope) -> [Scope] {
         switch scope {
         case .instance(let feature, _):
@@ -709,11 +726,13 @@ internal final class Router {
     }
 
     private func readinessDelta(op: String, contractId: String, scope: Scope, epoch: Int64) -> [String: Any?] {
+        readinessSeq += 1
         [
             "op": op,
             "contractId": contractId,
             "scope": Self.scopeToEnvMap(scope),
             "epoch": epoch,
+            "seq": readinessSeq,
             "member": "",
             "correlationId": ""
         ]

@@ -70,6 +70,7 @@ internal final class BindingEntry {
     // Guarded by the engine NSRecursiveLock (all reads/writes happen inside Router paths).
     private var _isLive: Bool = true
     var isLive: Bool { _isLive }
+    private(set) var closeReason: CloseReason? = nil
 
     // Stream job registry — guarded by engine lock.
     private var streamJobs: [String: Task<Void, Never>] = [:]
@@ -92,6 +93,7 @@ internal final class BindingEntry {
 
     internal func close(reason: CloseReason) {
         guard _isLive else { return }
+        closeReason = reason
         _isLive = false
         cancelAllStreamJobs()
         cancelStateObservations()
