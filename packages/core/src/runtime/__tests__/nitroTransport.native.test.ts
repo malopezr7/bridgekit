@@ -113,7 +113,7 @@ describe('connect', () => {
     expect(result.snapshot).toEqual([]);
   });
 
-  it('unwraps { v } in snapshot entries', () => {
+  it('Native single-wrap fixture hydrates value', () => {
     const { host } = getMocks();
     host.connectDispatcher.mockReturnValue({
       epoch: 1,
@@ -122,7 +122,7 @@ describe('connect', () => {
           contractId: 'a.b',
           key: 'status',
           scope: { kind: 'global' },
-          v: { v: 'idle' },
+          v: 'ready',
         },
       ],
     });
@@ -131,8 +131,30 @@ describe('connect', () => {
     const { snapshot } = transport.connect(makeDispatcher());
 
     expect(snapshot).toHaveLength(1);
-    expect(snapshot[0]!.value).toBe('idle');
-    expect(snapshot[0]!.contractId).toBe('a.b');
+    expect(snapshot[0]?.value).toBe('ready');
+    expect(snapshot[0]?.contractId).toBe('a.b');
+  });
+
+  it('Object values are not double-unwrapped', () => {
+    const { host } = getMocks();
+    host.connectDispatcher.mockReturnValue({
+      epoch: 1,
+      snapshot: [
+        {
+          contractId: 'a.b',
+          key: 'details',
+          scope: { kind: 'global' },
+          v: { nested: true },
+        },
+      ],
+    });
+
+    const transport = new NitroBridgeTransport();
+    const { snapshot } = transport.connect(makeDispatcher());
+
+    expect(snapshot).toHaveLength(1);
+    expect(snapshot[0]?.value).toEqual({ nested: true });
+    expect(snapshot[0]?.key).toBe('details');
   });
 
   it('stamps epoch onto outgoing invoke envelopes', async () => {
