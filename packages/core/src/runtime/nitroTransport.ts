@@ -176,16 +176,14 @@ export class NitroBridgeTransport implements BridgeTransport {
     const rawSnapshot = (result.snapshot as unknown[] | undefined) ?? [];
     const snapshot: StateSnapshotEntry[] = rawSnapshot.map((entry) => {
       const e = entry as Record<string, unknown>;
-      const vWrapped = e.v as Record<string, unknown> | undefined;
       return {
         contractId: (e.contractId as string | undefined) ?? '',
         key: (e.key as string | undefined) ?? '',
         scope: (e.scope as CallEnvelope['scope'] | undefined) ?? {
           kind: 'global' as const,
         },
-        // Snapshot values come from native already { v: <value> } wrapped —
-        // unwrap once here so mirrors receive the plain value.
-        value: vWrapped !== undefined ? vWrapped.v : undefined,
+        // Snapshot entries are already single-wrapped by native: entry.v is the plain value.
+        value: e.v,
       };
     });
 
