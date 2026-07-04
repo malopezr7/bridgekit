@@ -59,6 +59,21 @@ function invokePing(transport: LoopbackTransport, contractId = GraceContract.des
   });
 }
 
+function invokePingInScope(
+  transport: LoopbackTransport,
+  scope: typeof GLOBAL_SCOPE | typeof FEATURE_SCOPE | typeof INSTANCE_SCOPE,
+  contractId = FallbackGraceContract.descriptor.id,
+) {
+  return transport.invoke({
+    op: 'invoke',
+    contractId,
+    member: 'ping',
+    scope,
+    correlationId: `corr-${contractId}-${Date.now()}`,
+    epoch: transport.currentEpoch,
+  });
+}
+
 async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
@@ -203,19 +218,20 @@ describe('5.8 registry: graceTimer.unref() to prevent test-runner hang', () => {
     binding2.close('final');
   });
 
-  test('pendingCallers is always empty before grace timer fires (dead code confirmed safe)', () => {
+  test('replacing tombstone is removed when replacement arrives before timer expiry', async () => {
     const registry = new Registry();
 
-    // Provide and close with 'replacing' — no callers registered before close
     const binding = registry.provide(GraceContract, { ping: async () => 'ok' });
     binding.close('replacing');
+    const parked = registry.whenReplacingProvided(GraceContract.descriptor.id, GLOBAL_SCOPE);
 
-    // Re-provide within grace window to prevent callers from being rejected
     const binding2 = registry.provide(GraceContract, { ping: async () => 'ok2' });
 
-    // No callers in pendingCallers — the grace-timer loop is a confirmed no-op.
-    // This test documents the invariant: pendingCallers.length === 0 at grace-timer fire time.
+    await expect(parked).resolves.toBeUndefined();
     expect(registry.isProvided(GraceContract.descriptor.id)).toBe(true);
+    expect(
+      registry.whenReplacingProvided(GraceContract.descriptor.id, GLOBAL_SCOPE),
+    ).toBeUndefined();
 
     binding2.close('final');
   });
@@ -282,6 +298,109 @@ describe('S5 replacing grace window', () => {
     });
   });
 
+  test('Invoke parks on instance tombstone and wakes when global fallback is provided', async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const instanceBinding = bk.provide(
+      FallbackGraceContract,
+      { ping: async () => 'instance-old' },
+      { scope: INSTANCE_SCOPE },
+    );
+    instanceBinding.close('replacing');
+
+    const invocation = invokePingInScope(transport, INSTANCE_SCOPE);
+    let settled = false;
+    invocation.finally(() => {
+      settled = true;
+    });
+
+    jest.advanceTimersByTime(200);
+    await flushMicrotasks();
+    expect(settled).toBe(false);
+
+    bk.provide(FallbackGraceContract, { ping: async () => 'global-replacement' });
+
+    await expect(invocation).resolves.toEqual({ ok: true, value: 'global-replacement' });
+  });
+
+  test('Invoke parks on global tombstone and wakes when feature fallback is provided', async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const globalBinding = bk.provide(FallbackGraceContract, { ping: async () => 'global-old' });
+    globalBinding.close('replacing');
+
+    const invocation = invokePingInScope(transport, INSTANCE_SCOPE);
+    let settled = false;
+    invocation.finally(() => {
+      settled = true;
+    });
+
+    jest.advanceTimersByTime(200);
+    await flushMicrotasks();
+    expect(settled).toBe(false);
+
+    bk.provide(
+      FallbackGraceContract,
+      { ping: async () => 'feature-replacement' },
+      { scope: FEATURE_SCOPE },
+    );
+
+    await expect(invocation).resolves.toEqual({ ok: true, value: 'feature-replacement' });
+  });
+
+  test('Parked invoke rejects at the 1500ms grace boundary', async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const binding = bk.provide(GraceContract, { ping: async () => 'old' });
+    binding.close('replacing');
+
+    const invocation = invokePing(transport);
+    let settled = false;
+    invocation.finally(() => {
+      settled = true;
+    });
+
+    jest.advanceTimersByTime(1499);
+    await flushMicrotasks();
+    expect(settled).toBe(false);
+
+    jest.advanceTimersByTime(1);
+    await expect(invocation).resolves.toMatchObject({
+      ok: false,
+      code: 'CONTRACT_NOT_PROVIDED',
+    });
+  });
+
+  test('Instance call parks behind global tombstone when no wider provider exists', async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const globalBinding = bk.provide(FallbackGraceContract, { ping: async () => 'global-old' });
+    globalBinding.close('replacing');
+
+    const invocation = invokePingInScope(transport, INSTANCE_SCOPE);
+    let settled = false;
+    invocation.finally(() => {
+      settled = true;
+    });
+
+    await flushMicrotasks();
+    expect(settled).toBe(false);
+
+    jest.advanceTimersByTime(1500);
+    await expect(invocation).resolves.toMatchObject({
+      ok: false,
+      code: 'CONTRACT_NOT_PROVIDED',
+    });
+  });
+
   test('streamOpen parks then retries', async () => {
     const transport = new LoopbackTransport();
     const bk = new BridgeKitJs(transport);
@@ -324,6 +443,56 @@ describe('S5 replacing grace window', () => {
 
     expect(values).toEqual(['replacement-event']);
     expect(ends).toEqual([{ ok: true }]);
+  });
+
+  test('streamOpen closed while parked does not subscribe after replacement', async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const binding = bk.provide(GraceContract, {
+      ping: async () => 'old',
+      events: () => streamSource<string>(() => () => {}),
+    });
+    binding.close('replacing');
+
+    const values: unknown[] = [];
+    const ends: unknown[] = [];
+    const streamId = transport.openStream(
+      {
+        op: 'streamOpen',
+        contractId: GraceContract.descriptor.id,
+        member: 'events',
+        scope: GLOBAL_SCOPE,
+        correlationId: 'corr-s5-stream-cancel',
+        epoch: transport.currentEpoch,
+      },
+      (value) => values.push(value),
+      (end) => ends.push(end),
+    );
+
+    transport.closeStream(streamId);
+
+    let subscribed = false;
+    bk.provide(GraceContract, {
+      ping: async () => 'replacement',
+      events: () =>
+        streamSource<string>((emit, end) => {
+          subscribed = true;
+          emit('replacement-event');
+          end({ ok: true });
+          return () => {};
+        }),
+    });
+    await flushMicrotasks();
+
+    const dispatcher = (bk as unknown as { _dispatcher: Dispatcher })._dispatcher;
+    const openProducers = (dispatcher as unknown as { _openProducers: Map<string, unknown> })
+      ._openProducers;
+    expect(subscribed).toBe(false);
+    expect(values).toEqual([]);
+    expect(ends).toEqual([]);
+    expect(openProducers.has(streamId)).toBe(false);
   });
 
   test('streamOpen grace expires', async () => {
@@ -425,7 +594,55 @@ describe('S5 replacing grace window', () => {
     });
   });
 
-  test('RT-JS-20 lastKnown preserved', () => {
+  test("close('final') after replacing clears tombstone and rejects parked callers immediately", async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const binding = bk.provide(GraceContract, { ping: async () => 'old' });
+    binding.close('replacing');
+
+    const invocation = invokePing(transport);
+    let settled = false;
+    invocation.finally(() => {
+      settled = true;
+    });
+    await flushMicrotasks();
+    expect(settled).toBe(false);
+
+    binding.close('final');
+    await expect(invocation).resolves.toMatchObject({
+      ok: false,
+      code: 'CONTRACT_NOT_PROVIDED',
+    });
+    expect(settled).toBe(true);
+  });
+
+  test("closeAll('final') clears replacing tombstones and rejects parked callers immediately", async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const binding = bk.provide(GraceContract, { ping: async () => 'old' });
+    binding.close('replacing');
+
+    const invocation = invokePing(transport);
+    let settled = false;
+    invocation.finally(() => {
+      settled = true;
+    });
+    await flushMicrotasks();
+    expect(settled).toBe(false);
+
+    bk.registry.closeAll('final');
+    await expect(invocation).resolves.toMatchObject({
+      ok: false,
+      code: 'CONTRACT_NOT_PROVIDED',
+    });
+    expect(settled).toBe(true);
+  });
+
+  test('RT-JS-20 subscribed mirror preserves lastKnown value and reflects unprovided status', () => {
     const transport = new LoopbackTransport();
     const bk = new BridgeKitJs(transport);
     bk.connect();
@@ -433,10 +650,14 @@ describe('S5 replacing grace window', () => {
     const binding = bk.provide(GraceContract, { ping: async () => 'ok' });
     binding.setState('count', 7);
     const mirror = bk.state(GraceContract, 'count');
+    const seen: unknown[] = [];
+    const unsubscribe = mirror.subscribe((value) => seen.push(value));
 
     binding.close('final');
 
     expect(mirror.get().value).toBe(7);
-    expect(mirror.get().status).toBe('provided');
+    expect(mirror.get().status).toBe('unprovided');
+    expect(seen).toContainEqual({ value: 7, status: 'unprovided' });
+    unsubscribe();
   });
 });

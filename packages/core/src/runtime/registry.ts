@@ -39,15 +39,19 @@ export interface Binding {
 
 interface RegistryEntry {
   binding: Binding;
-  /** Waiting callers — resolve when binding becomes live after 'replacing' */
-  pendingCallers: Array<{ resolve: () => void; reject: (reason: unknown) => void }>;
-  graceTimer: ReturnType<typeof setTimeout> | null;
   /** Per-key state values */
   state: Map<string, unknown>;
 }
 
+interface ReplacingWaiter {
+  requestedScope: BridgeScope;
+  resolve: () => void;
+  reject: (reason: unknown) => void;
+}
+
 interface ReplacingTombstone {
-  pendingCallers: Array<{ resolve: () => void; reject: (reason: unknown) => void }>;
+  contractId: string;
+  pendingCallers: ReplacingWaiter[];
   graceTimer: ReturnType<typeof setTimeout>;
 }
 
@@ -119,27 +123,10 @@ export class Registry {
         );
       }
       existing.binding.isLive = false;
-      existing.graceTimer !== null && clearTimeout(existing.graceTimer);
-      const pending = existing.pendingCallers.splice(0);
-      for (const w of pending) {
-        w.resolve();
-      }
-    }
-
-    const replacingTombstone = this._replacingTombstones.get(entryKey);
-    if (replacingTombstone) {
-      this._replacingTombstones.delete(entryKey);
-      clearTimeout(replacingTombstone.graceTimer);
-      const pending = replacingTombstone.pendingCallers.splice(0);
-      for (const w of pending) {
-        w.resolve();
-      }
     }
 
     const entry: RegistryEntry = {
       binding: null as unknown as Binding, // filled below
-      pendingCallers: [],
-      graceTimer: null,
       state: new Map(),
     };
 
@@ -166,7 +153,12 @@ export class Registry {
         }
       },
       close: (reason?: 'replacing' | 'final') => {
-        if (!binding.isLive) return; // no-op if already superseded
+        if (!binding.isLive) {
+          if (reason === 'final') {
+            this._finalizeReplacingTombstone(entryKey);
+          }
+          return;
+        }
         binding.isLive = false;
         this._entries.delete(entryKey);
 
@@ -176,19 +168,19 @@ export class Registry {
             this._replacingTombstones.delete(entryKey);
             const pending = pendingCallers.splice(0);
             for (const w of pending) {
-              w.reject(new Error('CONTRACT_NOT_PROVIDED'));
+              if (this.resolve(contractId, w.requestedScope)) {
+                w.resolve();
+              } else {
+                w.reject(new Error('CONTRACT_NOT_PROVIDED'));
+              }
             }
           }, DEFAULT_GRACE_WINDOW_MS);
           // unref so the timer does not block Node.js process exit / test runner.
           (graceTimer as unknown as { unref?: () => void }).unref?.();
-          entry.graceTimer = graceTimer;
-          this._replacingTombstones.set(entryKey, { pendingCallers, graceTimer });
+          this._replacingTombstones.set(entryKey, { contractId, pendingCallers, graceTimer });
         } else {
           // final: fail immediately
-          const pending = entry.pendingCallers.splice(0);
-          for (const w of pending) {
-            w.reject(new Error('CONTRACT_NOT_PROVIDED'));
-          }
+          this._finalizeReplacingTombstone(entryKey);
           for (const [sk, listeners] of this._stateListeners) {
             if (sk.startsWith(`${contractId}|${scopeKey}|`)) {
               for (const cb of listeners) {
@@ -211,6 +203,8 @@ export class Registry {
 
     entry.binding = binding;
     this._entries.set(entryKey, entry);
+
+    this._wakeReplacingWaiters();
 
     // Resolve any readiness waiters
     this._notifyReadiness(contractId, scopeKey);
@@ -266,11 +260,15 @@ export class Registry {
           const idx = waiters.findIndex((w) => w.resolve === resolve);
           if (idx !== -1) waiters.splice(idx, 1);
         }
-        reject(
-          new Error(
-            `[bridgekit] CONTRACT_NOT_PROVIDED: contract '${contractId}' not provided in scope ${scopeKey} within ${timeoutMs}ms`,
-          ),
-        );
+        if (this.resolve(contractId, scope)) {
+          resolve();
+        } else {
+          reject(
+            new Error(
+              `[bridgekit] CONTRACT_NOT_PROVIDED: contract '${contractId}' not provided in scope ${scopeKey} within ${timeoutMs}ms`,
+            ),
+          );
+        }
       }, timeoutMs);
 
       this._readinessWaiters.get(key)?.push({ contractId, scope, resolve, reject, timer });
@@ -293,7 +291,7 @@ export class Registry {
       const tombstone = this._replacingTombstones.get(this._key(contractId, scopeKey));
       if (!tombstone) continue;
       return new Promise<void>((resolve, reject) => {
-        tombstone.pendingCallers.push({ resolve, reject });
+        tombstone.pendingCallers.push({ requestedScope: scope, resolve, reject });
       });
     }
     return undefined;
@@ -351,6 +349,11 @@ export class Registry {
         entry.binding.close(reason);
       }
     }
+    if (reason === 'final') {
+      for (const key of Array.from(this._replacingTombstones.keys())) {
+        this._finalizeReplacingTombstone(key);
+      }
+    }
   }
 
   /** Dump all bindings (for diagnostics). */
@@ -381,6 +384,38 @@ export class Registry {
       } else {
         this._readinessWaiters.delete(key);
       }
+    }
+  }
+
+  private _wakeReplacingWaiters(): void {
+    for (const [key, tombstone] of Array.from(this._replacingTombstones)) {
+      const pending: ReplacingWaiter[] = [];
+      for (const waiter of tombstone.pendingCallers) {
+        if (this.resolve(tombstone.contractId, waiter.requestedScope)) {
+          waiter.resolve();
+        } else {
+          pending.push(waiter);
+        }
+      }
+      if (this._entries.has(key)) {
+        this._replacingTombstones.delete(key);
+        clearTimeout(tombstone.graceTimer);
+      } else if (pending.length > 0) {
+        tombstone.pendingCallers = pending;
+      } else {
+        tombstone.pendingCallers = [];
+      }
+    }
+  }
+
+  private _finalizeReplacingTombstone(entryKey: string): void {
+    const tombstone = this._replacingTombstones.get(entryKey);
+    if (!tombstone) return;
+    this._replacingTombstones.delete(entryKey);
+    clearTimeout(tombstone.graceTimer);
+    const pending = tombstone.pendingCallers.splice(0);
+    for (const waiter of pending) {
+      waiter.reject(new Error('CONTRACT_NOT_PROVIDED'));
     }
   }
 }

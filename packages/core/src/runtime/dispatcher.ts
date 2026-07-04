@@ -19,6 +19,7 @@ type StreamProducerEntry = {
 export class Dispatcher implements JsDispatcher {
   private _transport: BridgeTransport | null = null;
   private _openProducers = new Map<string, StreamProducerEntry>();
+  private _parkedStreams = new Map<string, () => void>();
 
   constructor(
     private readonly _registry: Registry,
@@ -76,9 +77,23 @@ export class Dispatcher implements JsDispatcher {
     if (!entry) {
       const replacing = this._registry.whenReplacingProvided(env.contractId, env.scope);
       if (replacing) {
+        let canceled = false;
+        this._parkedStreams.set(streamId, () => {
+          canceled = true;
+        });
         replacing.then(
-          () => this.onStreamOpen(env, streamId),
-          () => transport.endFromJs(streamId, this._notProvided(env)),
+          () => {
+            this._parkedStreams.delete(streamId);
+            if (canceled) return;
+            this.onStreamOpen(env, streamId);
+          },
+          () => {
+            this._parkedStreams.delete(streamId);
+            if (canceled) return;
+            const currentTransport = this._transport;
+            if (!currentTransport) return;
+            currentTransport.endFromJs(streamId, this._notProvided(env));
+          },
         );
         return;
       }
@@ -189,6 +204,12 @@ export class Dispatcher implements JsDispatcher {
   // ---- onStreamClose -------------------------------------------------------
 
   onStreamClose(streamId: string, _reason: string): void {
+    const cancelParked = this._parkedStreams.get(streamId);
+    if (cancelParked) {
+      cancelParked();
+      this._parkedStreams.delete(streamId);
+      return;
+    }
     const producer = this._openProducers.get(streamId);
     if (producer) {
       producer.unsubscribe();
@@ -217,6 +238,10 @@ export class Dispatcher implements JsDispatcher {
 
   /** Clean up all open producers (on epoch change) */
   closeAllProducers(): void {
+    for (const [, cancelParked] of this._parkedStreams) {
+      cancelParked();
+    }
+    this._parkedStreams.clear();
     for (const [, producer] of this._openProducers) {
       producer.unsubscribe();
     }
