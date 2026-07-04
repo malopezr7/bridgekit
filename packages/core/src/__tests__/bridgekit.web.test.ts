@@ -204,6 +204,39 @@ describe('Dispatcher', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe('CONTRACT_NOT_PROVIDED');
   }, 10000);
+
+  test('readiness provide and unprovide ops are ignored until mirror handling lands', () => {
+    const registry = new Registry();
+    registry.provide(TestContract, {});
+    const dispatcher = new Dispatcher(
+      registry,
+      new Map([[TestContract.descriptor.id, TestContract]]),
+    );
+    const listener = jest.fn();
+    registry.subscribeState(TestContract.descriptor.id, GLOBAL_SCOPE, '', listener);
+
+    dispatcher.onStateWrite({
+      op: 'provide',
+      contractId: TestContract.descriptor.id,
+      member: '',
+      scope: GLOBAL_SCOPE,
+      payload: { v: 'must-not-write' },
+      correlationId: 'readiness-1',
+      epoch: 1,
+    });
+    dispatcher.onStateWrite({
+      op: 'unprovide',
+      contractId: TestContract.descriptor.id,
+      member: '',
+      scope: GLOBAL_SCOPE,
+      payload: { v: 'must-not-write' },
+      correlationId: 'readiness-2',
+      epoch: 1,
+    });
+
+    expect(registry.getState(TestContract.descriptor.id, GLOBAL_SCOPE, '')).toBeUndefined();
+    expect(listener).not.toHaveBeenCalled();
+  });
 });
 
 // ---- Proxy tests -----------------------------------------------------------

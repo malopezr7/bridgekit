@@ -185,6 +185,8 @@ export class Dispatcher implements JsDispatcher {
   // ---- onStateWrite --------------------------------------------------------
 
   onStateWrite(env: CallEnvelope): void {
+    if (env.op === 'provide' || env.op === 'unprovide') return;
+
     const entry = this._registry.resolve(env.contractId, env.scope);
     if (!entry) return;
 
