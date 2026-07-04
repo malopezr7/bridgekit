@@ -36,9 +36,15 @@ export class Dispatcher implements JsDispatcher {
     try {
       const entry = this._registry.resolve(env.contractId, env.scope);
       if (!entry) {
-        // Wait for readiness
+        // Wait for an exact replacing tombstone first. If there is no tombstone
+        // in the requested fallback chain, keep the existing readiness behavior.
         try {
-          await this._registry.whenProvided(env.contractId, { scope: env.scope });
+          const replacing = this._registry.whenReplacingProvided(env.contractId, env.scope);
+          if (replacing) {
+            await replacing;
+          } else {
+            await this._registry.whenProvided(env.contractId, { scope: env.scope });
+          }
         } catch {
           return this._notProvided(env);
         }
@@ -68,6 +74,14 @@ export class Dispatcher implements JsDispatcher {
 
     const entry = this._registry.resolve(env.contractId, env.scope);
     if (!entry) {
+      const replacing = this._registry.whenReplacingProvided(env.contractId, env.scope);
+      if (replacing) {
+        replacing.then(
+          () => this.onStreamOpen(env, streamId),
+          () => transport.endFromJs(streamId, this._notProvided(env)),
+        );
+        return;
+      }
       transport.endFromJs(streamId, {
         ok: false,
         code: 'CONTRACT_NOT_PROVIDED',

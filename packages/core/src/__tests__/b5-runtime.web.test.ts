@@ -12,9 +12,9 @@
 import { afterEach, beforeEach, describe, expect, jest, test } from '@jest/globals';
 import { defineContract, t } from '../contract/contract';
 import { BridgeKitJs } from '../runtime/bridgekit';
-import { Dispatcher } from '../runtime/dispatcher';
+import type { Dispatcher } from '../runtime/dispatcher';
 import { LoopbackTransport } from '../runtime/loopbackTransport';
-import { GLOBAL_SCOPE, Registry } from '../runtime/registry';
+import { GLOBAL_SCOPE, Registry, streamSource } from '../runtime/registry';
 
 // ---- Shared contract -------------------------------------------------------
 
@@ -30,8 +30,39 @@ const GraceContract = defineContract('b5.grace.contract', {
   methods: {
     ping: t.query(t.string()),
   },
+  streams: {
+    events: t.stream(t.string()),
+  },
+  state: {
+    count: t.state(t.number(), 0),
+  },
+});
+
+const FallbackGraceContract = defineContract('b5.grace.fallback', {
+  methods: {
+    ping: t.query(t.string()),
+  },
   state: {},
 });
+
+const INSTANCE_SCOPE = { kind: 'instance' as const, feature: 'checkout', instance: 'cart-1' };
+const FEATURE_SCOPE = { kind: 'feature' as const, feature: 'checkout' };
+
+function invokePing(transport: LoopbackTransport, contractId = GraceContract.descriptor.id) {
+  return transport.invoke({
+    op: 'invoke',
+    contractId,
+    member: 'ping',
+    scope: GLOBAL_SCOPE,
+    correlationId: `corr-${contractId}-${Date.now()}`,
+    epoch: transport.currentEpoch,
+  });
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
 
 // ---- 5.7 Dispatcher _openProducers leak ------------------------------------
 
@@ -187,5 +218,225 @@ describe('5.8 registry: graceTimer.unref() to prevent test-runner hang', () => {
     expect(registry.isProvided(GraceContract.descriptor.id)).toBe(true);
 
     binding2.close('final');
+  });
+});
+
+// ---- S5 Grace window + close semantics -------------------------------------
+
+describe('S5 replacing grace window', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test('Invoke parks then retries', async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const binding = bk.provide(GraceContract, { ping: async () => 'old' });
+    binding.close('replacing');
+
+    const invocation = invokePing(transport);
+    let settled = false;
+    invocation.finally(() => {
+      settled = true;
+    });
+
+    await flushMicrotasks();
+    expect(settled).toBe(false);
+
+    jest.advanceTimersByTime(1499);
+    await flushMicrotasks();
+    expect(settled).toBe(false);
+
+    bk.provide(GraceContract, { ping: async () => 'replacement' });
+    await expect(invocation).resolves.toEqual({ ok: true, value: 'replacement' });
+  });
+
+  test('Grace expires', async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const binding = bk.provide(GraceContract, { ping: async () => 'old' });
+    binding.close('replacing');
+
+    const invocation = invokePing(transport);
+    let settled = false;
+    invocation.finally(() => {
+      settled = true;
+    });
+
+    jest.advanceTimersByTime(1499);
+    await flushMicrotasks();
+    expect(settled).toBe(false);
+
+    jest.advanceTimersByTime(1);
+    await expect(invocation).resolves.toMatchObject({
+      ok: false,
+      code: 'CONTRACT_NOT_PROVIDED',
+    });
+  });
+
+  test('streamOpen parks then retries', async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const binding = bk.provide(GraceContract, {
+      ping: async () => 'old',
+      events: () => streamSource<string>(() => () => {}),
+    });
+    binding.close('replacing');
+
+    const values: unknown[] = [];
+    const ends: unknown[] = [];
+    transport.openStream(
+      {
+        op: 'streamOpen',
+        contractId: GraceContract.descriptor.id,
+        member: 'events',
+        scope: GLOBAL_SCOPE,
+        correlationId: 'corr-s5-stream-retry',
+        epoch: transport.currentEpoch,
+      },
+      (value) => values.push(value),
+      (end) => ends.push(end),
+    );
+
+    await flushMicrotasks();
+    expect(ends).toEqual([]);
+
+    bk.provide(GraceContract, {
+      ping: async () => 'replacement',
+      events: () =>
+        streamSource<string>((emit, end) => {
+          emit('replacement-event');
+          end({ ok: true });
+          return () => {};
+        }),
+    });
+    await flushMicrotasks();
+
+    expect(values).toEqual(['replacement-event']);
+    expect(ends).toEqual([{ ok: true }]);
+  });
+
+  test('streamOpen grace expires', async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const binding = bk.provide(GraceContract, {
+      ping: async () => 'old',
+      events: () => streamSource<string>(() => () => {}),
+    });
+    binding.close('replacing');
+
+    const ends: unknown[] = [];
+    transport.openStream(
+      {
+        op: 'streamOpen',
+        contractId: GraceContract.descriptor.id,
+        member: 'events',
+        scope: GLOBAL_SCOPE,
+        correlationId: 'corr-s5-stream-expiry',
+        epoch: transport.currentEpoch,
+      },
+      () => {},
+      (end) => ends.push(end),
+    );
+
+    jest.advanceTimersByTime(1499);
+    await flushMicrotasks();
+    expect(ends).toEqual([]);
+
+    jest.advanceTimersByTime(1);
+    await flushMicrotasks();
+    expect(ends).toEqual([expect.objectContaining({ ok: false, code: 'CONTRACT_NOT_PROVIDED' })]);
+  });
+
+  test('Resolve sees not-ready tombstone', () => {
+    const registry = new Registry();
+    const binding = registry.provide(GraceContract, { ping: async () => 'old' });
+
+    binding.close('replacing');
+
+    expect(registry.resolve(GraceContract.descriptor.id, GLOBAL_SCOPE)).toBeUndefined();
+    expect(registry.isProvided(GraceContract.descriptor.id, GLOBAL_SCOPE)).toBe(false);
+  });
+
+  test('Tombstone does not block wider fallback', async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    bk.provide(FallbackGraceContract, { ping: async () => 'feature' }, { scope: FEATURE_SCOPE });
+    const instanceBinding = bk.provide(
+      FallbackGraceContract,
+      { ping: async () => 'instance' },
+      { scope: INSTANCE_SCOPE },
+    );
+    instanceBinding.close('replacing');
+
+    const consumer = bk.bridge(FallbackGraceContract, { scope: INSTANCE_SCOPE });
+    await expect(consumer.ping()).resolves.toBe('feature');
+  });
+
+  test('In-flight invoke during reconnect parks and retries against replayed provider', async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    bk.provide(GraceContract, { ping: async () => 'replayed' });
+
+    let invocation: Promise<unknown> | null = null;
+    const originalConnect = transport.connect.bind(transport);
+    transport.connect = (dispatcher) => {
+      const result = originalConnect(dispatcher);
+      invocation = invokePing(transport);
+      return result;
+    };
+
+    bk.connect();
+
+    expect(invocation).not.toBeNull();
+    await expect(invocation as Promise<unknown>).resolves.toEqual({
+      ok: true,
+      value: 'replayed',
+    });
+  });
+
+  test('No wake toward dead provider', async () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const invocation = invokePing(transport);
+    const binding = bk.provide(GraceContract, { ping: async () => 'dead' });
+    binding.close('final');
+
+    await expect(invocation).resolves.toMatchObject({
+      ok: false,
+      code: 'CONTRACT_NOT_PROVIDED',
+    });
+  });
+
+  test('RT-JS-20 lastKnown preserved', () => {
+    const transport = new LoopbackTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+
+    const binding = bk.provide(GraceContract, { ping: async () => 'ok' });
+    binding.setState('count', 7);
+    const mirror = bk.state(GraceContract, 'count');
+
+    binding.close('final');
+
+    expect(mirror.get().value).toBe(7);
+    expect(mirror.get().status).toBe('provided');
   });
 });
