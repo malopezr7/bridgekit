@@ -28,18 +28,20 @@ The packages are released independently with package-specific tags:
    set -euo pipefail
    tmp="$(mktemp -d)"
    core_tarball="$(cd packages/core && npm pack --json --pack-destination "$tmp" | node -e "const c=require('fs').readFileSync(0,'utf8');const i=c.lastIndexOf('\n[');process.stdout.write(JSON.parse(c.slice(i>=0?i+1:c.indexOf('[')))[0].filename)")"
-   tar -tzf "$tmp/$core_tarball" | grep -Fx "package/dist/commonjs/index.js"
-   tar -tzf "$tmp/$core_tarball" | grep -Fx "package/dist/typescript/index.d.ts"
-   tar -tzf "$tmp/$core_tarball" | grep -Fx "package/LICENSE"
-   tar -tzf "$tmp/$core_tarball" | grep -Fx "package/android/build.gradle.kts"
-   tar -tzf "$tmp/$core_tarball" | grep -q "package/android/src/main"
-   if tar -tzf "$tmp/$core_tarball" | grep -q "android/src/test"; then
+   tar -tzf "$tmp/$core_tarball" > "$tmp/core-list.txt"
+   grep -Fx "package/dist/commonjs/index.js" "$tmp/core-list.txt"
+   grep -Fx "package/dist/typescript/index.d.ts" "$tmp/core-list.txt"
+   grep -Fx "package/LICENSE" "$tmp/core-list.txt"
+   grep -Fx "package/android/build.gradle.kts" "$tmp/core-list.txt"
+   grep -q "package/android/src/main" "$tmp/core-list.txt"
+   if grep -q "android/src/test" "$tmp/core-list.txt"; then
      exit 1
    fi
 
    cli_tarball="$(cd packages/cli && npm pack --json --pack-destination "$tmp" | node -e "const c=require('fs').readFileSync(0,'utf8');const i=c.lastIndexOf('\n[');process.stdout.write(JSON.parse(c.slice(i>=0?i+1:c.indexOf('[')))[0].filename)")"
-   tar -tzf "$tmp/$cli_tarball" | grep -Fx "package/dist/index.js"
-   tar -tzf "$tmp/$cli_tarball" | grep -Fx "package/LICENSE"
+   tar -tzf "$tmp/$cli_tarball" > "$tmp/cli-list.txt"
+   grep -Fx "package/dist/index.js" "$tmp/cli-list.txt"
+   grep -Fx "package/LICENSE" "$tmp/cli-list.txt"
    ```
 
 6. Update the relevant package `CHANGELOG.md` entries.
