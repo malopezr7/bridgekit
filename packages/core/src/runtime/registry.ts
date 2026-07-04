@@ -49,6 +49,8 @@ interface RegistryEntry {
 // ---- Readiness waiters -----------------------------------------------------
 
 interface ReadinessWaiter {
+  contractId: string;
+  scope: BridgeScope;
   resolve: () => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -73,6 +75,20 @@ export class Registry {
 
   private _stateKey(contractId: string, scopeKey: string, key: string): string {
     return `${contractId}|${scopeKey}|${key}`;
+  }
+
+  private _candidateScopeKeys(scope: BridgeScope): string[] {
+    if (scope.kind === 'instance') {
+      return [
+        serializeScope(scope),
+        serializeScope({ kind: 'feature', feature: scope.feature }),
+        'global',
+      ];
+    }
+    if (scope.kind === 'feature') {
+      return [serializeScope(scope), 'global'];
+    }
+    return ['global'];
   }
 
   /**
@@ -198,20 +214,7 @@ export class Registry {
    * Walks instance → feature → global.
    */
   resolve(contractId: string, scope: BridgeScope): RegistryEntry | undefined {
-    // Walk resolution order: instance → feature → global
-    const candidates: string[] = [];
-    if (scope.kind === 'instance') {
-      candidates.push(serializeScope(scope));
-      candidates.push(serializeScope({ kind: 'feature', feature: scope.feature }));
-      candidates.push('global');
-    } else if (scope.kind === 'feature') {
-      candidates.push(serializeScope(scope));
-      candidates.push('global');
-    } else {
-      candidates.push('global');
-    }
-
-    for (const sk of candidates) {
+    for (const sk of this._candidateScopeKeys(scope)) {
       const entry = this._entries.get(this._key(contractId, sk));
       if (entry?.binding.isLive) {
         return entry;
@@ -252,7 +255,7 @@ export class Registry {
         );
       }, timeoutMs);
 
-      this._readinessWaiters.get(key)?.push({ resolve, reject, timer });
+      this._readinessWaiters.get(key)?.push({ contractId, scope, resolve, reject, timer });
     });
   }
 
@@ -325,13 +328,24 @@ export class Registry {
   }
 
   private _notifyReadiness(contractId: string, scopeKey: string): void {
-    const key = this._key(contractId, scopeKey);
-    const waiters = this._readinessWaiters.get(key);
-    if (!waiters?.length) return;
-    this._readinessWaiters.delete(key);
-    for (const w of waiters) {
-      clearTimeout(w.timer);
-      w.resolve();
+    for (const [key, waiters] of this._readinessWaiters) {
+      const pending: ReadinessWaiter[] = [];
+      for (const waiter of waiters) {
+        const canResolve =
+          waiter.contractId === contractId &&
+          this._candidateScopeKeys(waiter.scope).includes(scopeKey);
+        if (canResolve) {
+          clearTimeout(waiter.timer);
+          waiter.resolve();
+        } else {
+          pending.push(waiter);
+        }
+      }
+      if (pending.length > 0) {
+        this._readinessWaiters.set(key, pending);
+      } else {
+        this._readinessWaiters.delete(key);
+      }
     }
   }
 }
