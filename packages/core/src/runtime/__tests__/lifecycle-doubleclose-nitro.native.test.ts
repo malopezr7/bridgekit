@@ -26,7 +26,7 @@ function makeMockNitro(): BridgeTransport & {
       observers.add(cb);
     },
     connect(_d: JsDispatcher): ConnectResult {
-      return { epoch: 1, snapshot: [] };
+      return { epoch: 1, snapshot: [], nativeProvided: [] };
     },
     async invoke(): Promise<ResultEnvelope> {
       return { ok: true, value: null };

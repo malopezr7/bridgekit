@@ -19,6 +19,7 @@ export interface StateSnapshotEntry {
 export interface ConnectResult {
   epoch: number;
   snapshot: StateSnapshotEntry[];
+  nativeProvided: Array<{ contractId: string; scope: BridgeScope }>;
 }
 
 // ---- JsDispatcher ---------------------------------------------------------

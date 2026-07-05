@@ -56,6 +56,8 @@ export interface CallEnvelope {
    */
   latestOnly?: boolean;
   sticky?: boolean;
+  /** Monotonic native readiness sequence for provide/unprovide deltas. */
+  seq?: number;
 }
 
 // ---- handshake / connect envelope -----------------------------------------

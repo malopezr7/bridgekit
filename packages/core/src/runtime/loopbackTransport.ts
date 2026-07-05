@@ -37,7 +37,7 @@ export class LoopbackTransport implements BridgeTransport {
   connect(dispatcher: JsDispatcher): ConnectResult {
     this._dispatcher = dispatcher;
     this._epoch++;
-    return { epoch: this._epoch, snapshot: [] };
+    return { epoch: this._epoch, snapshot: [], nativeProvided: [] };
   }
 
   get currentEpoch(): number {

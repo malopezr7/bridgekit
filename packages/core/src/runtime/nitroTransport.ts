@@ -98,6 +98,7 @@ function mapToEnvelope(map: Record<string, unknown>): CallEnvelope {
     contractHash: map.contractHash as string | undefined,
     latestOnly: map.latestOnly as boolean | undefined,
     sticky: map.sticky as boolean | undefined,
+    seq: map.seq as number | undefined,
   };
 }
 
@@ -177,7 +178,7 @@ export class NitroBridgeTransport implements BridgeTransport {
       },
     ) as unknown as Record<string, unknown>;
 
-    // Parse { epoch: number, snapshot: AnyMap[] }.
+    // Parse { epoch: number, snapshot: AnyMap[], nativeProvided: AnyMap[] }.
     // Native uses epoch 0 as the pre-connection sentinel; preserve that sentinel
     // when old or malformed native payloads omit epoch instead of masking to 1.
     const rawEpoch = result.epoch;
@@ -198,7 +199,18 @@ export class NitroBridgeTransport implements BridgeTransport {
       };
     });
 
-    return { epoch, snapshot };
+    const rawNativeProvided = (result.nativeProvided as unknown[] | undefined) ?? [];
+    const nativeProvided = rawNativeProvided.map((entry) => {
+      const e = entry as Record<string, unknown>;
+      return {
+        contractId: (e.contractId as string | undefined) ?? '',
+        scope: (e.scope as CallEnvelope['scope'] | undefined) ?? {
+          kind: 'global' as const,
+        },
+      };
+    });
+
+    return { epoch, snapshot, nativeProvided };
   }
 
   // ---- invoke --------------------------------------------------------------
