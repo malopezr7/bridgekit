@@ -18,7 +18,7 @@ import {
   openLocalStream,
 } from './localInvoker';
 import type { Binding } from './registry';
-import { GLOBAL_SCOPE, Registry, serializeScope } from './registry';
+import { DEFAULT_READINESS_TIMEOUT_MS, GLOBAL_SCOPE, Registry, serializeScope } from './registry';
 import type { StateMirror } from './stateMirror';
 import { LocalStateMirror, MirrorRegistry, NativeReadinessMirror } from './stateMirror';
 import type { BridgeTransport } from './transport';
@@ -166,6 +166,8 @@ function createProviderFacade(binding: Binding): ProviderFacade {
 }
 
 function candidateScopeKeys(scope: BridgeScope): string[] {
+  // Keep in sync with Registry._candidateScopeKeys. Duplicated here to avoid
+  // pushing registry-private fallback resolution into the BridgeKit facade layer.
   if (scope.kind === 'instance') {
     return [
       serializeScope(scope),
@@ -190,7 +192,7 @@ export class BridgeKitJs {
   private _connected = false;
   private _closingForEpochSwap = false;
   private _replayingProviders = false;
-  private _readinessVersion = 0;
+  private readonly _readinessVersionByContract = new Map<string, number>();
 
   constructor(private readonly _transport: BridgeTransport) {
     this.registry = new Registry();
@@ -200,12 +202,19 @@ export class BridgeKitJs {
       nativeReadiness: this.nativeReadiness,
       getEpoch: () => this._epoch,
     });
-    this.registry.onReadinessChange(() => {
-      this._readinessVersion += 1;
+    this.registry.onReadinessChange((event) => {
+      this._bumpReadinessVersion(event.contractId);
     });
-    this.nativeReadiness.subscribe(() => {
-      this._readinessVersion += 1;
+    this.nativeReadiness.subscribe((record) => {
+      this._bumpReadinessVersion(record.contractId);
     });
+  }
+
+  private _bumpReadinessVersion(contractId: string): void {
+    this._readinessVersionByContract.set(
+      contractId,
+      (this._readinessVersionByContract.get(contractId) ?? 0) + 1,
+    );
   }
 
   /**
@@ -835,7 +844,7 @@ export class BridgeKitJs {
     const scope = opts?.scope ?? _ambientScope;
     if (this.isProvided(contract, { scope })) return Promise.resolve();
 
-    const timeoutMs = opts?.timeoutMs ?? 5000;
+    const timeoutMs = opts?.timeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS;
     return new Promise<void>((resolve, reject) => {
       let settled = false;
       let timer: ReturnType<typeof setTimeout> | null = null;
@@ -899,7 +908,8 @@ export class BridgeKitJs {
   }
 
   readinessSnapshot(contract: BridgeContract<unknown>, scope: BridgeScope): string {
-    return `${this._readinessVersion}:${this.isProvided(contract, { scope }) ? '1' : '0'}`;
+    const readinessVersion = this._readinessVersionByContract.get(contract.descriptor.id) ?? 0;
+    return `${readinessVersion}:${this.isProvided(contract, { scope }) ? '1' : '0'}`;
   }
 
   /**

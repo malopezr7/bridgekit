@@ -7,6 +7,7 @@ import { createElement } from 'react';
 import { defineContract, t } from '../contract/contract';
 import { Async, State, Void } from '../contract/markers';
 import {
+  BridgeKitProvider,
   BridgeScopeProvider,
   useBridge,
   useBridgeReady,
@@ -17,6 +18,7 @@ import { getDefaultBridgeKit } from '../runtime/defaultInstance';
 import { diagnostics } from '../runtime/diagnostics';
 import type { Binding } from '../runtime/registry';
 import { GLOBAL_SCOPE } from '../runtime/registry';
+import { createTestBridge } from '../testing';
 
 // Unique contract IDs per file to avoid cross-test pollution.
 
@@ -173,6 +175,29 @@ describe('BridgeScopeProvider — scope isolation', () => {
     hookA.unmount();
     hookB.unmount();
   });
+
+  test('BridgeScopeProvider preserves an outer BridgeKitProvider instance', () => {
+    const { bridgekit: customKit } = createTestBridge();
+    const contract = defineContract('hooks.scope.custom-kit.test', {
+      methods: { ping: Async(t.string()) },
+    });
+    const binding = customKit.provide(contract, { ping: async () => 'custom' });
+
+    function Wrapper({ children }: { children: React.ReactNode }) {
+      return createElement(
+        BridgeKitProvider,
+        { bridgeKit: customKit },
+        createElement(BridgeScopeProvider, null, children),
+      );
+    }
+
+    const { result, unmount } = renderHook(() => useBridgeReady(contract), { wrapper: Wrapper });
+
+    expect(result.current).toBe(true);
+
+    unmount();
+    binding.close('final');
+  });
 });
 
 describe('useBridge proxy stability', () => {
@@ -195,6 +220,42 @@ describe('useBridge proxy stability', () => {
     expect(proxies.length).toBeGreaterThanOrEqual(2);
     expect(proxies[0]).toBe(proxies[1]);
     unmount();
+  });
+
+  test('proxy reference stays stable when readiness changes', () => {
+    const bk = getDefaultBridgeKit();
+    const contract = defineContract('hooks.proxy.ready-stable.test', {
+      methods: { ping: Async(t.string()) },
+    });
+    const proxies: unknown[] = [];
+
+    const { unmount } = renderHook(() => {
+      const proxy = useBridge(contract);
+      proxies.push(proxy);
+      return proxy;
+    });
+
+    act(() => {
+      bk.nativeReadiness.applyDelta({
+        op: 'provide',
+        contractId: contract.descriptor.id,
+        scope: GLOBAL_SCOPE,
+        seq: 1,
+      });
+    });
+
+    expect(proxies.length).toBeGreaterThanOrEqual(2);
+    expect(proxies[proxies.length - 1]).toBe(proxies[0]);
+
+    unmount();
+    act(() => {
+      bk.nativeReadiness.applyDelta({
+        op: 'unprovide',
+        contractId: contract.descriptor.id,
+        scope: GLOBAL_SCOPE,
+        seq: 2,
+      });
+    });
   });
 
   test('useProvideBridge mounts and unmounts without error', () => {
@@ -364,7 +425,61 @@ describe('ContractHook real subscription', () => {
 
     unmount();
   });
+
+  test('useBridgeState snapshot identity is stable when another contract readiness changes', () => {
+    const contractA = defineContract('hooks.state.readiness-stable-a.test', {
+      state: { value: State(t.string(), 'a') },
+    });
+    const contractB = defineContract('hooks.state.readiness-stable-b.test', {
+      methods: { ping: Async(t.string()) },
+    });
+    binding = bk.provide(contractA, {}, { scope: GLOBAL_SCOPE });
+
+    const snapshots: unknown[] = [];
+    const { result, rerender, unmount } = renderHook(() => {
+      const snapshot = useBridgeState(contractA, 'value');
+      snapshots.push(snapshot);
+      return snapshot;
+    });
+
+    expect(result.current.value).toBe('a');
+
+    act(() => {
+      bk.nativeReadiness.applyDelta({
+        op: 'provide',
+        contractId: contractB.descriptor.id,
+        scope: GLOBAL_SCOPE,
+        seq: 1,
+      });
+    });
+    rerender();
+
+    expect(snapshots.length).toBeGreaterThanOrEqual(2);
+    expect(snapshots[snapshots.length - 1]).toBe(snapshots[0]);
+
+    unmount();
+    act(() => {
+      bk.nativeReadiness.applyDelta({
+        op: 'unprovide',
+        contractId: contractB.descriptor.id,
+        scope: GLOBAL_SCOPE,
+        seq: 2,
+      });
+    });
+  });
 });
+
+function readinessSubscriberCounts(bk: ReturnType<typeof getDefaultBridgeKit>): {
+  registry: number;
+  native: number;
+} {
+  const registry = bk.registry as unknown as { _readinessListeners: Set<unknown> };
+  const nativeReadiness = bk.nativeReadiness as unknown as { _subscribers: Set<unknown> };
+  return {
+    registry: registry._readinessListeners.size,
+    native: nativeReadiness._subscribers.size,
+  };
+}
 
 describe('No subscription leaks on unmount', () => {
   test('unmounting hook stops receiving updates', async () => {
@@ -408,6 +523,25 @@ describe('No subscription leaks on unmount', () => {
 
     expect(mountCount).toBeGreaterThan(0);
     expect(() => unmount()).not.toThrow();
+  });
+
+  test('useBridgeReady unsubscribes readiness channels on unmount', () => {
+    const bk = getDefaultBridgeKit();
+    const contract = defineContract('hooks.ready.no-leak.test', {
+      methods: { ping: Async(t.string()) },
+    });
+    const before = readinessSubscriberCounts(bk);
+
+    const { unmount } = renderHook(() => useBridgeReady(contract));
+
+    expect(readinessSubscriberCounts(bk)).toEqual({
+      registry: before.registry + 1,
+      native: before.native + 1,
+    });
+
+    unmount();
+
+    expect(readinessSubscriberCounts(bk)).toEqual(before);
   });
 });
 
@@ -484,5 +618,28 @@ describe('useBridgeReady persistent readiness subscription', () => {
 
     expect(result.current).toBe(false);
     unmount();
+  });
+
+  test('inline-equal scope literals do not resubscribe on rerender', () => {
+    const bk = getDefaultBridgeKit();
+    const contract = defineContract('hooks.ready.scope-stable.test', {
+      methods: { ping: Async(t.string()) },
+    });
+    const subscribeSpy = jest.spyOn(bk, 'subscribeReadiness');
+
+    const { rerender, unmount } = renderHook(() =>
+      useBridgeReady(contract, { scope: { kind: 'feature', feature: 'inline-ready' } }),
+    );
+
+    rerender();
+    rerender();
+    rerender();
+    rerender();
+    rerender();
+
+    expect(subscribeSpy).toHaveBeenCalledTimes(1);
+
+    unmount();
+    subscribeSpy.mockRestore();
   });
 });

@@ -64,9 +64,10 @@ function useReadinessSignal(
   scope: BridgeScope,
 ): string {
   return useSyncExternalStore(
+    // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — scope fields are the stable deps
     useCallback(
       (onStoreChange) => bk.subscribeReadiness(contract, scope, onStoreChange),
-      [bk, contract, scope],
+      [bk, contract, scope.kind, scope.feature, scope.instance],
     ),
     () => bk.readinessSnapshot(contract, scope),
     () => bk.readinessSnapshot(contract, scope),
@@ -86,6 +87,7 @@ interface BridgeKitProviderProps {
   children: ReactNode;
 }
 
+/** @internal Test seam for injecting an isolated BridgeKitJs instance. */
 export function BridgeKitProvider({ bridgeKit, children }: BridgeKitProviderProps): ReactNode {
   return createElement(BridgeKitContext.Provider, { value: bridgeKit }, children);
 }
@@ -101,6 +103,7 @@ export function BridgeScopeProvider({
   instance,
   children,
 }: BridgeScopeProviderProps): ReactNode {
+  const bridgeKit = useBridgeKit();
   const scope: BridgeScope = useMemo(
     () =>
       instance
@@ -114,7 +117,7 @@ export function BridgeScopeProvider({
   return createElement(
     ScopeContext.Provider,
     { value: scope },
-    createElement(BridgeKitContext.Provider, { value: getDefaultBridgeKit() }, children),
+    createElement(BridgeKitContext.Provider, { value: bridgeKit }, children),
   );
 }
 
@@ -132,12 +135,12 @@ export function useBridge<TShape>(
   const contextScope = useContext(ScopeContext);
   const scope = opts?.scope ?? contextScope;
   useWarnIfNoProvider(contextScope, opts?.scope !== undefined, 'useBridge');
-  const readinessSignal = useReadinessSignal(bk, contract as BridgeContract<unknown>, scope);
+  useReadinessSignal(bk, contract as BridgeContract<unknown>, scope);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — scope fields are the stable deps
   return useMemo(
     () => bk.bridge(contract, { scope }),
-    [bk, contract, scope.kind, scope.feature, scope.instance, readinessSignal],
+    [bk, contract, scope.kind, scope.feature, scope.instance],
   );
 }
 

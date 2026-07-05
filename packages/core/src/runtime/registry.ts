@@ -81,7 +81,7 @@ interface ReadinessWaiter {
 
 // ---- Registry constants ---------------------------------------------------
 
-const DEFAULT_READINESS_TIMEOUT_MS = 5000;
+export const DEFAULT_READINESS_TIMEOUT_MS = 5000;
 const DEFAULT_GRACE_WINDOW_MS = 1500;
 
 // ---- Registry -------------------------------------------------------------
