@@ -7,12 +7,20 @@ import { decode, encode, sanitizeAny } from '../contract/codec';
 import type { BridgeContract, BridgeStreamSource } from '../contract/contract';
 import type { CallEnvelope, ResultEnvelope } from '../contract/protocol';
 import { diagnostics } from './diagnostics';
-import { type Registry, serializeScope } from './registry';
+import { type Binding, type Registry, serializeScope } from './registry';
 import type { BridgeTransport, JsDispatcher } from './transport';
 
 type StreamProducerEntry = {
+  generationToken?: ReplayGenerationToken;
   unsubscribe: () => void;
   replayKey?: string;
+};
+
+type ReplayGenerationToken = Binding;
+
+type StreamLatestEntry = {
+  generationToken: ReplayGenerationToken;
+  value: unknown;
 };
 
 type ReplayCloneResult<T> = { ok: true; value: T } | { ok: false };
@@ -59,15 +67,16 @@ export class Dispatcher implements JsDispatcher {
   private _transport: BridgeTransport | null = null;
   private _openProducers = new Map<string, StreamProducerEntry>();
   private _parkedStreams = new Map<string, () => void>();
-  private _streamLatestValues = new Map<string, unknown>();
+  private _streamLatestValues = new Map<string, StreamLatestEntry>();
+  private _liveReplayGenerations = new Set<ReplayGenerationToken>();
 
   constructor(
     private readonly _registry: Registry,
     private readonly _contracts: Map<string, BridgeContract<unknown>>,
   ) {
-    this._registry.onBindingClose(({ contractId, scope, reason }) => {
+    this._registry.onBindingClose(({ binding, contractId, scope, reason }) => {
       if (reason === 'final') {
-        this.invalidateReplayFor(contractId, scope);
+        this.invalidateReplayFor(contractId, scope, binding);
       }
     });
   }
@@ -189,10 +198,21 @@ export class Dispatcher implements JsDispatcher {
       const shouldReplayLatest =
         descriptorWantsReplay || env.latestOnly === true || env.sticky === true;
       const replayKey = shouldReplayLatest ? streamReplayKey(env) : undefined;
-      if (replayKey !== undefined && this._streamLatestValues.has(replayKey)) {
-        const replay = cloneReplayValue(this._streamLatestValues.get(replayKey));
-        if (replay.ok) {
-          transport.emitFromJs(streamId, replay.value);
+      const generationToken = replayKey !== undefined ? entry.binding : undefined;
+      if (generationToken !== undefined) {
+        this._liveReplayGenerations.add(generationToken);
+      }
+      if (replayKey !== undefined) {
+        const replayEntry = this._streamLatestValues.get(replayKey);
+        if (replayEntry !== undefined) {
+          if (this._liveReplayGenerations.has(replayEntry.generationToken)) {
+            const replay = cloneReplayValue(replayEntry.value);
+            if (replay.ok) {
+              transport.emitFromJs(streamId, replay.value);
+            }
+          } else {
+            this._streamLatestValues.delete(replayKey);
+          }
         }
       }
 
@@ -222,8 +242,13 @@ export class Dispatcher implements JsDispatcher {
               // Marker path: no schema → universal sanitize
               encoded = sanitizeAny(result.value);
             }
-            if (shouldReplayLatest && replayKey !== undefined) {
-              this._streamLatestValues.set(replayKey, encoded);
+            if (
+              shouldReplayLatest &&
+              replayKey !== undefined &&
+              generationToken !== undefined &&
+              this._liveReplayGenerations.has(generationToken)
+            ) {
+              this._streamLatestValues.set(replayKey, { generationToken, value: encoded });
             }
             transport.emitFromJs(streamId, encoded);
           }
@@ -251,6 +276,7 @@ export class Dispatcher implements JsDispatcher {
       pump().catch(() => {});
 
       this._openProducers.set(streamId, {
+        generationToken,
         replayKey,
         unsubscribe: () => {
           active = false;
@@ -320,9 +346,24 @@ export class Dispatcher implements JsDispatcher {
     }
     this._openProducers.clear();
     this._streamLatestValues.clear();
+    this._liveReplayGenerations.clear();
   }
 
-  invalidateReplayFor(contractId: string, scope: CallEnvelope['scope']): void {
+  invalidateReplayFor(
+    contractId: string,
+    scope: CallEnvelope['scope'],
+    generationToken?: ReplayGenerationToken,
+  ): void {
+    if (generationToken !== undefined) {
+      this._liveReplayGenerations.delete(generationToken);
+      for (const [replayKey, replayEntry] of Array.from(this._streamLatestValues.entries())) {
+        if (replayEntry.generationToken === generationToken) {
+          this._streamLatestValues.delete(replayKey);
+        }
+      }
+      return;
+    }
+
     const scopeNeedle = `|${serializeScope(scope)}|`;
     for (const replayKey of Array.from(this._streamLatestValues.keys())) {
       if (replayKey.startsWith(`${contractId}|`) && replayKey.includes(scopeNeedle)) {

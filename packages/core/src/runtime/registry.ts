@@ -44,6 +44,7 @@ interface RegistryEntry {
 }
 
 interface BindingCloseEvent {
+  binding: Binding;
   contractId: string;
   scope: BridgeScope;
   reason?: 'replacing' | 'final';
@@ -213,7 +214,7 @@ export class Registry {
           durationMs: 0,
           side: 'js',
         });
-        this._notifyClose({ contractId, scope, reason });
+        this._notifyClose({ binding, contractId, scope, reason });
       },
     };
 

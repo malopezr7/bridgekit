@@ -25,12 +25,13 @@ function makeStreamOpen(
   member: string,
   flags?: Pick<CallEnvelope, 'latestOnly' | 'sticky'>,
   payload?: unknown,
+  scope: CallEnvelope['scope'] = GLOBAL_SCOPE,
 ) {
   return {
     op: 'streamOpen' as const,
     contractId: StreamDeliveryContract.descriptor.id,
     member,
-    scope: GLOBAL_SCOPE,
+    scope,
     ...(payload !== undefined ? { payload } : {}),
     correlationId: `corr-${member}`,
     epoch: 1,
@@ -247,6 +248,77 @@ describe('Dispatcher stream delivery modes', () => {
     expect(values.get('stream-2')).toEqual(['provider-generation-2']);
   });
 
+  test('final-close of fallback provider invalidates requested-scope replay', async () => {
+    const { dispatcher, registry, values } = makeDispatcherHarness();
+    const instanceScope: CallEnvelope['scope'] = {
+      kind: 'instance',
+      feature: 'fallback-feature',
+      instance: 'fallback-instance',
+    };
+    const firstBinding = registry.provide(StreamDeliveryContract, {
+      latestEvents: () =>
+        streamSource<string>((emit) => {
+          emit('fallback-generation-1');
+          return () => {};
+        }),
+    });
+
+    dispatcher.onStreamOpen(
+      makeStreamOpen('latestEvents', { latestOnly: true }, undefined, instanceScope),
+      'stream-1',
+    );
+    await flushMicrotasks();
+    firstBinding.close('final');
+    registry.provide(StreamDeliveryContract, {
+      latestEvents: () =>
+        streamSource<string>((emit) => {
+          emit('fallback-generation-2');
+          return () => {};
+        }),
+    });
+
+    dispatcher.onStreamOpen(
+      makeStreamOpen('latestEvents', { latestOnly: true }, undefined, instanceScope),
+      'stream-2',
+    );
+    await flushMicrotasks();
+
+    expect(values.get('stream-1')).toEqual(['fallback-generation-1']);
+    expect(values.get('stream-2')).toEqual(['fallback-generation-2']);
+  });
+
+  test('post-final-close producer emissions stay live but cannot re-poison replay', async () => {
+    const { dispatcher, registry, values } = makeDispatcherHarness();
+    let emitFromFirst: ((value: string) => void) | undefined;
+    const firstBinding = registry.provide(StreamDeliveryContract, {
+      latestEvents: () =>
+        streamSource<string>((emit) => {
+          emitFromFirst = emit;
+          emit('gen1-a');
+          return () => {};
+        }),
+    });
+
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-1');
+    await flushMicrotasks();
+    firstBinding.close('final');
+    emitFromFirst?.('gen1-late');
+    await flushMicrotasks();
+    registry.provide(StreamDeliveryContract, {
+      latestEvents: () =>
+        streamSource<string>((emit) => {
+          emit('gen2-b');
+          return () => {};
+        }),
+    });
+
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-2');
+    await flushMicrotasks();
+
+    expect(values.get('stream-1')).toEqual(['gen1-a', 'gen1-late']);
+    expect(values.get('stream-2')).toEqual(['gen2-b']);
+  });
+
   test('envelope latestOnly updates replay cache for unflagged descriptors', async () => {
     const { dispatcher, registry, values } = makeDispatcherHarness();
     let sequence = 0;
@@ -266,6 +338,27 @@ describe('Dispatcher stream delivery modes', () => {
 
     expect(values.get('stream-1')).toEqual(['envelope-1']);
     expect(values.get('stream-2')).toEqual(['envelope-1', 'envelope-2']);
+  });
+
+  test('envelope sticky updates replay cache for unflagged descriptors', async () => {
+    const { dispatcher, registry, values } = makeDispatcherHarness();
+    let sequence = 0;
+    registry.provide(StreamDeliveryContract, {
+      plainEvents: () =>
+        streamSource<string>((emit) => {
+          sequence += 1;
+          emit(`sticky-envelope-${sequence}`);
+          return () => {};
+        }),
+    });
+
+    dispatcher.onStreamOpen(makeStreamOpen('plainEvents', { sticky: true }), 'stream-1');
+    await flushMicrotasks();
+    dispatcher.onStreamOpen(makeStreamOpen('plainEvents', { sticky: true }), 'stream-2');
+    await flushMicrotasks();
+
+    expect(values.get('stream-1')).toEqual(['sticky-envelope-1']);
+    expect(values.get('stream-2')).toEqual(['sticky-envelope-1', 'sticky-envelope-2']);
   });
 
   test('closing one same-key subscriber keeps replay cache for live siblings', async () => {
