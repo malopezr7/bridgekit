@@ -14,12 +14,17 @@ type StreamProducerEntry = {
   unsubscribe: () => void;
 };
 
+function streamReplayKey(env: CallEnvelope): string {
+  return `${env.contractId}|${env.member}|${JSON.stringify(env.scope)}`;
+}
+
 // ---- Dispatcher ------------------------------------------------------------
 
 export class Dispatcher implements JsDispatcher {
   private _transport: BridgeTransport | null = null;
   private _openProducers = new Map<string, StreamProducerEntry>();
   private _parkedStreams = new Map<string, () => void>();
+  private _streamLatestValues = new Map<string, unknown>();
 
   constructor(
     private readonly _registry: Registry,
@@ -139,6 +144,11 @@ export class Dispatcher implements JsDispatcher {
 
       let active = true;
       const iterator = source[Symbol.asyncIterator]();
+      const shouldReplayLatest = env.latestOnly === true || env.sticky === true;
+      const replayKey = shouldReplayLatest ? streamReplayKey(env) : undefined;
+      if (replayKey !== undefined && this._streamLatestValues.has(replayKey)) {
+        transport.emitFromJs(streamId, this._streamLatestValues.get(replayKey));
+      }
 
       // Drive iterator async — pumps values to transport and calls endFromJs when done
       const pump = async () => {
@@ -160,6 +170,9 @@ export class Dispatcher implements JsDispatcher {
             } else {
               // Marker path: no schema → universal sanitize
               encoded = sanitizeAny(result.value);
+            }
+            if (replayKey !== undefined) {
+              this._streamLatestValues.set(replayKey, encoded);
             }
             transport.emitFromJs(streamId, encoded);
           }

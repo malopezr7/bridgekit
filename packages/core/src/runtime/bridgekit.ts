@@ -630,6 +630,8 @@ export class BridgeKitJs {
               correlationId: nextCorrelationId(),
               epoch: this._epoch,
               contractHash: contract.hash,
+              ...(streamDesc.latestOnly === true ? { latestOnly: true } : {}),
+              ...(streamDesc.sticky === true ? { sticky: true } : {}),
             };
 
             let streamId: string | null = null;
