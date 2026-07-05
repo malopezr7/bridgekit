@@ -405,6 +405,54 @@ describe('ContractHook real subscription', () => {
     unmount();
   });
 
+  test('useBridgeState rebuilds mirror when JS provider hands off to native readiness', async () => {
+    const { bridgekit, transport } = createTestBridge();
+    const contract = defineContract('hooks.state.js-native-handoff.test', {
+      state: { status: State(t.string(), 'initial') },
+    });
+    const binding = bridgekit.provide(contract, {}, { scope: GLOBAL_SCOPE });
+    binding.setState('status', 'js-backed');
+
+    function Wrapper({ children }: { children: React.ReactNode }) {
+      return createElement(BridgeKitProvider, { bridgeKit: bridgekit }, children);
+    }
+
+    const { result, unmount } = renderHook(() => useBridgeState(contract, 'status'), {
+      wrapper: Wrapper,
+    });
+
+    expect(result.current).toEqual({ value: 'js-backed', status: 'provided' });
+
+    act(() => {
+      bridgekit.nativeReadiness.applyDelta({
+        op: 'provide',
+        contractId: contract.descriptor.id,
+        scope: GLOBAL_SCOPE,
+        seq: 1,
+      });
+      transport.pushProviderState(contract.descriptor.id, GLOBAL_SCOPE, 'status', 'native-backed');
+      binding.close('final');
+    });
+
+    await act(async () => {});
+
+    act(() => {
+      transport.pushProviderState(contract.descriptor.id, GLOBAL_SCOPE, 'status', 'native-backed');
+    });
+
+    expect(result.current).toEqual({ value: 'native-backed', status: 'provided' });
+
+    unmount();
+    act(() => {
+      bridgekit.nativeReadiness.applyDelta({
+        op: 'unprovide',
+        contractId: contract.descriptor.id,
+        scope: GLOBAL_SCOPE,
+        seq: 2,
+      });
+    });
+  });
+
   test('ContractHook (defineContract) called in React render subscribes via useSyncExternalStore', async () => {
     binding = bk.provide(MarkerHookTest, {}, { scope: GLOBAL_SCOPE });
     binding.setState('msg', 'initial-value');
@@ -597,6 +645,41 @@ describe('useBridgeReady persistent readiness subscription', () => {
 
     expect(result.current).toBe(true);
     unmount();
+  });
+
+  test('feature-scoped useBridgeReady reacts when a global provider appears', () => {
+    const { bridgekit } = createTestBridge();
+    const contract = defineContract('hooks.ready.feature-global-fallback.test', {
+      methods: { ping: Async(t.string()) },
+    });
+    const featureScope = { kind: 'feature' as const, feature: 'global-fallback' };
+
+    function Wrapper({ children }: { children: React.ReactNode }) {
+      return createElement(BridgeKitProvider, { bridgeKit: bridgekit }, children);
+    }
+
+    const { result, unmount } = renderHook(
+      () => useBridgeReady(contract, { scope: featureScope }),
+      {
+        wrapper: Wrapper,
+      },
+    );
+
+    expect(result.current).toBe(false);
+
+    let globalBinding: Binding | null = null;
+    act(() => {
+      globalBinding = bridgekit.provide(
+        contract,
+        { ping: async () => 'pong' },
+        { scope: GLOBAL_SCOPE },
+      );
+    });
+
+    expect(result.current).toBe(true);
+
+    unmount();
+    globalBinding?.close('final');
   });
 
   test('provider loss transitions back to not-ready', () => {
