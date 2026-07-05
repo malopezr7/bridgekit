@@ -15,6 +15,8 @@ type StreamProducerEntry = {
   replayKey?: string;
 };
 
+type ReplayCloneResult<T> = { ok: true; value: T } | { ok: false };
+
 function stableSerialize(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(stableSerialize).join(',')}]`;
@@ -29,14 +31,22 @@ function stableSerialize(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function cloneReplayValue<T>(value: T): T {
+function cloneReplayValue<T>(value: T): ReplayCloneResult<T> {
   if (typeof globalThis.structuredClone === 'function') {
-    return globalThis.structuredClone(value);
+    try {
+      return { ok: true, value: globalThis.structuredClone(value) };
+    } catch {
+      // Fall through to the lossy JSON clone below. Replay must never fail open.
+    }
   }
   if (value === undefined || value === null || typeof value !== 'object') {
-    return value;
+    return { ok: true, value };
   }
-  return JSON.parse(JSON.stringify(value)) as T;
+  try {
+    return { ok: true, value: JSON.parse(JSON.stringify(value)) as T };
+  } catch {
+    return { ok: false };
+  }
 }
 
 function streamReplayKey(env: CallEnvelope): string {
@@ -54,7 +64,13 @@ export class Dispatcher implements JsDispatcher {
   constructor(
     private readonly _registry: Registry,
     private readonly _contracts: Map<string, BridgeContract<unknown>>,
-  ) {}
+  ) {
+    this._registry.onBindingClose(({ contractId, scope, reason }) => {
+      if (reason === 'final') {
+        this.invalidateReplayFor(contractId, scope);
+      }
+    });
+  }
 
   setTransport(transport: BridgeTransport): void {
     this._transport = transport;
@@ -174,7 +190,10 @@ export class Dispatcher implements JsDispatcher {
         descriptorWantsReplay || env.latestOnly === true || env.sticky === true;
       const replayKey = shouldReplayLatest ? streamReplayKey(env) : undefined;
       if (replayKey !== undefined && this._streamLatestValues.has(replayKey)) {
-        transport.emitFromJs(streamId, cloneReplayValue(this._streamLatestValues.get(replayKey)));
+        const replay = cloneReplayValue(this._streamLatestValues.get(replayKey));
+        if (replay.ok) {
+          transport.emitFromJs(streamId, replay.value);
+        }
       }
 
       // Drive iterator async — pumps values to transport and calls endFromJs when done
@@ -186,9 +205,11 @@ export class Dispatcher implements JsDispatcher {
               if (active) {
                 transport.endFromJs(streamId, { ok: true });
                 if (replayKey !== undefined) {
-                  this._streamLatestValues.delete(replayKey);
+                  this._openProducers.delete(streamId);
+                  this._deleteReplayIfUnused(replayKey);
+                } else {
+                  this._openProducers.delete(streamId);
                 }
-                this._openProducers.delete(streamId);
               }
               break;
             }
@@ -201,7 +222,7 @@ export class Dispatcher implements JsDispatcher {
               // Marker path: no schema → universal sanitize
               encoded = sanitizeAny(result.value);
             }
-            if (descriptorWantsReplay && replayKey !== undefined) {
+            if (shouldReplayLatest && replayKey !== undefined) {
               this._streamLatestValues.set(replayKey, encoded);
             }
             transport.emitFromJs(streamId, encoded);
@@ -217,11 +238,11 @@ export class Dispatcher implements JsDispatcher {
               scope: env.scope,
             });
             if (replayKey !== undefined) {
-              this._streamLatestValues.delete(replayKey);
+              this._openProducers.delete(streamId);
+              this._deleteReplayIfUnused(replayKey);
+            } else {
+              this._openProducers.delete(streamId);
             }
-            // 5.7: clean up the producer entry so onStreamClose does not attempt
-            // a second unsubscribe/endFromJs on an already-finished stream.
-            this._openProducers.delete(streamId);
           }
         }
       };
@@ -261,9 +282,11 @@ export class Dispatcher implements JsDispatcher {
     if (producer) {
       producer.unsubscribe();
       if (producer.replayKey !== undefined) {
-        this._streamLatestValues.delete(producer.replayKey);
+        this._openProducers.delete(streamId);
+        this._deleteReplayIfUnused(producer.replayKey);
+      } else {
+        this._openProducers.delete(streamId);
       }
-      this._openProducers.delete(streamId);
     }
   }
 
@@ -299,6 +322,15 @@ export class Dispatcher implements JsDispatcher {
     this._streamLatestValues.clear();
   }
 
+  invalidateReplayFor(contractId: string, scope: CallEnvelope['scope']): void {
+    const scopeNeedle = `|${serializeScope(scope)}|`;
+    for (const replayKey of Array.from(this._streamLatestValues.keys())) {
+      if (replayKey.startsWith(`${contractId}|`) && replayKey.includes(scopeNeedle)) {
+        this._streamLatestValues.delete(replayKey);
+      }
+    }
+  }
+
   // ---- private helpers -----------------------------------------------------
 
   private _notProvided(env: CallEnvelope): ResultEnvelope {
@@ -310,6 +342,13 @@ export class Dispatcher implements JsDispatcher {
       member: env.member,
       scope: env.scope,
     };
+  }
+
+  private _deleteReplayIfUnused(replayKey: string): void {
+    for (const producer of this._openProducers.values()) {
+      if (producer.replayKey === replayKey) return;
+    }
+    this._streamLatestValues.delete(replayKey);
   }
 
   private async _callImpl(

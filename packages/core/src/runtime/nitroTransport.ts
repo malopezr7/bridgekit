@@ -39,6 +39,12 @@ function envelopeToMap(env: CallEnvelope): Record<string, unknown> {
   if (env.contractHash !== undefined) {
     map.contractHash = env.contractHash;
   }
+  if (env.latestOnly !== undefined) {
+    map.latestOnly = env.latestOnly;
+  }
+  if (env.sticky !== undefined) {
+    map.sticky = env.sticky;
+  }
   return map;
 }
 
@@ -90,6 +96,8 @@ function mapToEnvelope(map: Record<string, unknown>): CallEnvelope {
     correlationId: (map.correlationId as string | undefined) ?? '',
     epoch: (map.epoch as number | undefined) ?? 0,
     contractHash: map.contractHash as string | undefined,
+    latestOnly: map.latestOnly as boolean | undefined,
+    sticky: map.sticky as boolean | undefined,
   };
 }
 

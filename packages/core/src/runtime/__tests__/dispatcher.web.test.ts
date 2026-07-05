@@ -1,4 +1,4 @@
-import { describe, expect, test } from '@jest/globals';
+import { describe, expect, jest, test } from '@jest/globals';
 import { defineContract, t } from '../../contract/contract';
 import type { CallEnvelope, ResultEnvelope } from '../../contract/protocol';
 import { BridgeKitJs } from '../bridgekit';
@@ -231,7 +231,6 @@ describe('Dispatcher stream delivery modes', () => {
 
     dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-1');
     await flushMicrotasks();
-    dispatcher.onStreamClose('stream-1', 'consumer');
     firstBinding.close('final');
     registry.provide(StreamDeliveryContract, {
       latestEvents: () =>
@@ -246,6 +245,84 @@ describe('Dispatcher stream delivery modes', () => {
 
     expect(values.get('stream-1')).toEqual(['provider-generation-1']);
     expect(values.get('stream-2')).toEqual(['provider-generation-2']);
+  });
+
+  test('envelope latestOnly updates replay cache for unflagged descriptors', async () => {
+    const { dispatcher, registry, values } = makeDispatcherHarness();
+    let sequence = 0;
+    registry.provide(StreamDeliveryContract, {
+      plainEvents: () =>
+        streamSource<string>((emit) => {
+          sequence += 1;
+          emit(`envelope-${sequence}`);
+          return () => {};
+        }),
+    });
+
+    dispatcher.onStreamOpen(makeStreamOpen('plainEvents', { latestOnly: true }), 'stream-1');
+    await flushMicrotasks();
+    dispatcher.onStreamOpen(makeStreamOpen('plainEvents', { latestOnly: true }), 'stream-2');
+    await flushMicrotasks();
+
+    expect(values.get('stream-1')).toEqual(['envelope-1']);
+    expect(values.get('stream-2')).toEqual(['envelope-1', 'envelope-2']);
+  });
+
+  test('closing one same-key subscriber keeps replay cache for live siblings', async () => {
+    const { dispatcher, registry, values } = makeDispatcherHarness();
+    let sequence = 0;
+    registry.provide(StreamDeliveryContract, {
+      latestEvents: () =>
+        streamSource<string>((emit) => {
+          sequence += 1;
+          emit(`shared-${sequence}`);
+          return () => {};
+        }),
+    });
+
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-1');
+    await flushMicrotasks();
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-2');
+    await flushMicrotasks();
+    dispatcher.onStreamClose('stream-1', 'consumer');
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-3');
+    await flushMicrotasks();
+
+    expect(values.get('stream-2')).toEqual(['shared-1', 'shared-2']);
+    expect(values.get('stream-3')).toEqual(['shared-2', 'shared-3']);
+  });
+
+  test('clone failures never fail stream open and fall back to JSON replay clone', async () => {
+    const originalStructuredClone = globalThis.structuredClone;
+    Object.defineProperty(globalThis, 'structuredClone', {
+      configurable: true,
+      value: jest.fn(() => {
+        throw new Error('cannot clone symbol');
+      }),
+    });
+    const { dispatcher, ends, registry, values } = makeDispatcherHarness();
+    try {
+      registry.provide(StreamDeliveryContract, {
+        objectEvents: () =>
+          streamSource<unknown>((emit) => {
+            emit({ marker: Symbol('not-cloneable'), safe: 'ok' });
+            return () => {};
+          }),
+      });
+
+      dispatcher.onStreamOpen(makeStreamOpen('objectEvents', { latestOnly: true }), 'stream-1');
+      await flushMicrotasks();
+      dispatcher.onStreamOpen(makeStreamOpen('objectEvents', { latestOnly: true }), 'stream-2');
+      await flushMicrotasks();
+
+      expect(values.get('stream-2')?.[0]).toEqual({ safe: 'ok' });
+      expect(ends.get('stream-2')).toBeUndefined();
+    } finally {
+      Object.defineProperty(globalThis, 'structuredClone', {
+        configurable: true,
+        value: originalStructuredClone,
+      });
+    }
   });
 
   test('closeAllProducers clears latest replay across epochs', async () => {

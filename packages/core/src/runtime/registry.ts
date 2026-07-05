@@ -43,6 +43,12 @@ interface RegistryEntry {
   state: Map<string, unknown>;
 }
 
+interface BindingCloseEvent {
+  contractId: string;
+  scope: BridgeScope;
+  reason?: 'replacing' | 'final';
+}
+
 interface ReplacingWaiter {
   requestedScope: BridgeScope;
   resolve: () => void;
@@ -79,6 +85,7 @@ export class Registry {
   private readonly _readinessWaiters = new Map<string, ReadinessWaiter[]>();
   // Registry-level state listeners survive provider swaps — never cleared by an entry close.
   private readonly _stateListeners = new Map<string, Set<(value: unknown) => void>>();
+  private readonly _closeListeners = new Set<(event: BindingCloseEvent) => void>();
 
   private _key(contractId: string, scopeKey: string): string {
     return `${contractId}|${scopeKey}`;
@@ -206,6 +213,7 @@ export class Registry {
           durationMs: 0,
           side: 'js',
         });
+        this._notifyClose({ contractId, scope, reason });
       },
     };
 
@@ -371,6 +379,19 @@ export class Registry {
       scopeKey: entry.binding.scopeKey,
       isLive: entry.binding.isLive,
     }));
+  }
+
+  onBindingClose(listener: (event: BindingCloseEvent) => void): () => void {
+    this._closeListeners.add(listener);
+    return () => {
+      this._closeListeners.delete(listener);
+    };
+  }
+
+  private _notifyClose(event: BindingCloseEvent): void {
+    for (const listener of this._closeListeners) {
+      listener(event);
+    }
   }
 
   private _notifyReadiness(contractId: string, scopeKey: string): void {

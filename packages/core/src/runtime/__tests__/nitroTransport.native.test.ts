@@ -178,7 +178,7 @@ describe('connect', () => {
 
     await transport.invoke(baseEnv);
 
-    const arg = host.invoke.mock.calls[0]![0] as Record<string, unknown>;
+    const arg = host.invoke.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(arg.epoch).toBe(7);
   });
 });
@@ -199,7 +199,7 @@ describe('invoke', () => {
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.value).toBe('hello');
 
-    const sentMap = host.invoke.mock.calls[0]![0] as Record<string, unknown>;
+    const sentMap = host.invoke.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(sentMap.op).toBe('invoke');
     expect(sentMap.contractId).toBe('test.contract');
     expect(sentMap.member).toBe('doThing');
@@ -275,7 +275,7 @@ describe('onInvoke callback', () => {
     };
 
     // Must resolve, never reject
-    await expect(capturedOnInvoke!(envMap)).resolves.toBeDefined();
+    await expect(capturedOnInvoke?.(envMap)).resolves.toBeDefined();
   });
 
   it('never rejects when the dispatcher resolves ok:false', async () => {
@@ -310,13 +310,52 @@ describe('onInvoke callback', () => {
       epoch: 1,
     };
 
-    await expect(capturedOnInvoke!(envMap)).resolves.toBeDefined();
+    await expect(capturedOnInvoke?.(envMap)).resolves.toBeDefined();
   });
 });
 
 // ---- stream open / close / { v } wrapping -----------------------------------
 
 describe('openStream', () => {
+  it('carries latestOnly and sticky flags across the Nitro wire in both directions', () => {
+    const { host, streams } = getMocks();
+    let capturedOnStreamOpen: ((env: unknown) => void) | undefined;
+    host.connectDispatcher.mockImplementation(
+      (_epochInfo: unknown, _onInvoke: unknown, onStreamOpen: (env: unknown) => void) => {
+        capturedOnStreamOpen = onStreamOpen;
+        return { epoch: 1, snapshot: [] };
+      },
+    );
+    streams.open.mockReturnValue('stream-flags');
+    const dispatcher = makeDispatcher();
+
+    const transport = new NitroBridgeTransport();
+    transport.connect(dispatcher);
+
+    transport.openStream(
+      { ...baseEnv, op: 'streamOpen', latestOnly: true, sticky: true },
+      jest.fn(),
+      jest.fn(),
+    );
+
+    expect(streams.open.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ latestOnly: true, sticky: true }),
+    );
+
+    capturedOnStreamOpen?.({
+      ...baseEnv,
+      op: 'streamOpen',
+      streamId: 'native-stream',
+      latestOnly: true,
+      sticky: true,
+    });
+
+    expect(dispatcher.onStreamOpen).toHaveBeenCalledWith(
+      expect.objectContaining({ latestOnly: true, sticky: true }),
+      'native-stream',
+    );
+  });
+
   it('passes envelope and captures onNext/onEnd callbacks', () => {
     const { host, streams } = getMocks();
     host.connectDispatcher.mockReturnValue({ epoch: 1, snapshot: [] });
@@ -334,12 +373,12 @@ describe('openStream', () => {
     expect(streams.open).toHaveBeenCalledTimes(1);
 
     // Simulate native calling onNext with { v: 'tick' }
-    const passedOnNext = streams.open.mock.calls[0]![1] as (v: Record<string, unknown>) => void;
+    const passedOnNext = streams.open.mock.calls[0]?.[1] as (v: Record<string, unknown>) => void;
     passedOnNext({ v: 'tick' });
     expect(onNext).toHaveBeenCalledWith('tick');
 
     // Simulate native calling onEnd with ok:true envelope
-    const passedOnEnd = streams.open.mock.calls[0]![2] as (e: Record<string, unknown>) => void;
+    const passedOnEnd = streams.open.mock.calls[0]?.[2] as (e: Record<string, unknown>) => void;
     passedOnEnd({ ok: true });
     expect(onEnd).toHaveBeenCalledWith({ ok: true, value: undefined });
   });
@@ -355,7 +394,7 @@ describe('openStream', () => {
     const onNext = jest.fn();
     transport.openStream({ ...baseEnv, op: 'streamOpen' }, onNext, jest.fn());
 
-    const passedOnNext = streams.open.mock.calls[0]![1] as (v: Record<string, unknown>) => void;
+    const passedOnNext = streams.open.mock.calls[0]?.[1] as (v: Record<string, unknown>) => void;
 
     passedOnNext({ v: null });
     expect(onNext).toHaveBeenLastCalledWith(null);
@@ -419,7 +458,7 @@ describe('stateObserve', () => {
     expect(obsId).toBe('obs-1');
 
     // Simulate native calling onChange with { v: 'active' }
-    const passedOnChange = state.observe.mock.calls[0]![1] as (v: Record<string, unknown>) => void;
+    const passedOnChange = state.observe.mock.calls[0]?.[1] as (v: Record<string, unknown>) => void;
     passedOnChange({ v: 'active' });
     expect(onChange).toHaveBeenCalledWith('active');
   });
