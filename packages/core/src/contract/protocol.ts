@@ -50,6 +50,12 @@ export interface CallEnvelope {
    * differs. Optional for backward/loopback compatibility.
    */
   contractHash?: string;
+  /**
+   * Optional stream delivery modes for op='streamOpen'. Old peers ignore these
+   * additive fields; absence preserves plain stream behavior.
+   */
+  latestOnly?: boolean;
+  sticky?: boolean;
 }
 
 // ---- handshake / connect envelope -----------------------------------------

@@ -78,6 +78,9 @@
     "README.md",
     "LICENSE",
     "!**/__tests__",
+    "!**/__tests__/**",
+    "!**/__typechecks__",
+    "!**/__typechecks__/**",
     "!**/__fixtures__",
     "!**/__mocks__",
     "!**/*.test.ts",
@@ -123,9 +126,14 @@
           "configFile": true
         }
       ],
-      "typescript"
+      [
+        "typescript",
+        {
+          "project": "tsconfig.build.json"
+        }
+      ]
     ],
-    "exclude": "{**/tests/**,**/*.stories.*}"
+    "exclude": "{**/tests/**,**/__tests__/**,**/__typechecks__/**,**/*.stories.*}"
   },
   "devDependencies": {
     "@babel/core": "7.28.3",

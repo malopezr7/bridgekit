@@ -1,4 +1,13 @@
-import { createBridgeError, ERROR_CODES, isBridgeError } from '../protocol';
+import { type CallEnvelope, createBridgeError, ERROR_CODES, isBridgeError } from '../protocol';
+
+const baseStreamOpenEnvelope = {
+  op: 'streamOpen' as const,
+  contractId: 'protocol.stream.test',
+  member: 'events',
+  scope: { kind: 'global' as const },
+  correlationId: 'corr-protocol-stream',
+  epoch: 1,
+};
 
 describe('ERROR_CODES', () => {
   it('is a readonly tuple of string codes', () => {
@@ -44,8 +53,8 @@ describe('isBridgeError', () => {
   it('accepts cross-realm-style plain objects (duck-typed)', () => {
     // Simulate object from a different realm (plain object that looks like error)
     const obj = Object.create(null) as Record<string, unknown>;
-    obj['code'] = 'CANCELLED';
-    obj['message'] = 'cancelled by user';
+    obj.code = 'CANCELLED';
+    obj.message = 'cancelled by user';
     expect(isBridgeError(obj)).toBe(true);
   });
 
@@ -82,5 +91,26 @@ describe('createBridgeError', () => {
     });
     expect(err.contractId).toBe('foo.bar');
     expect(err.scope).toEqual({ kind: 'global' });
+  });
+});
+
+describe('streamOpen delivery flags', () => {
+  it('keeps latestOnly and sticky optional when omitted', () => {
+    const env: CallEnvelope = baseStreamOpenEnvelope;
+
+    expect(env.op).toBe('streamOpen');
+    expect('latestOnly' in env).toBe(false);
+    expect('sticky' in env).toBe(false);
+  });
+
+  it('accepts latestOnly and sticky as additive streamOpen fields', () => {
+    const env: CallEnvelope = {
+      ...baseStreamOpenEnvelope,
+      latestOnly: true,
+      sticky: true,
+    };
+
+    expect(env.latestOnly).toBe(true);
+    expect(env.sticky).toBe(true);
   });
 });
