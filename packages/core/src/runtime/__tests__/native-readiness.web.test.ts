@@ -127,6 +127,22 @@ describe('Native readiness mirror protocol', () => {
     expect(mirror.dump()).toEqual([]);
   });
 
+  test('Stale delta rejection does not notify readiness subscribers', () => {
+    const mirror = new NativeReadinessMirror();
+    const notifications: boolean[] = [];
+    mirror.subscribe((record) => {
+      notifications.push(record.provided);
+    });
+    const dispatcher = new Dispatcher(new Registry(), new Map(), {
+      nativeReadiness: mirror,
+      getEpoch: () => 7,
+    });
+
+    dispatcher.onStateWrite(readinessDelta('provide', { epoch: 6, seq: 1 }));
+
+    expect(notifications).toEqual([]);
+  });
+
   test('latest-seq-wins application', () => {
     const mirror = new NativeReadinessMirror();
     const dispatcher = new Dispatcher(new Registry(), new Map(), {

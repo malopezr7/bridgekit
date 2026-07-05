@@ -580,6 +580,51 @@ describe('local-first: readiness waiter scope fallback', () => {
     expect(transport.stateObserveCalls).toBe(0);
   });
 
+  test('RT-JS-03 awaitProvided wakes from native readiness mirror', async () => {
+    const { bk } = makeBk();
+    const instanceScope = {
+      kind: 'instance' as const,
+      feature: 'nativeReadyFeature',
+      instance: 'instanceA',
+    };
+    const featureScope = { kind: 'feature' as const, feature: 'nativeReadyFeature' };
+
+    const waiter = bk.awaitProvided(ScopedContract, { scope: instanceScope, timeoutMs: 50 });
+
+    bk.nativeReadiness.applyDelta({
+      op: 'provide',
+      contractId: ScopedContract.descriptor.id,
+      scope: featureScope,
+      seq: 1,
+    });
+
+    await expect(waiter).resolves.toBeUndefined();
+    expect(bk.isProvided(ScopedContract, { scope: instanceScope })).toBe(true);
+  });
+
+  test('JS provider wins locally', async () => {
+    const { bk, transport } = makeBk({ shouldThrow: true });
+    const instanceScope = {
+      kind: 'instance' as const,
+      feature: 'localWinsFeature',
+      instance: 'instanceA',
+    };
+    const featureScope = { kind: 'feature' as const, feature: 'localWinsFeature' };
+    bk.nativeReadiness.applyDelta({
+      op: 'provide',
+      contractId: ScopedContract.descriptor.id,
+      scope: GLOBAL_SCOPE,
+      seq: 1,
+    });
+    bk.provide(ScopedContract, { who: async () => 'feature-js' }, { scope: featureScope });
+
+    const proxy = bk.bridge(ScopedContract, { scope: instanceScope });
+    const result = await (proxy as Record<string, () => Promise<string>>).who();
+
+    expect(result).toBe('feature-js');
+    expect(transport.invokeCalls).toBe(0);
+  });
+
   test('does not wake waiters for unrelated scopes', async () => {
     const { bk } = makeBk();
     const waitingScope = { kind: 'feature' as const, feature: 'waitingFeature' };

@@ -18,7 +18,7 @@ import {
   openLocalStream,
 } from './localInvoker';
 import type { Binding } from './registry';
-import { GLOBAL_SCOPE, Registry, serializeScope } from './registry';
+import { DEFAULT_READINESS_TIMEOUT_MS, GLOBAL_SCOPE, Registry, serializeScope } from './registry';
 import type { StateMirror } from './stateMirror';
 import { LocalStateMirror, MirrorRegistry, NativeReadinessMirror } from './stateMirror';
 import type { BridgeTransport } from './transport';
@@ -165,6 +165,20 @@ function createProviderFacade(binding: Binding): ProviderFacade {
   };
 }
 
+function candidateScopeKeys(scope: BridgeScope): string[] {
+  // Keep in sync with Registry._candidateScopeKeys. Duplicated here to avoid
+  // pushing registry-private fallback resolution into the BridgeKit facade layer.
+  if (scope.kind === 'instance') {
+    return [
+      serializeScope(scope),
+      serializeScope({ kind: 'feature', feature: scope.feature }),
+      'global',
+    ];
+  }
+  if (scope.kind === 'feature') return [serializeScope(scope), 'global'];
+  return ['global'];
+}
+
 // ---- BridgeKitJs ----------------------------------------------------------
 
 export class BridgeKitJs {
@@ -178,6 +192,7 @@ export class BridgeKitJs {
   private _connected = false;
   private _closingForEpochSwap = false;
   private _replayingProviders = false;
+  private readonly _readinessVersionByContract = new Map<string, number>();
 
   constructor(private readonly _transport: BridgeTransport) {
     this.registry = new Registry();
@@ -187,6 +202,19 @@ export class BridgeKitJs {
       nativeReadiness: this.nativeReadiness,
       getEpoch: () => this._epoch,
     });
+    this.registry.onReadinessChange((event) => {
+      this._bumpReadinessVersion(event.contractId);
+    });
+    this.nativeReadiness.subscribe((record) => {
+      this._bumpReadinessVersion(record.contractId);
+    });
+  }
+
+  private _bumpReadinessVersion(contractId: string): void {
+    this._readinessVersionByContract.set(
+      contractId,
+      (this._readinessVersionByContract.get(contractId) ?? 0) + 1,
+    );
   }
 
   /**
@@ -797,7 +825,10 @@ export class BridgeKitJs {
    */
   isProvided(contract: BridgeContract<unknown>, opts?: { scope?: BridgeScope }): boolean {
     const scope = opts?.scope ?? _ambientScope;
-    return this.registry.isProvided(contract.descriptor.id, scope);
+    return (
+      this.registry.isProvided(contract.descriptor.id, scope) ||
+      this.nativeReadiness.isProvided(contract.descriptor.id, scope)
+    );
   }
 
   /**
@@ -811,10 +842,74 @@ export class BridgeKitJs {
     opts?: { scope?: BridgeScope; timeoutMs?: number },
   ): Promise<void> {
     const scope = opts?.scope ?? _ambientScope;
-    return this.registry.whenProvided(contract.descriptor.id, {
-      scope,
-      timeoutMs: opts?.timeoutMs,
+    if (this.isProvided(contract, { scope })) return Promise.resolve();
+
+    const timeoutMs = opts?.timeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS;
+    return new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      let unsubscribeRegistry: (() => void) | null = null;
+      let unsubscribeNative: (() => void) | null = null;
+      const settle = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        if (timer !== null) clearTimeout(timer);
+        unsubscribeRegistry?.();
+        unsubscribeNative?.();
+        fn();
+      };
+      const check = () => {
+        if (this.isProvided(contract, { scope })) {
+          settle(resolve);
+        }
+      };
+
+      unsubscribeRegistry = this.registry.onReadinessChange((event) => {
+        if (event.contractId === contract.descriptor.id) check();
+      });
+      unsubscribeNative = this.nativeReadiness.subscribe((record) => {
+        if (record.contractId === contract.descriptor.id) check();
+      });
+      timer = setTimeout(() => {
+        settle(() => {
+          reject(
+            new Error(
+              `[bridgekit] CONTRACT_NOT_PROVIDED: contract '${contract.descriptor.id}' not provided in scope ${serializeScope(scope)} within ${timeoutMs}ms`,
+            ),
+          );
+        });
+      }, timeoutMs);
+      (timer as unknown as { unref?: () => void }).unref?.();
+      check();
     });
+  }
+
+  subscribeReadiness(
+    contract: BridgeContract<unknown>,
+    scope: BridgeScope,
+    onStoreChange: () => void,
+  ): () => void {
+    const relevantScopeKeys = candidateScopeKeys(scope);
+    const notifyIfRelevant = (contractId: string, scopeKey: string) => {
+      if (contractId === contract.descriptor.id && relevantScopeKeys.includes(scopeKey)) {
+        onStoreChange();
+      }
+    };
+    const unsubscribeRegistry = this.registry.onReadinessChange((event) => {
+      notifyIfRelevant(event.contractId, serializeScope(event.scope));
+    });
+    const unsubscribeNative = this.nativeReadiness.subscribe((record) => {
+      notifyIfRelevant(record.contractId, record.scopeKey);
+    });
+    return () => {
+      unsubscribeRegistry();
+      unsubscribeNative();
+    };
+  }
+
+  readinessSnapshot(contract: BridgeContract<unknown>, scope: BridgeScope): string {
+    const readinessVersion = this._readinessVersionByContract.get(contract.descriptor.id) ?? 0;
+    return `${readinessVersion}:${this.isProvided(contract, { scope }) ? '1' : '0'}`;
   }
 
   /**
