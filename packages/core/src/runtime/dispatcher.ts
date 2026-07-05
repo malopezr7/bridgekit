@@ -40,9 +40,12 @@ function stableSerialize(value: unknown): string {
 }
 
 function cloneReplayValue<T>(value: T): ReplayCloneResult<T> {
-  if (typeof globalThis.structuredClone === 'function') {
+  // Index access via a typed view: `globalThis.structuredClone` is not declared
+  // in every consumer tsconfig lib set (e.g. RN app configs without DOM).
+  const globalClone = (globalThis as { structuredClone?: <V>(input: V) => V }).structuredClone;
+  if (typeof globalClone === 'function') {
     try {
-      return { ok: true, value: globalThis.structuredClone(value) };
+      return { ok: true, value: globalClone(value) };
     } catch {
       // Fall through to the lossy JSON clone below. Replay must never fail open.
     }
