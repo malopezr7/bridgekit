@@ -9,7 +9,6 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
   useSyncExternalStore,
 } from 'react';
 import type { BridgeContract } from '../contract/contract';
@@ -59,12 +58,36 @@ function useBridgeKit(): BridgeKitJs {
   return useContext(BridgeKitContext) ?? getDefaultBridgeKit();
 }
 
+function useReadinessSignal(
+  bk: BridgeKitJs,
+  contract: BridgeContract<unknown>,
+  scope: BridgeScope,
+): string {
+  return useSyncExternalStore(
+    useCallback(
+      (onStoreChange) => bk.subscribeReadiness(contract, scope, onStoreChange),
+      [bk, contract, scope],
+    ),
+    () => bk.readinessSnapshot(contract, scope),
+    () => bk.readinessSnapshot(contract, scope),
+  );
+}
+
 // ---- BridgeScopeProvider ---------------------------------------------------
 
 interface BridgeScopeProviderProps {
   feature?: string;
   instance?: string;
   children: ReactNode;
+}
+
+interface BridgeKitProviderProps {
+  bridgeKit: BridgeKitJs;
+  children: ReactNode;
+}
+
+export function BridgeKitProvider({ bridgeKit, children }: BridgeKitProviderProps): ReactNode {
+  return createElement(BridgeKitContext.Provider, { value: bridgeKit }, children);
 }
 
 /**
@@ -109,11 +132,12 @@ export function useBridge<TShape>(
   const contextScope = useContext(ScopeContext);
   const scope = opts?.scope ?? contextScope;
   useWarnIfNoProvider(contextScope, opts?.scope !== undefined, 'useBridge');
+  const readinessSignal = useReadinessSignal(bk, contract as BridgeContract<unknown>, scope);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — scope fields are the stable deps
   return useMemo(
     () => bk.bridge(contract, { scope }),
-    [bk, contract, scope.kind, scope.feature, scope.instance],
+    [bk, contract, scope.kind, scope.feature, scope.instance, readinessSignal],
   );
 }
 
@@ -186,11 +210,12 @@ export function useBridgeState<TShape, K extends string>(
   const contextScope = useContext(ScopeContext);
   const scope = opts?.scope ?? contextScope;
   useWarnIfNoProvider(contextScope, opts?.scope !== undefined, 'useBridgeState');
+  const readinessSignal = useReadinessSignal(bk, contract as BridgeContract<unknown>, scope);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — scope fields are the stable deps
   const mirror = useMemo(
     () => bk.state(contract as BridgeContract<unknown>, key, scope),
-    [bk, contract, key, scope.kind, scope.feature, scope.instance],
+    [bk, contract, key, scope.kind, scope.feature, scope.instance, readinessSignal],
   );
 
   return useSyncExternalStore(
@@ -213,38 +238,9 @@ export function useBridgeReady<TShape>(
   const bk = useBridgeKit();
   const contextScope = useContext(ScopeContext);
   const scope = opts?.scope ?? contextScope;
+  useReadinessSignal(bk, contract as BridgeContract<unknown>, scope);
 
-  // useState lazy init only runs once, so we read synchronously during render
-  // and update via the effect when scope changes.
-  const contractId = contract.descriptor.id;
-  const scopeKind = scope.kind;
-  const scopeFeature = (scope as { feature?: string }).feature;
-  const scopeInstance = (scope as { instance?: string }).instance;
-
-  const [ready, setReady] = useState(() => bk.registry.isProvided(contractId, scope));
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — scope fields are the stable deps
-  useEffect(() => {
-    let cancelled = false;
-
-    setReady(bk.registry.isProvided(contractId, scope));
-
-    if (!bk.registry.isProvided(contractId, scope)) {
-      bk.registry
-        .whenProvided(contractId, { scope })
-        .then(() => {
-          if (!cancelled) setReady(bk.registry.isProvided(contractId, scope));
-        })
-        .catch(() => {});
-    }
-
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bk, contractId, scopeKind, scopeFeature, scopeInstance]);
-
-  return ready;
+  return bk.isProvided(contract as BridgeContract<unknown>, { scope });
 }
 
 export type { BridgeCallOpts };

@@ -6,7 +6,13 @@ import { act, renderHook } from '@testing-library/react';
 import { createElement } from 'react';
 import { defineContract, t } from '../contract/contract';
 import { Async, State, Void } from '../contract/markers';
-import { BridgeScopeProvider, useBridge, useBridgeState, useProvideBridge } from '../react/hooks';
+import {
+  BridgeScopeProvider,
+  useBridge,
+  useBridgeReady,
+  useBridgeState,
+  useProvideBridge,
+} from '../react/hooks';
 import { getDefaultBridgeKit } from '../runtime/defaultInstance';
 import { diagnostics } from '../runtime/diagnostics';
 import type { Binding } from '../runtime/registry';
@@ -402,5 +408,81 @@ describe('No subscription leaks on unmount', () => {
 
     expect(mountCount).toBeGreaterThan(0);
     expect(() => unmount()).not.toThrow();
+  });
+});
+
+describe('useBridgeReady persistent readiness subscription', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test('Re-arm after timeout', () => {
+    jest.useFakeTimers();
+    const bk = getDefaultBridgeKit();
+    const contract = defineContract('hooks.ready.rearm.test', {
+      methods: { ping: Async(t.string()) },
+    });
+
+    const { result, unmount } = renderHook(() => useBridgeReady(contract));
+
+    expect(result.current).toBe(false);
+    act(() => {
+      jest.advanceTimersByTime(5000);
+    });
+    expect(result.current).toBe(false);
+
+    let binding: Binding | null = null;
+    act(() => {
+      binding = bk.provide(contract, { ping: async () => 'pong' });
+    });
+
+    expect(result.current).toBe(true);
+    act(() => {
+      binding?.close('final');
+    });
+    unmount();
+  });
+
+  test('RT-JS-03 native visibility', () => {
+    const bk = getDefaultBridgeKit();
+    const contract = defineContract('hooks.ready.native.test', {
+      methods: { ping: Async(t.string()) },
+    });
+
+    const { result, unmount } = renderHook(() => useBridgeReady(contract));
+
+    expect(result.current).toBe(false);
+    act(() => {
+      bk.nativeReadiness.applyDelta({
+        op: 'provide',
+        contractId: contract.descriptor.id,
+        scope: GLOBAL_SCOPE,
+        seq: 1,
+      });
+    });
+
+    expect(result.current).toBe(true);
+    unmount();
+  });
+
+  test('provider loss transitions back to not-ready', () => {
+    const bk = getDefaultBridgeKit();
+    const contract = defineContract('hooks.ready.loss.test', {
+      methods: { ping: Async(t.string()) },
+    });
+    let binding: Binding | null = null;
+
+    act(() => {
+      binding = bk.provide(contract, { ping: async () => 'pong' });
+    });
+    const { result, unmount } = renderHook(() => useBridgeReady(contract));
+
+    expect(result.current).toBe(true);
+    act(() => {
+      binding?.close('final');
+    });
+
+    expect(result.current).toBe(false);
+    unmount();
   });
 });

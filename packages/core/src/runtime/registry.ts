@@ -50,6 +50,12 @@ interface BindingCloseEvent {
   reason?: 'replacing' | 'final';
 }
 
+type ReadinessChangeListener = (event: {
+  contractId: string;
+  scope: BridgeScope;
+  provided: boolean;
+}) => void;
+
 interface ReplacingWaiter {
   requestedScope: BridgeScope;
   resolve: () => void;
@@ -87,6 +93,7 @@ export class Registry {
   // Registry-level state listeners survive provider swaps — never cleared by an entry close.
   private readonly _stateListeners = new Map<string, Set<(value: unknown) => void>>();
   private readonly _closeListeners = new Set<(event: BindingCloseEvent) => void>();
+  private readonly _readinessListeners = new Set<ReadinessChangeListener>();
 
   private _key(contractId: string, scopeKey: string): string {
     return `${contractId}|${scopeKey}`;
@@ -215,6 +222,7 @@ export class Registry {
           side: 'js',
         });
         this._notifyClose({ binding, contractId, scope, reason });
+        this._notifyReadinessChange({ contractId, scope, provided: false });
       },
     };
 
@@ -225,6 +233,7 @@ export class Registry {
 
     // Resolve any readiness waiters
     this._notifyReadiness(contractId, scopeKey);
+    this._notifyReadinessChange({ contractId, scope, provided: true });
 
     diagnostics.trace({
       op: 'provide',
@@ -389,9 +398,30 @@ export class Registry {
     };
   }
 
+  onReadinessChange(listener: ReadinessChangeListener): () => void {
+    this._readinessListeners.add(listener);
+    return () => {
+      this._readinessListeners.delete(listener);
+    };
+  }
+
   private _notifyClose(event: BindingCloseEvent): void {
     for (const listener of this._closeListeners) {
       listener(event);
+    }
+  }
+
+  private _notifyReadinessChange(event: {
+    contractId: string;
+    scope: BridgeScope;
+    provided: boolean;
+  }): void {
+    for (const listener of this._readinessListeners) {
+      try {
+        listener(event);
+      } catch {
+        // Readiness listeners are observers; one failed observer must not abort registry mutation.
+      }
     }
   }
 
