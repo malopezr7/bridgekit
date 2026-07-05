@@ -7,15 +7,40 @@ import { decode, encode, sanitizeAny } from '../contract/codec';
 import type { BridgeContract, BridgeStreamSource } from '../contract/contract';
 import type { CallEnvelope, ResultEnvelope } from '../contract/protocol';
 import { diagnostics } from './diagnostics';
-import type { Registry } from './registry';
+import { type Registry, serializeScope } from './registry';
 import type { BridgeTransport, JsDispatcher } from './transport';
 
 type StreamProducerEntry = {
   unsubscribe: () => void;
+  replayKey?: string;
 };
 
+function stableSerialize(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableSerialize).join(',')}]`;
+  }
+  if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function cloneReplayValue<T>(value: T): T {
+  if (typeof globalThis.structuredClone === 'function') {
+    return globalThis.structuredClone(value);
+  }
+  if (value === undefined || value === null || typeof value !== 'object') {
+    return value;
+  }
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 function streamReplayKey(env: CallEnvelope): string {
-  return `${env.contractId}|${env.member}|${JSON.stringify(env.scope)}`;
+  return `${env.contractId}|${env.member}|${serializeScope(env.scope)}|${stableSerialize(env.payload)}`;
 }
 
 // ---- Dispatcher ------------------------------------------------------------
@@ -144,10 +169,12 @@ export class Dispatcher implements JsDispatcher {
 
       let active = true;
       const iterator = source[Symbol.asyncIterator]();
-      const shouldReplayLatest = env.latestOnly === true || env.sticky === true;
+      const descriptorWantsReplay = streamDesc?.latestOnly === true || streamDesc?.sticky === true;
+      const shouldReplayLatest =
+        descriptorWantsReplay || env.latestOnly === true || env.sticky === true;
       const replayKey = shouldReplayLatest ? streamReplayKey(env) : undefined;
       if (replayKey !== undefined && this._streamLatestValues.has(replayKey)) {
-        transport.emitFromJs(streamId, this._streamLatestValues.get(replayKey));
+        transport.emitFromJs(streamId, cloneReplayValue(this._streamLatestValues.get(replayKey)));
       }
 
       // Drive iterator async — pumps values to transport and calls endFromJs when done
@@ -158,6 +185,9 @@ export class Dispatcher implements JsDispatcher {
             if (result.done) {
               if (active) {
                 transport.endFromJs(streamId, { ok: true });
+                if (replayKey !== undefined) {
+                  this._streamLatestValues.delete(replayKey);
+                }
                 this._openProducers.delete(streamId);
               }
               break;
@@ -171,7 +201,7 @@ export class Dispatcher implements JsDispatcher {
               // Marker path: no schema → universal sanitize
               encoded = sanitizeAny(result.value);
             }
-            if (replayKey !== undefined) {
+            if (descriptorWantsReplay && replayKey !== undefined) {
               this._streamLatestValues.set(replayKey, encoded);
             }
             transport.emitFromJs(streamId, encoded);
@@ -186,6 +216,9 @@ export class Dispatcher implements JsDispatcher {
               member: env.member,
               scope: env.scope,
             });
+            if (replayKey !== undefined) {
+              this._streamLatestValues.delete(replayKey);
+            }
             // 5.7: clean up the producer entry so onStreamClose does not attempt
             // a second unsubscribe/endFromJs on an already-finished stream.
             this._openProducers.delete(streamId);
@@ -197,6 +230,7 @@ export class Dispatcher implements JsDispatcher {
       pump().catch(() => {});
 
       this._openProducers.set(streamId, {
+        replayKey,
         unsubscribe: () => {
           active = false;
           iterator.return?.();
@@ -226,6 +260,9 @@ export class Dispatcher implements JsDispatcher {
     const producer = this._openProducers.get(streamId);
     if (producer) {
       producer.unsubscribe();
+      if (producer.replayKey !== undefined) {
+        this._streamLatestValues.delete(producer.replayKey);
+      }
       this._openProducers.delete(streamId);
     }
   }
@@ -259,6 +296,7 @@ export class Dispatcher implements JsDispatcher {
       producer.unsubscribe();
     }
     this._openProducers.clear();
+    this._streamLatestValues.clear();
   }
 
   // ---- private helpers -----------------------------------------------------

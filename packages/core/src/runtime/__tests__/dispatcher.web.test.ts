@@ -11,15 +11,27 @@ const StreamDeliveryContract = defineContract('dispatcher.stream.delivery', {
     latestEvents: { kind: 'stream', value: t.string(), latestOnly: true },
     stickyEvents: { kind: 'stream', value: t.string(), sticky: true },
     plainEvents: { kind: 'stream', value: t.string() },
+    paramEvents: {
+      kind: 'stream',
+      value: t.string(),
+      params: t.object({ id: t.number() }),
+      latestOnly: true,
+    },
+    objectEvents: { kind: 'stream', value: t.json(), latestOnly: true },
   },
 });
 
-function makeStreamOpen(member: string, flags?: Pick<CallEnvelope, 'latestOnly' | 'sticky'>) {
+function makeStreamOpen(
+  member: string,
+  flags?: Pick<CallEnvelope, 'latestOnly' | 'sticky'>,
+  payload?: unknown,
+) {
   return {
     op: 'streamOpen' as const,
     contractId: StreamDeliveryContract.descriptor.id,
     member,
     scope: GLOBAL_SCOPE,
+    ...(payload !== undefined ? { payload } : {}),
     correlationId: `corr-${member}`,
     epoch: 1,
     ...flags,
@@ -147,6 +159,188 @@ describe('Dispatcher stream delivery modes', () => {
     expect(values.get('stream-2')).toEqual(['old-latest', 'replacement-live']);
   });
 
+  test('ok-terminal latestOnly stream does not replay terminal generation to a new subscriber', async () => {
+    const { dispatcher, ends, registry, values } = makeDispatcherHarness();
+    let sequence = 0;
+    registry.provide(StreamDeliveryContract, {
+      latestEvents: () =>
+        streamSource<string>((emit, end) => {
+          sequence += 1;
+          emit(`terminal-${sequence}`);
+          end({ ok: true });
+          return () => {};
+        }),
+    });
+
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-1');
+    await flushMicrotasks();
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-2');
+    await flushMicrotasks();
+
+    expect(values.get('stream-1')).toEqual(['terminal-1']);
+    expect(values.get('stream-2')).toEqual(['terminal-2']);
+    expect(ends.get('stream-1')).toEqual([{ ok: true }]);
+    expect(ends.get('stream-2')).toEqual([{ ok: true }]);
+  });
+
+  test('error-terminal latestOnly stream does not replay failed generation to a new subscriber', async () => {
+    const { dispatcher, ends, registry, values } = makeDispatcherHarness();
+    let sequence = 0;
+    registry.provide(StreamDeliveryContract, {
+      latestEvents: () => ({
+        [Symbol.asyncIterator](): AsyncIterator<string> {
+          let emitted = false;
+          return {
+            next(): Promise<IteratorResult<string>> {
+              if (!emitted) {
+                emitted = true;
+                sequence += 1;
+                return Promise.resolve({ done: false, value: `error-${sequence}` });
+              }
+              return Promise.reject(new Error('boom'));
+            },
+          };
+        },
+      }),
+    });
+
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-1');
+    await flushMicrotasks();
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-2');
+    await flushMicrotasks();
+
+    expect(values.get('stream-1')).toEqual(['error-1']);
+    expect(values.get('stream-2')).toEqual(['error-2']);
+    expect(ends.get('stream-1')).toEqual([
+      expect.objectContaining({ ok: false, code: 'PROVIDER_ERROR' }),
+    ]);
+    expect(ends.get('stream-2')).toEqual([
+      expect.objectContaining({ ok: false, code: 'PROVIDER_ERROR' }),
+    ]);
+  });
+
+  test('final-close then re-provide does not replay the old provider generation', async () => {
+    const { dispatcher, registry, values } = makeDispatcherHarness();
+    const firstBinding = registry.provide(StreamDeliveryContract, {
+      latestEvents: () =>
+        streamSource<string>((emit) => {
+          emit('provider-generation-1');
+          return () => {};
+        }),
+    });
+
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-1');
+    await flushMicrotasks();
+    dispatcher.onStreamClose('stream-1', 'consumer');
+    firstBinding.close('final');
+    registry.provide(StreamDeliveryContract, {
+      latestEvents: () =>
+        streamSource<string>((emit) => {
+          emit('provider-generation-2');
+          return () => {};
+        }),
+    });
+
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-2');
+    await flushMicrotasks();
+
+    expect(values.get('stream-1')).toEqual(['provider-generation-1']);
+    expect(values.get('stream-2')).toEqual(['provider-generation-2']);
+  });
+
+  test('closeAllProducers clears latest replay across epochs', async () => {
+    const { dispatcher, registry, values } = makeDispatcherHarness();
+    let sequence = 0;
+    registry.provide(StreamDeliveryContract, {
+      latestEvents: () =>
+        streamSource<string>((emit) => {
+          sequence += 1;
+          emit(`epoch-${sequence}`);
+          return () => {};
+        }),
+    });
+
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-1');
+    await flushMicrotasks();
+    dispatcher.closeAllProducers();
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-2');
+    await flushMicrotasks();
+
+    expect(values.get('stream-1')).toEqual(['epoch-1']);
+    expect(values.get('stream-2')).toEqual(['epoch-2']);
+  });
+
+  test('latest replay cache is partitioned by stream params', async () => {
+    const { dispatcher, registry, values } = makeDispatcherHarness();
+    registry.provide(StreamDeliveryContract, {
+      paramEvents: (params: { id: number }) =>
+        streamSource<string>((emit) => {
+          emit(`data-for-${params.id}`);
+          return () => {};
+        }),
+    });
+
+    dispatcher.onStreamOpen(
+      makeStreamOpen('paramEvents', { latestOnly: true }, { id: 1 }),
+      'stream-1',
+    );
+    await flushMicrotasks();
+    dispatcher.onStreamOpen(
+      makeStreamOpen('paramEvents', { latestOnly: true }, { id: 2 }),
+      'stream-2',
+    );
+    await flushMicrotasks();
+
+    expect(values.get('stream-1')).toEqual(['data-for-1']);
+    expect(values.get('stream-2')).toEqual(['data-for-2']);
+  });
+
+  test('descriptor delivery mode updates latest cache for plain streamOpen envelopes', async () => {
+    const { dispatcher, registry, values } = makeDispatcherHarness();
+    let sequence = 0;
+    registry.provide(StreamDeliveryContract, {
+      latestEvents: () =>
+        streamSource<string>((emit) => {
+          sequence += 1;
+          emit(`descriptor-${sequence}`);
+          return () => {};
+        }),
+    });
+
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-1');
+    await flushMicrotasks();
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents'), 'stream-2');
+    await flushMicrotasks();
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-3');
+    await flushMicrotasks();
+
+    expect(values.get('stream-1')).toEqual(['descriptor-1']);
+    expect(values.get('stream-2')).toEqual(['descriptor-1', 'descriptor-2']);
+    expect(values.get('stream-3')).toEqual(['descriptor-2', 'descriptor-3']);
+  });
+
+  test('replayed latest value is cloned rather than aliased', async () => {
+    const { dispatcher, registry, values } = makeDispatcherHarness();
+    const emitted = { nested: { count: 1 } };
+    registry.provide(StreamDeliveryContract, {
+      objectEvents: () =>
+        streamSource<unknown>((emit) => {
+          emit(emitted);
+          return () => {};
+        }),
+    });
+
+    dispatcher.onStreamOpen(makeStreamOpen('objectEvents', { latestOnly: true }), 'stream-1');
+    await flushMicrotasks();
+    dispatcher.onStreamOpen(makeStreamOpen('objectEvents', { latestOnly: true }), 'stream-2');
+    await flushMicrotasks();
+
+    const first = values.get('stream-1')?.[0];
+    const replayed = values.get('stream-2')?.[0];
+    expect(replayed).toEqual(first);
+    expect(Object.is(replayed, first)).toBe(false);
+  });
+
   test('transport stream forwards descriptor delivery flags', () => {
     let capturedEnv: CallEnvelope | undefined;
     const transport: BridgeTransport = {
@@ -178,5 +372,38 @@ describe('Dispatcher stream delivery modes', () => {
 
     expect(capturedEnv).toEqual(expect.objectContaining({ latestOnly: true }));
     expect(capturedEnv).not.toHaveProperty('sticky');
+  });
+
+  test('transport stream forwards sticky descriptor flag', () => {
+    let capturedEnv: CallEnvelope | undefined;
+    const transport: BridgeTransport = {
+      connect(_dispatcher: JsDispatcher): ConnectResult {
+        return { epoch: 7, snapshot: [] };
+      },
+      invoke: () => Promise.resolve({ ok: true }),
+      invokeSync: () => ({ ok: true }),
+      openStream(env: CallEnvelope): string {
+        capturedEnv = env;
+        return 'stream-1';
+      },
+      closeStream: () => {},
+      emitFromJs: () => {},
+      endFromJs: () => {},
+      stateRead: () => ({ ok: true }),
+      stateObserve: () => 'obs-1',
+      stateUnobserve: () => {},
+      stateWrite: () => ({ ok: true }),
+      pushProviderState: () => {},
+      announceProvided: () => {},
+      announceUnprovided: () => {},
+    };
+    const bridgekit = new BridgeKitJs(transport);
+    bridgekit.connect();
+    const proxy = bridgekit.bridge(StreamDeliveryContract);
+
+    proxy.stickyEvents().subscribe(() => {});
+
+    expect(capturedEnv).toEqual(expect.objectContaining({ sticky: true }));
+    expect(capturedEnv).not.toHaveProperty('latestOnly');
   });
 });
