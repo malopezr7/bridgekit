@@ -20,7 +20,7 @@ import {
 import type { Binding } from './registry';
 import { GLOBAL_SCOPE, Registry, serializeScope } from './registry';
 import type { StateMirror } from './stateMirror';
-import { LocalStateMirror, MirrorRegistry } from './stateMirror';
+import { LocalStateMirror, MirrorRegistry, NativeReadinessMirror } from './stateMirror';
 import type { BridgeTransport } from './transport';
 
 /**
@@ -169,6 +169,7 @@ function createProviderFacade(binding: Binding): ProviderFacade {
 
 export class BridgeKitJs {
   readonly registry: Registry;
+  readonly nativeReadiness: NativeReadinessMirror;
   private readonly _mirrors: MirrorRegistry;
   private readonly _dispatcher: Dispatcher;
   private readonly _contracts = new Map<string, BridgeContract<unknown>>();
@@ -180,8 +181,12 @@ export class BridgeKitJs {
 
   constructor(private readonly _transport: BridgeTransport) {
     this.registry = new Registry();
+    this.nativeReadiness = new NativeReadinessMirror();
     this._mirrors = new MirrorRegistry();
-    this._dispatcher = new Dispatcher(this.registry, this._contracts);
+    this._dispatcher = new Dispatcher(this.registry, this._contracts, {
+      nativeReadiness: this.nativeReadiness,
+      getEpoch: () => this._epoch,
+    });
   }
 
   /**
@@ -209,17 +214,26 @@ export class BridgeKitJs {
     }
 
     this._dispatcher.setTransport(this._transport);
-    const result = this._transport.connect(this._dispatcher);
-    this._epoch = result.epoch;
-    this._connected = true;
+    try {
+      this._dispatcher.beginReadinessHydration();
+      const result = this._transport.connect(this._dispatcher);
+      this._epoch = result.epoch;
+      this._connected = true;
 
-    for (const entry of result.snapshot) {
-      const stub = {
-        descriptor: { id: entry.contractId, methods: {}, streams: {}, state: {} },
-        hash: '',
-      } as unknown as BridgeContract<unknown>;
-      this._mirrors.getOrCreate(stub, entry.key, entry.scope, entry.value).hydrate(entry.value);
-      quietDetached.delete(this._mirrors.keyFor(entry.contractId, entry.key, entry.scope));
+      for (const entry of result.snapshot) {
+        const stub = {
+          descriptor: { id: entry.contractId, methods: {}, streams: {}, state: {} },
+          hash: '',
+        } as unknown as BridgeContract<unknown>;
+        this._mirrors.getOrCreate(stub, entry.key, entry.scope, entry.value).hydrate(entry.value);
+        quietDetached.delete(this._mirrors.keyFor(entry.contractId, entry.key, entry.scope));
+      }
+
+      this.nativeReadiness.hydrate(result.nativeProvided ?? []);
+      this._dispatcher.endReadinessHydration();
+    } catch (err) {
+      this._dispatcher.abortReadinessHydration();
+      throw err;
     }
 
     this._mirrors.attachAll(this._transport);
@@ -809,6 +823,7 @@ export class BridgeKitJs {
   dump(): {
     bindings: ReturnType<Registry['dump']>;
     mirrors: ReturnType<MirrorRegistry['dump']>;
+    nativeReadiness: ReturnType<NativeReadinessMirror['dump']>;
     openStreams: number;
     streamDrops: number;
     counters: ReturnType<typeof diagnostics.getCounters>;
@@ -817,6 +832,7 @@ export class BridgeKitJs {
     return {
       bindings: this.registry.dump(),
       mirrors: this._mirrors.dump(),
+      nativeReadiness: this.nativeReadiness.dump(),
       openStreams: diagnostics.getOpenStreams(),
       streamDrops: diagnostics.getStreamDrops(),
       counters: diagnostics.getCounters(),

@@ -146,6 +146,30 @@ describe('connect', () => {
     expect(snapshot[0]?.contractId).toBe('a.b');
   });
 
+  it('connectDispatcher returns nativeProvided', () => {
+    const { host } = getMocks();
+    host.connectDispatcher.mockReturnValue({
+      epoch: 11,
+      snapshot: [],
+      nativeProvided: [
+        {
+          contractId: 'native.contract',
+          scope: { kind: 'feature', feature: 'FeatureA' },
+        },
+      ],
+    });
+
+    const transport = new NitroBridgeTransport();
+    const result = transport.connect(makeDispatcher());
+
+    expect(result.nativeProvided).toEqual([
+      {
+        contractId: 'native.contract',
+        scope: { kind: 'feature', feature: 'FeatureA' },
+      },
+    ]);
+  });
+
   it('Object values are not double-unwrapped', () => {
     const { host } = getMocks();
     host.connectDispatcher.mockReturnValue({

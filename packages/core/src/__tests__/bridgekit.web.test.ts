@@ -938,7 +938,7 @@ describe('W2-1: providers and mirrors cleaned up on reconnect', () => {
 
     connect(_dispatcher: JsDispatcher): ConnectResult {
       this.epoch += 1;
-      return { epoch: this.epoch, snapshot: [] };
+      return { epoch: this.epoch, snapshot: [], nativeProvided: [] };
     }
 
     invoke = jest.fn<BridgeTransport['invoke']>().mockResolvedValue({ ok: true, value: undefined });
@@ -1110,6 +1110,7 @@ describe('W2-1: providers and mirrors cleaned up on reconnect', () => {
                   },
                 ]
               : [],
+          nativeProvided: [],
         };
       }
     }
@@ -1143,6 +1144,7 @@ describe('W2-1: providers and mirrors cleaned up on reconnect', () => {
               value: 7,
             },
           ],
+          nativeProvided: [],
         };
       }
     }

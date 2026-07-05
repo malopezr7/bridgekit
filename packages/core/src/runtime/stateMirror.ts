@@ -155,7 +155,11 @@ export class StateMirror<T> {
 
   private _notify(): void {
     for (const cb of this._subscribers) {
-      cb(this._snapshot);
+      try {
+        cb(this._snapshot);
+      } catch {
+        // State listeners are observers; one failed observer must not abort hydration.
+      }
     }
   }
 }
@@ -241,6 +245,121 @@ export class LocalStateMirror<T> {
     for (const cb of this._subscribers) {
       cb(this._snapshot);
     }
+  }
+}
+
+// ---- NativeReadinessMirror ---------------------------------------------------
+
+export interface NativeReadinessEntry {
+  contractId: string;
+  scope: BridgeScope;
+}
+
+export interface NativeReadinessDelta extends NativeReadinessEntry {
+  op: 'provide' | 'unprovide';
+  seq: number;
+}
+
+type NativeReadinessRecord = {
+  contractId: string;
+  provided: boolean;
+  scopeKey: string;
+  seq: number;
+};
+
+type NativeReadinessSubscriber = (record: NativeReadinessRecord) => void;
+
+function candidateScopes(scope: BridgeScope): BridgeScope[] {
+  if (scope.kind === 'instance') {
+    return [scope, { kind: 'feature', feature: scope.feature }, { kind: 'global' }];
+  }
+  if (scope.kind === 'feature') {
+    return [scope, { kind: 'global' }];
+  }
+  return [{ kind: 'global' }];
+}
+
+/** Consumer-side mirror for native provider readiness, hydrated from connect and deltas. */
+export class NativeReadinessMirror {
+  private readonly _records = new Map<string, NativeReadinessRecord>();
+  private readonly _subscribers = new Set<NativeReadinessSubscriber>();
+
+  hydrate(entries: NativeReadinessEntry[]): void {
+    const previous = new Map(this._records);
+    const nextKeys = new Set<string>();
+    this._records.clear();
+    for (const entry of entries) {
+      const scopeKey = serializeScope(entry.scope);
+      const key = this._key(entry.contractId, scopeKey);
+      nextKeys.add(key);
+      this._records.set(key, {
+        contractId: entry.contractId,
+        provided: true,
+        scopeKey,
+        seq: 0,
+      });
+    }
+    this._notifyAll();
+    for (const [key, record] of previous) {
+      if (nextKeys.has(key)) continue;
+      if (!record.provided) continue;
+      this._notify({ ...record, provided: false, seq: 0 });
+    }
+  }
+
+  applyDelta(delta: NativeReadinessDelta): void {
+    const scopeKey = serializeScope(delta.scope);
+    const key = this._key(delta.contractId, scopeKey);
+    const current = this._records.get(key);
+    if (current !== undefined && delta.seq <= current.seq) return;
+
+    const next = {
+      contractId: delta.contractId,
+      provided: delta.op === 'provide',
+      scopeKey,
+      seq: delta.seq,
+    };
+    this._records.set(key, next);
+    this._notify(next);
+  }
+
+  isProvided(contractId: string, scope: BridgeScope): boolean {
+    return candidateScopes(scope).some((candidate) => {
+      const record = this._records.get(this._key(contractId, serializeScope(candidate)));
+      return record?.provided === true;
+    });
+  }
+
+  subscribe(cb: NativeReadinessSubscriber): () => void {
+    this._subscribers.add(cb);
+    return () => {
+      this._subscribers.delete(cb);
+    };
+  }
+
+  dump(): NativeReadinessRecord[] {
+    return Array.from(this._records.values()).sort((a, b) => {
+      const contractOrder = a.contractId.localeCompare(b.contractId);
+      return contractOrder !== 0 ? contractOrder : a.scopeKey.localeCompare(b.scopeKey);
+    });
+  }
+
+  private _key(contractId: string, scopeKey: string): string {
+    return `${contractId}|${scopeKey}`;
+  }
+
+  private _notify(record: NativeReadinessRecord): void {
+    for (const cb of this._subscribers) {
+      try {
+        cb(record);
+      } catch {
+        // Readiness listeners are observers; one failed observer must not abort hydration.
+      }
+    }
+  }
+
+  private _notifyAll(): void {
+    for (const record of this._records.values()) this._notify(record);
   }
 }
 

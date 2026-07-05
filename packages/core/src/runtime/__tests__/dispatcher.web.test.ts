@@ -620,7 +620,7 @@ describe('Dispatcher stream delivery modes', () => {
     let capturedEnv: CallEnvelope | undefined;
     const transport: BridgeTransport = {
       connect(_dispatcher: JsDispatcher): ConnectResult {
-        return { epoch: 7, snapshot: [] };
+        return { epoch: 7, snapshot: [], nativeProvided: [] };
       },
       invoke: () => Promise.resolve({ ok: true }),
       invokeSync: () => ({ ok: true }),
@@ -653,7 +653,7 @@ describe('Dispatcher stream delivery modes', () => {
     let capturedEnv: CallEnvelope | undefined;
     const transport: BridgeTransport = {
       connect(_dispatcher: JsDispatcher): ConnectResult {
-        return { epoch: 7, snapshot: [] };
+        return { epoch: 7, snapshot: [], nativeProvided: [] };
       },
       invoke: () => Promise.resolve({ ok: true }),
       invokeSync: () => ({ ok: true }),

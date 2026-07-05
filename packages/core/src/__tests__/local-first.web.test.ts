@@ -69,7 +69,7 @@ function makeSpyTransport(opts?: {
     stateObserveCalls: 0,
 
     connect(): ConnectResult {
-      return { epoch: 1, snapshot: [] };
+      return { epoch: 1, snapshot: [], nativeProvided: [] };
     },
     invoke(): Promise<ReturnType<BridgeTransport['invoke']>> {
       t.invokeCalls++;

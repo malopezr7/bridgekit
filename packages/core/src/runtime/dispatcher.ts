@@ -8,6 +8,7 @@ import type { BridgeContract, BridgeStreamSource } from '../contract/contract';
 import type { CallEnvelope, ResultEnvelope } from '../contract/protocol';
 import { diagnostics } from './diagnostics';
 import { type Binding, type Registry, serializeScope } from './registry';
+import type { NativeReadinessMirror } from './stateMirror';
 import type { BridgeTransport, JsDispatcher } from './transport';
 
 type StreamProducerEntry = {
@@ -24,6 +25,11 @@ type StreamLatestEntry = {
 };
 
 type ReplayCloneResult<T> = { ok: true; value: T } | { ok: false };
+
+interface DispatcherOptions {
+  nativeReadiness?: NativeReadinessMirror;
+  getEpoch?: () => number;
+}
 
 function stableSerialize(value: unknown): string {
   if (Array.isArray(value)) {
@@ -72,10 +78,13 @@ export class Dispatcher implements JsDispatcher {
   private _parkedStreams = new Map<string, () => void>();
   private _streamLatestValues = new Map<string, StreamLatestEntry>();
   private _liveReplayGenerations = new Set<ReplayGenerationToken>();
+  private _isReadinessHydrating = false;
+  private _readinessHydrationQueue: Array<CallEnvelope & { op: 'provide' | 'unprovide' }> = [];
 
   constructor(
     private readonly _registry: Registry,
     private readonly _contracts: Map<string, BridgeContract<unknown>>,
+    private readonly _opts: DispatcherOptions = {},
   ) {
     this._registry.onBindingClose(({ binding, contractId, scope, reason }) => {
       if (reason !== 'replacing') {
@@ -86,6 +95,27 @@ export class Dispatcher implements JsDispatcher {
 
   setTransport(transport: BridgeTransport): void {
     this._transport = transport;
+  }
+
+  beginReadinessHydration(): void {
+    this._isReadinessHydrating = true;
+    this._readinessHydrationQueue = [];
+  }
+
+  endReadinessHydration(): void {
+    const queued = this._readinessHydrationQueue;
+    this._isReadinessHydrating = false;
+    this._readinessHydrationQueue = [];
+    for (const env of queued) {
+      this._applyReadinessDelta(env);
+    }
+  }
+
+  abortReadinessHydration(): void {
+    // A failed connect means the transport session is dead. Drop deltas queued by
+    // that attempt; retry connect rebuilds readiness from a fresh nativeProvided baseline.
+    this._isReadinessHydrating = false;
+    this._readinessHydrationQueue = [];
   }
 
   // ---- onInvoke ------------------------------------------------------------
@@ -311,7 +341,10 @@ export class Dispatcher implements JsDispatcher {
   // ---- onStateWrite --------------------------------------------------------
 
   onStateWrite(env: CallEnvelope): void {
-    if (env.op === 'provide' || env.op === 'unprovide') return;
+    if (env.op === 'provide' || env.op === 'unprovide') {
+      this._applyReadinessDelta({ ...env, op: env.op });
+      return;
+    }
 
     const entry = this._registry.resolve(env.contractId, env.scope);
     if (!entry) return;
@@ -375,6 +408,24 @@ export class Dispatcher implements JsDispatcher {
       member: env.member,
       scope: env.scope,
     };
+  }
+
+  private _applyReadinessDelta(env: CallEnvelope & { op: 'provide' | 'unprovide' }): void {
+    if (this._isReadinessHydrating) {
+      this._readinessHydrationQueue.push(env);
+      return;
+    }
+    const mirror = this._opts.nativeReadiness;
+    const currentEpoch = this._opts.getEpoch?.();
+    if (mirror === undefined || currentEpoch === undefined) return;
+    if (env.epoch !== currentEpoch) return;
+    if (typeof env.seq !== 'number' || !Number.isFinite(env.seq)) return;
+    mirror.applyDelta({
+      op: env.op,
+      contractId: env.contractId,
+      scope: env.scope,
+      seq: env.seq,
+    });
   }
 
   private _deleteReplayIfUnused(replayKey: string): void {
