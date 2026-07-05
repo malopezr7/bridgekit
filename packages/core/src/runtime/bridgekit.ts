@@ -214,22 +214,27 @@ export class BridgeKitJs {
     }
 
     this._dispatcher.setTransport(this._transport);
-    this._dispatcher.beginReadinessHydration();
-    const result = this._transport.connect(this._dispatcher);
-    this._epoch = result.epoch;
-    this._connected = true;
+    try {
+      this._dispatcher.beginReadinessHydration();
+      const result = this._transport.connect(this._dispatcher);
+      this._epoch = result.epoch;
+      this._connected = true;
 
-    for (const entry of result.snapshot) {
-      const stub = {
-        descriptor: { id: entry.contractId, methods: {}, streams: {}, state: {} },
-        hash: '',
-      } as unknown as BridgeContract<unknown>;
-      this._mirrors.getOrCreate(stub, entry.key, entry.scope, entry.value).hydrate(entry.value);
-      quietDetached.delete(this._mirrors.keyFor(entry.contractId, entry.key, entry.scope));
+      for (const entry of result.snapshot) {
+        const stub = {
+          descriptor: { id: entry.contractId, methods: {}, streams: {}, state: {} },
+          hash: '',
+        } as unknown as BridgeContract<unknown>;
+        this._mirrors.getOrCreate(stub, entry.key, entry.scope, entry.value).hydrate(entry.value);
+        quietDetached.delete(this._mirrors.keyFor(entry.contractId, entry.key, entry.scope));
+      }
+
+      this.nativeReadiness.hydrate(result.nativeProvided ?? []);
+      this._dispatcher.endReadinessHydration();
+    } catch (err) {
+      this._dispatcher.abortReadinessHydration();
+      throw err;
     }
-
-    this.nativeReadiness.hydrate(result.nativeProvided ?? []);
-    this._dispatcher.endReadinessHydration();
 
     this._mirrors.attachAll(this._transport);
 

@@ -249,6 +249,81 @@ describe('Native readiness mirror protocol', () => {
     expect(mirror.dump()).toEqual([]);
   });
 
+  test('Failed reconnect aborts readiness hydration without keeping queued deltas', () => {
+    const transport = new ReadinessTransport();
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    transport.onConnect = (dispatcher) => {
+      dispatcher.onStateWrite(readinessDelta('provide', { epoch: 7, seq: 1 }));
+      throw new Error('connect failed');
+    };
+
+    expect(() => bk.connect()).toThrow('connect failed');
+    transport.dispatcher?.onStateWrite(readinessDelta('provide', { epoch: 7, seq: 2 }));
+
+    expect(bk.nativeReadiness.dump()).toEqual([
+      {
+        contractId: NativeContract.descriptor.id,
+        provided: true,
+        scopeKey: 'global',
+        seq: 2,
+      },
+    ]);
+  });
+
+  test('Subscriber exceptions during native readiness hydrate do not abort reconnect replay', () => {
+    const transport = new ReadinessTransport();
+    const announceCalls: string[] = [];
+    transport.announceProvided = (contractId) => {
+      announceCalls.push(contractId);
+    };
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    bk.provide(NativeContract, { ping: () => Promise.resolve('js') }, { scope: GLOBAL });
+    announceCalls.length = 0;
+    const notified: boolean[] = [];
+    bk.nativeReadiness.subscribe(() => {
+      throw new Error('subscriber failed');
+    });
+    bk.nativeReadiness.subscribe((record) => {
+      notified.push(record.provided);
+    });
+    transport.connectResult = {
+      epoch: 8,
+      snapshot: [],
+      nativeProvided: [{ contractId: NativeContract.descriptor.id, scope: GLOBAL }],
+    };
+
+    expect(() => bk.connect()).not.toThrow();
+
+    expect(notified).toEqual([true]);
+    expect(announceCalls).toEqual([NativeContract.descriptor.id]);
+  });
+
+  test('Reconnect absent does not duplicate already-unprovided native records', () => {
+    const mirror = new NativeReadinessMirror();
+    const notifications: boolean[] = [];
+    mirror.subscribe((record) => {
+      if (record.contractId === NativeContract.descriptor.id) notifications.push(record.provided);
+    });
+
+    mirror.applyDelta({
+      op: 'provide',
+      contractId: NativeContract.descriptor.id,
+      scope: GLOBAL,
+      seq: 1,
+    });
+    mirror.applyDelta({
+      op: 'unprovide',
+      contractId: NativeContract.descriptor.id,
+      scope: GLOBAL,
+      seq: 2,
+    });
+    mirror.hydrate([]);
+
+    expect(notifications).toEqual([true, false]);
+  });
+
   test('Full hydration order includes native readiness', () => {
     const transport = new ReadinessTransport();
     transport.connectResult = {

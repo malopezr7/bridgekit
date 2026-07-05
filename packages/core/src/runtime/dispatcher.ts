@@ -111,6 +111,11 @@ export class Dispatcher implements JsDispatcher {
     }
   }
 
+  abortReadinessHydration(): void {
+    this._isReadinessHydrating = false;
+    this._readinessHydrationQueue = [];
+  }
+
   // ---- onInvoke ------------------------------------------------------------
 
   async onInvoke(env: CallEnvelope): Promise<ResultEnvelope> {

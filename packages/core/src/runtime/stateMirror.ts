@@ -298,6 +298,7 @@ export class NativeReadinessMirror {
     this._notifyAll();
     for (const [key, record] of previous) {
       if (nextKeys.has(key)) continue;
+      if (!record.provided) continue;
       this._notify({ ...record, provided: false, seq: 0 });
     }
   }
@@ -344,7 +345,13 @@ export class NativeReadinessMirror {
   }
 
   private _notify(record: NativeReadinessRecord): void {
-    for (const cb of this._subscribers) cb(record);
+    for (const cb of this._subscribers) {
+      try {
+        cb(record);
+      } catch {
+        // Readiness listeners are observers; one failed observer must not abort hydration.
+      }
+    }
   }
 
   private _notifyAll(): void {
