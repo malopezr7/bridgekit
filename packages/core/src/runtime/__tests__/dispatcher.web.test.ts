@@ -248,6 +248,73 @@ describe('Dispatcher stream delivery modes', () => {
     expect(values.get('stream-2')).toEqual(['provider-generation-2']);
   });
 
+  test('close with omitted reason invalidates latest replay before re-provide', async () => {
+    const { dispatcher, registry, values } = makeDispatcherHarness();
+    const firstBinding = registry.provide(StreamDeliveryContract, {
+      latestEvents: () =>
+        streamSource<string>((emit) => {
+          emit('noreason-gen1');
+          return () => {};
+        }),
+    });
+
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-1');
+    await flushMicrotasks();
+    firstBinding.close();
+    registry.provide(StreamDeliveryContract, {
+      latestEvents: () =>
+        streamSource<string>((emit) => {
+          emit('noreason-gen2');
+          return () => {};
+        }),
+    });
+
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-2');
+    await flushMicrotasks();
+
+    expect(values.get('stream-1')).toEqual(['noreason-gen1']);
+    expect(values.get('stream-2')).toEqual(['noreason-gen2']);
+  });
+
+  test("replacing hot-swap cycles don't retain stale replay generation tokens", async () => {
+    const { dispatcher, registry } = makeDispatcherHarness();
+    const getLiveReplayGenerationCount = () =>
+      (dispatcher as unknown as { _liveReplayGenerations: Set<unknown> })._liveReplayGenerations
+        .size;
+    const getLatestReplayEntryCount = () =>
+      (dispatcher as unknown as { _streamLatestValues: Map<string, unknown> })._streamLatestValues
+        .size;
+
+    let binding = registry.provide(StreamDeliveryContract, {
+      latestEvents: () =>
+        streamSource<string>((emit) => {
+          emit('swap-gen-0');
+          return () => {};
+        }),
+    });
+    dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), 'stream-0');
+    await flushMicrotasks();
+
+    for (let cycle = 1; cycle <= 40; cycle += 1) {
+      binding.close('replacing');
+      binding = registry.provide(StreamDeliveryContract, {
+        latestEvents: () =>
+          streamSource<string>((emit) => {
+            emit(`swap-gen-${cycle}`);
+            return () => {};
+          }),
+      });
+      dispatcher.onStreamOpen(
+        makeStreamOpen('latestEvents', { latestOnly: true }),
+        `stream-${cycle}`,
+      );
+      await flushMicrotasks();
+    }
+
+    expect(getLatestReplayEntryCount()).toBe(1);
+    expect(getLiveReplayGenerationCount()).toBeLessThanOrEqual(getLatestReplayEntryCount() + 1);
+  });
+
   test('final-close of fallback provider invalidates requested-scope replay', async () => {
     const { dispatcher, registry, values } = makeDispatcherHarness();
     const instanceScope: CallEnvelope['scope'] = {

@@ -75,7 +75,7 @@ export class Dispatcher implements JsDispatcher {
     private readonly _contracts: Map<string, BridgeContract<unknown>>,
   ) {
     this._registry.onBindingClose(({ binding, contractId, scope, reason }) => {
-      if (reason === 'final') {
+      if (reason !== 'replacing') {
         this.invalidateReplayFor(contractId, scope, binding);
       }
     });
@@ -211,7 +211,7 @@ export class Dispatcher implements JsDispatcher {
               transport.emitFromJs(streamId, replay.value);
             }
           } else {
-            this._streamLatestValues.delete(replayKey);
+            this._deleteReplayEntry(replayKey);
           }
         }
       }
@@ -248,7 +248,11 @@ export class Dispatcher implements JsDispatcher {
               generationToken !== undefined &&
               this._liveReplayGenerations.has(generationToken)
             ) {
+              const previous = this._streamLatestValues.get(replayKey);
               this._streamLatestValues.set(replayKey, { generationToken, value: encoded });
+              if (previous?.generationToken !== undefined) {
+                this._releaseReplayGenerationIfUnreferenced(previous.generationToken);
+              }
             }
             transport.emitFromJs(streamId, encoded);
           }
@@ -358,7 +362,7 @@ export class Dispatcher implements JsDispatcher {
       this._liveReplayGenerations.delete(generationToken);
       for (const [replayKey, replayEntry] of Array.from(this._streamLatestValues.entries())) {
         if (replayEntry.generationToken === generationToken) {
-          this._streamLatestValues.delete(replayKey);
+          this._deleteReplayEntry(replayKey);
         }
       }
       return;
@@ -367,7 +371,7 @@ export class Dispatcher implements JsDispatcher {
     const scopeNeedle = `|${serializeScope(scope)}|`;
     for (const replayKey of Array.from(this._streamLatestValues.keys())) {
       if (replayKey.startsWith(`${contractId}|`) && replayKey.includes(scopeNeedle)) {
-        this._streamLatestValues.delete(replayKey);
+        this._deleteReplayEntry(replayKey);
       }
     }
   }
@@ -389,7 +393,22 @@ export class Dispatcher implements JsDispatcher {
     for (const producer of this._openProducers.values()) {
       if (producer.replayKey === replayKey) return;
     }
+    this._deleteReplayEntry(replayKey);
+  }
+
+  private _deleteReplayEntry(replayKey: string): void {
+    const previous = this._streamLatestValues.get(replayKey);
     this._streamLatestValues.delete(replayKey);
+    if (previous !== undefined) {
+      this._releaseReplayGenerationIfUnreferenced(previous.generationToken);
+    }
+  }
+
+  private _releaseReplayGenerationIfUnreferenced(generationToken: ReplayGenerationToken): void {
+    for (const replayEntry of this._streamLatestValues.values()) {
+      if (replayEntry.generationToken === generationToken) return;
+    }
+    this._liveReplayGenerations.delete(generationToken);
   }
 
   private async _callImpl(
