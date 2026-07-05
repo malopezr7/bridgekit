@@ -1,4 +1,4 @@
-import { describe, expect, test } from '@jest/globals';
+import { describe, expect, jest, test } from '@jest/globals';
 import { defineContract, t } from '../../contract/contract';
 import type { BridgeScope, CallEnvelope, ResultEnvelope } from '../../contract/protocol';
 import { BridgeKitJs } from '../bridgekit';
@@ -38,10 +38,6 @@ function readinessDelta(
     seq: 1,
     ...overrides,
   } as CallEnvelope;
-}
-
-function flushMicrotasks(): Promise<void> {
-  return Promise.resolve().then(() => undefined);
 }
 
 class ReadinessTransport implements BridgeTransport {
@@ -154,21 +150,103 @@ describe('Native readiness mirror protocol', () => {
     ]);
   });
 
-  test('Delta queued during hydration', async () => {
+  test('Synchronous delta emitted during connect hydration is buffered and applied', () => {
     const transport = new ReadinessTransport();
     transport.connectResult = { epoch: 7, snapshot: [], nativeProvided: [] };
     transport.onConnect = (dispatcher) => {
-      queueMicrotask(() => {
-        dispatcher.onStateWrite(readinessDelta('provide', { epoch: 7, seq: 1 }));
-      });
+      dispatcher.onStateWrite(readinessDelta('provide', { epoch: 7, seq: 1 }));
     };
     const bk = new BridgeKitJs(transport);
 
     bk.connect();
-    expect(bk.nativeReadiness.isProvided(NativeContract.descriptor.id, GLOBAL)).toBe(false);
-
-    await flushMicrotasks();
     expect(bk.nativeReadiness.isProvided(NativeContract.descriptor.id, GLOBAL)).toBe(true);
+  });
+
+  test('Reconnect hydration notifies subscribers when native provider disappears', () => {
+    const transport = new ReadinessTransport();
+    transport.connectResult = {
+      epoch: 7,
+      snapshot: [],
+      nativeProvided: [{ contractId: NativeContract.descriptor.id, scope: GLOBAL }],
+    };
+    const bk = new BridgeKitJs(transport);
+    const notifications: Array<{
+      contractId: string;
+      provided: boolean;
+      scopeKey: string;
+      seq: number;
+    }> = [];
+    bk.nativeReadiness.subscribe((record) => notifications.push(record));
+
+    bk.connect();
+    transport.connectResult = { epoch: 8, snapshot: [], nativeProvided: [] };
+    bk.connect();
+
+    expect(notifications).toContainEqual({
+      contractId: NativeContract.descriptor.id,
+      provided: false,
+      scopeKey: 'global',
+      seq: 0,
+    });
+  });
+
+  test('Reconnect hydration clears native providers absent from the new epoch', () => {
+    const transport = new ReadinessTransport();
+    transport.connectResult = {
+      epoch: 7,
+      snapshot: [],
+      nativeProvided: [{ contractId: NativeContract.descriptor.id, scope: GLOBAL }],
+    };
+    const bk = new BridgeKitJs(transport);
+
+    bk.connect();
+    transport.connectResult = { epoch: 8, snapshot: [], nativeProvided: [] };
+    bk.connect();
+
+    expect(bk.nativeReadiness.isProvided(NativeContract.descriptor.id, GLOBAL)).toBe(false);
+  });
+
+  test('Reconnect hydrates native readiness before replaying JS providers', () => {
+    const debugSpy = jest.spyOn(console, 'debug').mockImplementation(() => undefined);
+    const events: string[] = [];
+    const transport = new ReadinessTransport();
+    transport.announceProvided = () => {
+      events.push('announceProvided');
+    };
+    transport.connectResult = { epoch: 7, snapshot: [], nativeProvided: [] };
+    const bk = new BridgeKitJs(transport);
+    bk.nativeReadiness.subscribe((record) => {
+      if (record.provided) events.push('nativeReadinessHydrated');
+    });
+
+    try {
+      bk.connect();
+      bk.provide(NativeContract, { ping: () => Promise.resolve('js') }, { scope: GLOBAL });
+      events.length = 0;
+      transport.connectResult = {
+        epoch: 8,
+        snapshot: [],
+        nativeProvided: [{ contractId: NativeContract.descriptor.id, scope: GLOBAL }],
+      };
+      bk.connect();
+
+      expect(events).toEqual(['nativeReadinessHydrated', 'announceProvided']);
+    } finally {
+      debugSpy.mockRestore();
+    }
+  });
+
+  test('Delta without numeric seq is ignored for old-native compatibility', () => {
+    const mirror = new NativeReadinessMirror();
+    const dispatcher = new Dispatcher(new Registry(), new Map(), {
+      nativeReadiness: mirror,
+      getEpoch: () => 7,
+    });
+
+    dispatcher.onStateWrite(readinessDelta('provide', { seq: undefined }));
+    dispatcher.onStateWrite(readinessDelta('provide', { seq: Number.NaN }));
+
+    expect(mirror.dump()).toEqual([]);
   });
 
   test('Full hydration order includes native readiness', () => {

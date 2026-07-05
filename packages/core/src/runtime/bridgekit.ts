@@ -214,6 +214,7 @@ export class BridgeKitJs {
     }
 
     this._dispatcher.setTransport(this._transport);
+    this._dispatcher.beginReadinessHydration();
     const result = this._transport.connect(this._dispatcher);
     this._epoch = result.epoch;
     this._connected = true;
@@ -228,6 +229,7 @@ export class BridgeKitJs {
     }
 
     this.nativeReadiness.hydrate(result.nativeProvided ?? []);
+    this._dispatcher.endReadinessHydration();
 
     this._mirrors.attachAll(this._transport);
 

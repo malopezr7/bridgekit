@@ -281,10 +281,14 @@ export class NativeReadinessMirror {
   private readonly _subscribers = new Set<NativeReadinessSubscriber>();
 
   hydrate(entries: NativeReadinessEntry[]): void {
+    const previous = new Map(this._records);
+    const nextKeys = new Set<string>();
     this._records.clear();
     for (const entry of entries) {
       const scopeKey = serializeScope(entry.scope);
-      this._records.set(this._key(entry.contractId, scopeKey), {
+      const key = this._key(entry.contractId, scopeKey);
+      nextKeys.add(key);
+      this._records.set(key, {
         contractId: entry.contractId,
         provided: true,
         scopeKey,
@@ -292,6 +296,10 @@ export class NativeReadinessMirror {
       });
     }
     this._notifyAll();
+    for (const [key, record] of previous) {
+      if (nextKeys.has(key)) continue;
+      this._notify({ ...record, provided: false, seq: 0 });
+    }
   }
 
   applyDelta(delta: NativeReadinessDelta): void {
