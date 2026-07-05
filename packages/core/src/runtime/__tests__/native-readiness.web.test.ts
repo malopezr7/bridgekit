@@ -300,6 +300,71 @@ describe('Native readiness mirror protocol', () => {
     expect(announceCalls).toEqual([NativeContract.descriptor.id]);
   });
 
+  test('Subscriber exceptions during state hydrate do not abort readiness hydration or replay', () => {
+    const transport = new ReadinessTransport();
+    const announceCalls: string[] = [];
+    transport.announceProvided = (contractId) => {
+      announceCalls.push(contractId);
+    };
+    const bk = new BridgeKitJs(transport);
+    bk.connect();
+    const mirror = bk.state(NativeContract, 'status', GLOBAL);
+    bk.provide(NativeContract, { ping: () => Promise.resolve('js') }, { scope: GLOBAL });
+    let throwOnStateHydrate = false;
+    mirror.subscribe(() => {
+      if (throwOnStateHydrate) throw new Error('state subscriber failed');
+    });
+    const stateNotifications: unknown[] = [];
+    mirror.subscribe((snapshot) => {
+      stateNotifications.push(snapshot.value);
+    });
+    announceCalls.length = 0;
+    stateNotifications.length = 0;
+    throwOnStateHydrate = true;
+    transport.connectResult = {
+      epoch: 8,
+      snapshot: [
+        {
+          contractId: NativeContract.descriptor.id,
+          key: 'status',
+          scope: GLOBAL,
+          value: 'epoch-8-state',
+        },
+      ],
+      nativeProvided: [{ contractId: NativeContract.descriptor.id, scope: GLOBAL }],
+    };
+
+    expect(() => bk.connect()).not.toThrow();
+
+    expect(bk.dump().epoch).toBe(8);
+    expect(bk.nativeReadiness.isProvided(NativeContract.descriptor.id, GLOBAL)).toBe(true);
+    expect(announceCalls).toEqual([NativeContract.descriptor.id]);
+    expect(stateNotifications).toContain('epoch-8-state');
+  });
+
+  test('Duplicate readiness delta with identical seq does not notify again', () => {
+    const mirror = new NativeReadinessMirror();
+    const notifications: boolean[] = [];
+    mirror.subscribe((record) => {
+      notifications.push(record.provided);
+    });
+
+    mirror.applyDelta({
+      op: 'provide',
+      contractId: NativeContract.descriptor.id,
+      scope: GLOBAL,
+      seq: 5,
+    });
+    mirror.applyDelta({
+      op: 'provide',
+      contractId: NativeContract.descriptor.id,
+      scope: GLOBAL,
+      seq: 5,
+    });
+
+    expect(notifications).toEqual([true]);
+  });
+
   test('Reconnect absent does not duplicate already-unprovided native records', () => {
     const mirror = new NativeReadinessMirror();
     const notifications: boolean[] = [];

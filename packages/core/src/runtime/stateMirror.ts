@@ -155,7 +155,11 @@ export class StateMirror<T> {
 
   private _notify(): void {
     for (const cb of this._subscribers) {
-      cb(this._snapshot);
+      try {
+        cb(this._snapshot);
+      } catch {
+        // State listeners are observers; one failed observer must not abort hydration.
+      }
     }
   }
 }

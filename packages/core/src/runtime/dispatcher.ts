@@ -112,6 +112,8 @@ export class Dispatcher implements JsDispatcher {
   }
 
   abortReadinessHydration(): void {
+    // A failed connect means the transport session is dead. Drop deltas queued by
+    // that attempt; retry connect rebuilds readiness from a fresh nativeProvided baseline.
     this._isReadinessHydrating = false;
     this._readinessHydrationQueue = [];
   }
