@@ -224,12 +224,7 @@ export class Dispatcher implements JsDispatcher {
             if (result.done) {
               if (active) {
                 transport.endFromJs(streamId, { ok: true });
-                if (replayKey !== undefined) {
-                  this._openProducers.delete(streamId);
-                  this._deleteReplayIfUnused(replayKey);
-                } else {
-                  this._openProducers.delete(streamId);
-                }
+                this._deleteProducer(streamId);
               }
               break;
             }
@@ -266,12 +261,7 @@ export class Dispatcher implements JsDispatcher {
               member: env.member,
               scope: env.scope,
             });
-            if (replayKey !== undefined) {
-              this._openProducers.delete(streamId);
-              this._deleteReplayIfUnused(replayKey);
-            } else {
-              this._openProducers.delete(streamId);
-            }
+            this._deleteProducer(streamId);
           }
         }
       };
@@ -311,12 +301,7 @@ export class Dispatcher implements JsDispatcher {
     const producer = this._openProducers.get(streamId);
     if (producer) {
       producer.unsubscribe();
-      if (producer.replayKey !== undefined) {
-        this._openProducers.delete(streamId);
-        this._deleteReplayIfUnused(producer.replayKey);
-      } else {
-        this._openProducers.delete(streamId);
-      }
+      this._deleteProducer(streamId);
     }
   }
 
@@ -396,6 +381,18 @@ export class Dispatcher implements JsDispatcher {
     this._deleteReplayEntry(replayKey);
   }
 
+  private _deleteProducer(streamId: string): void {
+    const producer = this._openProducers.get(streamId);
+    if (producer === undefined) return;
+    this._openProducers.delete(streamId);
+    if (producer.replayKey !== undefined) {
+      this._deleteReplayIfUnused(producer.replayKey);
+    }
+    if (producer.generationToken !== undefined) {
+      this._releaseReplayGenerationIfUnreferenced(producer.generationToken);
+    }
+  }
+
   private _deleteReplayEntry(replayKey: string): void {
     const previous = this._streamLatestValues.get(replayKey);
     this._streamLatestValues.delete(replayKey);
@@ -407,6 +404,9 @@ export class Dispatcher implements JsDispatcher {
   private _releaseReplayGenerationIfUnreferenced(generationToken: ReplayGenerationToken): void {
     for (const replayEntry of this._streamLatestValues.values()) {
       if (replayEntry.generationToken === generationToken) return;
+    }
+    for (const producer of this._openProducers.values()) {
+      if (producer.generationToken === generationToken && producer.generationToken.isLive) return;
     }
     this._liveReplayGenerations.delete(generationToken);
   }

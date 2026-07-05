@@ -315,6 +315,44 @@ describe('Dispatcher stream delivery modes', () => {
     expect(getLiveReplayGenerationCount()).toBeLessThanOrEqual(getLatestReplayEntryCount() + 1);
   });
 
+  test('never-emitting latestOnly streams release replay generations when consumers close before replacement', async () => {
+    const { dispatcher, registry } = makeDispatcherHarness();
+    const getLiveReplayGenerationCount = () =>
+      (dispatcher as unknown as { _liveReplayGenerations: Set<unknown> })._liveReplayGenerations
+        .size;
+    const getLatestReplayEntryCount = () =>
+      (dispatcher as unknown as { _streamLatestValues: Map<string, unknown> })._streamLatestValues
+        .size;
+
+    const neverEmittingLatestEvents = () => ({
+      [Symbol.asyncIterator](): AsyncIterator<string> {
+        return {
+          next: () => new Promise<IteratorResult<string>>(() => {}),
+          return: () => Promise.resolve({ value: undefined as unknown as string, done: true }),
+        };
+      },
+    });
+
+    let binding = registry.provide(StreamDeliveryContract, {
+      latestEvents: neverEmittingLatestEvents,
+    });
+
+    for (let cycle = 0; cycle < 40; cycle += 1) {
+      const streamId = `never-emit-${cycle}`;
+      dispatcher.onStreamOpen(makeStreamOpen('latestEvents', { latestOnly: true }), streamId);
+      await flushMicrotasks();
+      dispatcher.onStreamClose(streamId, 'consumer');
+      binding.close('replacing');
+      binding = registry.provide(StreamDeliveryContract, {
+        latestEvents: neverEmittingLatestEvents,
+      });
+      await flushMicrotasks();
+    }
+
+    expect(getLatestReplayEntryCount()).toBe(0);
+    expect(getLiveReplayGenerationCount()).toBeLessThanOrEqual(1);
+  });
+
   test('final-close of fallback provider invalidates requested-scope replay', async () => {
     const { dispatcher, registry, values } = makeDispatcherHarness();
     const instanceScope: CallEnvelope['scope'] = {
