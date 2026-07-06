@@ -25,14 +25,45 @@ function sortedStringify(value: unknown): string {
 
 // ---- FNV-1a 32-bit --------------------------------------------------------
 
-function fnv1a32(str: string): string {
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < str.length; i++) {
-    hash ^= str.charCodeAt(i);
-    // Unsigned 32-bit multiply: split into 16-bit halves to avoid overflow
-    hash = ((hash >>> 0) * 0x01000193) >>> 0;
+function utf8Bytes(str: string): Uint8Array {
+  if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(str);
+
+  const bytes: number[] = [];
+  for (const char of str) {
+    const rawCodePoint = char.codePointAt(0);
+    const codePoint =
+      rawCodePoint !== undefined && rawCodePoint >= 0xd800 && rawCodePoint <= 0xdfff
+        ? 0xfffd
+        : rawCodePoint;
+    if (codePoint === undefined) continue;
+    if (codePoint <= 0x7f) {
+      bytes.push(codePoint);
+    } else if (codePoint <= 0x7ff) {
+      bytes.push(0xc0 | (codePoint >> 6), 0x80 | (codePoint & 0x3f));
+    } else if (codePoint <= 0xffff) {
+      bytes.push(
+        0xe0 | (codePoint >> 12),
+        0x80 | ((codePoint >> 6) & 0x3f),
+        0x80 | (codePoint & 0x3f),
+      );
+    } else {
+      bytes.push(
+        0xf0 | (codePoint >> 18),
+        0x80 | ((codePoint >> 12) & 0x3f),
+        0x80 | ((codePoint >> 6) & 0x3f),
+        0x80 | (codePoint & 0x3f),
+      );
+    }
   }
-  return (hash >>> 0).toString(16).padStart(8, '0');
+  return Uint8Array.from(bytes);
+}
+
+export function hash8hex(str: string): string {
+  let hash = 0x811c9dc5;
+  for (const byte of utf8Bytes(str)) {
+    hash = Math.imul(hash ^ byte, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
 }
 
 /**
@@ -40,7 +71,7 @@ function fnv1a32(str: string): string {
  * Object keys are sorted recursively, so key insertion order does not affect the hash.
  */
 export function stableHash(value: unknown): string {
-  return fnv1a32(sortedStringify(value));
+  return hash8hex(sortedStringify(value));
 }
 
 /**

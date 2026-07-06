@@ -40,13 +40,22 @@
   "scripts": {
     "build": "tsc",
     "prepack": "tsc",
+    "test": "jest --config ./jest.config.cjs",
+    "test:codec": "jest --config ./jest.config.cjs --testPathPattern=codec --passWithNoTests",
+    "test:hash": "jest --config ./jest.config.cjs --testPathPattern=hash",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@malopezr7/bridgekit": "workspace:*",
     "chalk": "4.1.2"
   },
   "devDependencies": {
+    "@babel/core": "7.28.3",
+    "@react-native/babel-preset": "0.83.6",
+    "@types/jest": "^29.5.13",
     "@types/node": "^22.0.0",
+    "babel-jest": "29.7.0",
+    "jest": "29.7.0",
     "typescript": "5.9.2"
   }
 }
