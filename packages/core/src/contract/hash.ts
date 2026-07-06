@@ -30,7 +30,11 @@ function utf8Bytes(str: string): Uint8Array {
 
   const bytes: number[] = [];
   for (const char of str) {
-    const codePoint = char.codePointAt(0);
+    const rawCodePoint = char.codePointAt(0);
+    const codePoint =
+      rawCodePoint !== undefined && rawCodePoint >= 0xd800 && rawCodePoint <= 0xdfff
+        ? 0xfffd
+        : rawCodePoint;
     if (codePoint === undefined) continue;
     if (codePoint <= 0x7f) {
       bytes.push(codePoint);

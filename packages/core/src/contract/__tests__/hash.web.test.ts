@@ -6,7 +6,33 @@ describe('hash8hex – FNV-1a UTF-8 golden vectors', () => {
     expect(hash8hex('')).toBe('811c9dc5');
     expect(hash8hex('a')).toBe('e40c292c');
     expect(hash8hex('é')).toBe('1e9de8c1');
+    expect(hash8hex('€')).toBe('298f832b');
     expect(hash8hex('💩')).toBe('3892005d');
+  });
+
+  it('hash_web_fallback_matches_textencoder_for_surrogates_and_three_byte_chars', () => {
+    const originalTextEncoder = (globalThis as { TextEncoder?: typeof TextEncoder }).TextEncoder;
+    Object.defineProperty(globalThis, 'TextEncoder', { configurable: true, value: undefined });
+
+    try {
+      jest.isolateModules(() => {
+        const { hash8hex: fallbackHash8hex } = require('../hash') as typeof import('../hash');
+
+        expect(fallbackHash8hex('\uD800')).toBe('03479c4a');
+        expect(fallbackHash8hex('\uDCA9')).toBe('03479c4a');
+        expect(fallbackHash8hex('€')).toBe('298f832b');
+        expect(fallbackHash8hex('💩')).toBe('3892005d');
+      });
+    } finally {
+      if (originalTextEncoder === undefined) {
+        delete (globalThis as { TextEncoder?: typeof TextEncoder }).TextEncoder;
+      } else {
+        Object.defineProperty(globalThis, 'TextEncoder', {
+          configurable: true,
+          value: originalTextEncoder,
+        });
+      }
+    }
   });
 });
 
