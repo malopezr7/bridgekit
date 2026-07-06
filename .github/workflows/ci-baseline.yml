@@ -230,11 +230,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build CLI
-        run: pnpm --filter @malopezr7/bridgekit-cli build
-
       - name: Build core contract exports
         run: pnpm --filter @malopezr7/bridgekit build
+
+      - name: Build CLI
+        run: pnpm --filter @malopezr7/bridgekit-cli build
 
       - name: Report known generate drift
         continue-on-error: true
