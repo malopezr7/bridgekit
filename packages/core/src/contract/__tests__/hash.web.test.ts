@@ -20,6 +20,7 @@ describe('hash8hex – FNV-1a UTF-8 golden vectors', () => {
 
         expect(fallbackHash8hex('\uD800')).toBe('03479c4a');
         expect(fallbackHash8hex('\uDCA9')).toBe('03479c4a');
+        expect(fallbackHash8hex('\uD7FF')).toBe('a4ce656e');
         expect(fallbackHash8hex('€')).toBe('298f832b');
         expect(fallbackHash8hex('💩')).toBe('3892005d');
       });
