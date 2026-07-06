@@ -1,4 +1,6 @@
 module.exports = {
+  // Tests import @malopezr7/bridgekit/contract from core dist; run `pnpm --filter @malopezr7/bridgekit build` first in clean clones.
+  // `test:hash` scopes current hash tests; `test:codec` intentionally uses --passWithNoTests until slice 6b codec snapshots land.
   clearMocks: true,
   rootDir: __dirname,
   testEnvironment: 'node',

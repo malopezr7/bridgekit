@@ -40,8 +40,9 @@
   "scripts": {
     "build": "tsc",
     "prepack": "tsc",
-    "test:codec": "jest --config ./jest.config.cjs",
-    "test:hash": "jest --config ./jest.config.cjs",
+    "test": "jest --config ./jest.config.cjs",
+    "test:codec": "jest --config ./jest.config.cjs --testPathPattern=codec --passWithNoTests",
+    "test:hash": "jest --config ./jest.config.cjs --testPathPattern=hash",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
