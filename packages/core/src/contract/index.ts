@@ -33,7 +33,7 @@ export type {
 // Contract definition
 export { defineContract, isMarkerDescriptor, t } from './contract';
 // Hash utilities (used by CLI codegen and skew diffing)
-export { memberHashes, stableHash } from './hash';
+export { hash8hex, memberHashes, stableHash } from './hash';
 // Marker API (DX-1)
 export type {
   BridgeStreamSource as MarkerStreamSource,

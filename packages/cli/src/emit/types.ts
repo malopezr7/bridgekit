@@ -1,5 +1,7 @@
 // emit/types.ts — schema node shapes, identifier helpers, Kotlin type emitter.
 
+import { stableHash } from '@malopezr7/bridgekit/contract';
+
 import { CliError } from '../cliError.js';
 
 export interface SchemaNode {
@@ -479,26 +481,7 @@ export class KotlinTypeEmitter {
 }
 
 export function hashMember(value: unknown): string {
-  function sortedStringify(v: unknown): string {
-    if (v === null) return 'null';
-    if (v === undefined) return 'undefined';
-    if (Array.isArray(v)) return `[${(v as unknown[]).map(sortedStringify).join(',')}]`;
-    if (typeof v === 'object') {
-      const obj = v as Record<string, unknown>;
-      return `{${Object.keys(obj)
-        .sort()
-        .map((k) => `${JSON.stringify(k)}:${sortedStringify(obj[k])}`)
-        .join(',')}}`;
-    }
-    return JSON.stringify(v);
-  }
-  let hash = 0x811c9dc5;
-  const str = sortedStringify(value);
-  for (let i = 0; i < str.length; i++) {
-    hash ^= str.charCodeAt(i);
-    hash = ((hash >>> 0) * 0x01000193) >>> 0;
-  }
-  return (hash >>> 0).toString(16).padStart(8, '0');
+  return stableHash(value);
 }
 
 export function kotlinLiteral(value: unknown): string {

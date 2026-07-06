@@ -1,5 +1,14 @@
-import { memberHashes, stableHash } from '../hash';
+import { hash8hex, memberHashes, stableHash } from '../hash';
 import { defineContract, t } from '../index';
+
+describe('hash8hex – FNV-1a UTF-8 golden vectors', () => {
+  it('hash_web_golden_vectors_fnv1a_utf8', () => {
+    expect(hash8hex('')).toBe('811c9dc5');
+    expect(hash8hex('a')).toBe('e40c292c');
+    expect(hash8hex('é')).toBe('1e9de8c1');
+    expect(hash8hex('💩')).toBe('3892005d');
+  });
+});
 
 describe('stableHash – deterministic and stable', () => {
   it('produces same hash regardless of object key order', () => {
