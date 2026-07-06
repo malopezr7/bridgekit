@@ -1,3 +1,4 @@
+import { stableHash } from '../hash';
 import { defineContract, t } from '../index';
 
 describe('defineContract – id validation', () => {
@@ -134,6 +135,7 @@ describe('defineContract – state initial value validation', () => {
         state: { count: t.state(t.int64(), 0n) },
       }),
     ).not.toThrow();
+    expect(() => stableHash({ initial: 0n })).not.toThrow();
 
     const epoch = defineContract('foo.bar', {
       state: { at: t.state(t.date(), new Date('2024-01-01T00:00:00.000Z')) },
@@ -143,6 +145,9 @@ describe('defineContract – state initial value validation', () => {
     });
 
     expect(epoch.hash).toBe(nextDay.hash);
+    expect(stableHash({ initial: new Date('2024-01-01T00:00:00.000Z') })).not.toBe(
+      stableHash({ initial: new Date('2024-01-02T00:00:00.000Z') }),
+    );
   });
 });
 

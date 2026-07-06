@@ -1,6 +1,7 @@
 import { stableHash } from '@malopezr7/bridgekit/contract';
 
-import { hashMember } from '../emit/types.js';
+import type { ObjectNode } from '../emit/types.js';
+import { hashMember, KotlinTypeEmitter } from '../emit/types.js';
 
 describe('emit type member hashes', () => {
   it('cli_hash_member_hashes_match_core pins FNV-1a UTF-8 hashMember goldens', () => {
@@ -19,5 +20,29 @@ describe('emit type member hashes', () => {
         initial: 'é',
       }),
     ).toBe('4f602849');
+  });
+
+  it('cli_allocate_name_suffixes_structurally_different_schema_types_with_same_candidate_name', () => {
+    const emitter = new KotlinTypeEmitter('Fixture');
+    const stringPayloadNode: ObjectNode = {
+      kind: 'object',
+      fields: { value: { kind: 'string' } },
+    };
+    const numberPayloadNode: ObjectNode = {
+      kind: 'object',
+      fields: { value: { kind: 'number' } },
+    };
+
+    const stringPayload = emitter.emit(stringPayloadNode, 'payload');
+    const numberPayload = emitter.emit(numberPayloadNode, 'payload');
+
+    expect(numberPayload.typeName).not.toBe(stringPayload.typeName);
+    expect(numberPayload.typeName).toMatch(/^Payload_[0-9a-f]{4}$/);
+    expect(emitter.getDeclarations()).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('data class Payload('),
+        expect.stringContaining(`data class ${numberPayload.typeName}(`),
+      ]),
+    );
   });
 });

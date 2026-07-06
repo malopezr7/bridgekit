@@ -49,10 +49,12 @@ function isContractDescriptor(value: unknown): value is ContractDescriptor {
   return isRecord(value) && value.$type === 'com.bridgekit.contract';
 }
 
+const MEMBER_DESCRIPTOR_KINDS = new Set(['fire', 'query', 'querySync', 'stream', 'state']);
+
 function isMemberDescriptor(
   value: unknown,
 ): value is MethodDescriptor | StreamDescriptor | StateDescriptor {
-  return isRecord(value) && typeof value.kind === 'string';
+  return isRecord(value) && MEMBER_DESCRIPTOR_KINDS.has(value.kind as string);
 }
 
 function projectSchema(schema: AnySchema | HashableRecord): HashableRecord {
@@ -109,7 +111,7 @@ function projectSchema(schema: AnySchema | HashableRecord): HashableRecord {
         ['tags', (schema as { tags?: readonly string[] }).tags],
       ]);
     default:
-      return { kind: schema.kind };
+      return schema as HashableRecord;
   }
 }
 
@@ -146,6 +148,8 @@ function projectMemberDescriptor(
         ['kind', descriptor.kind],
         ['value', projectSchema(descriptor.value)],
       ]);
+    default:
+      return descriptor;
   }
 }
 

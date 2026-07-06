@@ -76,6 +76,28 @@ describe('stableHash – deterministic and stable', () => {
       stableHash({ at: new Date('2024-01-02T00:00:00.000Z') }),
     );
   });
+
+  it('hash_web_schema_nodes_remain_structurally_distinct', () => {
+    const undefinedHash = hash8hex('undefined');
+
+    const objectWithStringField = stableHash(t.object({ a: t.string() }));
+    const objectWithNumberField = stableHash(t.object({ b: t.number() }));
+
+    expect(objectWithStringField).not.toBe(objectWithNumberField);
+    expect(objectWithStringField).not.toBe(undefinedHash);
+    expect(objectWithNumberField).not.toBe(undefinedHash);
+  });
+
+  it('hash_web_unknown_kind_objects_use_full_value_shape', () => {
+    const undefinedHash = hash8hex('undefined');
+
+    const customWithOne = stableHash({ kind: 'custom', a: 1 });
+    const customWithTwo = stableHash({ kind: 'custom', a: 2 });
+
+    expect(customWithOne).not.toBe(customWithTwo);
+    expect(customWithOne).not.toBe(undefinedHash);
+    expect(customWithTwo).not.toBe(undefinedHash);
+  });
 });
 
 describe('contract hash – integration', () => {
@@ -182,6 +204,40 @@ describe('contract hash – integration', () => {
       memberHashes(baseline.descriptor)['methods.load'],
     );
     expect(memberHashes(schemaTypeChanged.descriptor)['methods.load']).not.toBe(
+      memberHashes(baseline.descriptor)['methods.load'],
+    );
+  });
+
+  it('hash_web_schema_fields_named_like_local_config_remain_wire_relevant', () => {
+    const baseline = defineContract('test.hash', {
+      methods: {
+        load: t.query(
+          t.object({
+            timeoutMs: t.string(),
+            sticky: t.string(),
+            initial: t.string(),
+            latestOnly: t.string(),
+          }),
+          t.string(),
+        ),
+      },
+    });
+    const schemaFieldTypesChanged = defineContract('test.hash', {
+      methods: {
+        load: t.query(
+          t.object({
+            timeoutMs: t.number(),
+            sticky: t.number(),
+            initial: t.number(),
+            latestOnly: t.number(),
+          }),
+          t.string(),
+        ),
+      },
+    });
+
+    expect(schemaFieldTypesChanged.hash).not.toBe(baseline.hash);
+    expect(memberHashes(schemaFieldTypesChanged.descriptor)['methods.load']).not.toBe(
       memberHashes(baseline.descriptor)['methods.load'],
     );
   });

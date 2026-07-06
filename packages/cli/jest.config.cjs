@@ -1,5 +1,5 @@
 module.exports = {
-  // Tests import @malopezr7/bridgekit/contract from core dist; run `pnpm --filter @malopezr7/bridgekit build` first in clean clones.
+  // Hash tests assert semantics against core source; CLI tsc still validates the dist type-shape, and CI builds core.
   // `test:hash` scopes current hash tests; `test:codec` intentionally uses --passWithNoTests until slice 6b codec snapshots land.
   clearMocks: true,
   rootDir: __dirname,
