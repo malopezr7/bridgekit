@@ -9,6 +9,7 @@ module.exports = {
     '^.+\\.[jt]sx?$': ['babel-jest', { presets: ['module:@react-native/babel-preset'] }],
   },
   moduleNameMapper: {
+    '^@malopezr7/bridgekit/contract$': '<rootDir>/../core/src/contract/index.ts',
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
   testMatch: ['<rootDir>/src/**/*.test.ts'],

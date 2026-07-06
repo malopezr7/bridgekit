@@ -36,7 +36,7 @@ describe('buildLock member hashes', () => {
 
     expect(lock.contracts['fixture.hash']?.members).toEqual({
       'methods.translate': 'f7232f5d',
-      'state.mood': '1ee92d7f',
+      'state.mood': '4f602849',
       'streams.updates': 'f2b12f34',
     });
     expect(lock.contracts['fixture.hash']?.members).toEqual(

@@ -66,6 +66,16 @@ describe('stableHash – deterministic and stable', () => {
     const b = stableHash({ arr: [3, 2, 1] });
     expect(a).not.toBe(b);
   });
+
+  it('serializes bigint and Date values deterministically', () => {
+    expect(() => stableHash({ id: 9007199254740993n })).not.toThrow();
+    expect(stableHash({ id: 9007199254740993n })).toBe(
+      stableHash({ id: BigInt('9007199254740993') }),
+    );
+    expect(stableHash({ at: new Date('2024-01-01T00:00:00.000Z') })).not.toBe(
+      stableHash({ at: new Date('2024-01-02T00:00:00.000Z') }),
+    );
+  });
 });
 
 describe('contract hash – integration', () => {
@@ -89,14 +99,91 @@ describe('contract hash – integration', () => {
     expect(c1.hash).not.toBe(c2.hash);
   });
 
-  it('hash changes when a state initial value changes', () => {
+  it('hash does not change when a state initial value changes', () => {
     const c1 = defineContract('test.hash', {
       state: { count: t.state(t.number(), 0) },
     });
     const c2 = defineContract('test.hash', {
       state: { count: t.state(t.number(), 99) },
     });
-    expect(c1.hash).not.toBe(c2.hash);
+    expect(c1.hash).toBe(c2.hash);
+  });
+
+  it('hash_web_excludes_local_config', () => {
+    const baseline = defineContract('test.hash', {
+      methods: {
+        load: t.query(t.object({ id: t.string() }), t.string(), { timeoutMs: 100 }),
+      },
+      streams: {
+        events: t.stream(t.object({ message: t.string() }), {
+          latestOnly: false,
+          sticky: false,
+        }),
+      },
+      state: {
+        count: t.state(t.number(), 0),
+      },
+    });
+    const localConfigOnly = defineContract('test.hash', {
+      methods: {
+        load: t.query(t.object({ id: t.string() }), t.string(), { timeoutMs: 999 }),
+      },
+      streams: {
+        events: t.stream(t.object({ message: t.string() }), {
+          latestOnly: true,
+          sticky: true,
+        }),
+      },
+      state: {
+        count: t.state(t.number(), 42),
+      },
+    });
+
+    expect(localConfigOnly.hash).toBe(baseline.hash);
+    expect(stableHash({ ...localConfigOnly.descriptor, descriptorVersion: 2 })).toBe(baseline.hash);
+    expect(memberHashes(localConfigOnly.descriptor)).toEqual(memberHashes(baseline.descriptor));
+  });
+
+  it('hash_web_changes_when_wire_relevant_shape_changes', () => {
+    const baseline = defineContract('test.hash', {
+      methods: {
+        load: t.query(t.object({ id: t.string() }), t.string()),
+      },
+      streams: { events: t.stream(t.object({ message: t.string() })) },
+      state: { count: t.state(t.number(), 0) },
+    });
+    const memberAdded = defineContract('test.hash', {
+      methods: {
+        load: t.query(t.object({ id: t.string() }), t.string()),
+        save: t.fire(t.object({ id: t.string() })),
+      },
+      streams: { events: t.stream(t.object({ message: t.string() })) },
+      state: { count: t.state(t.number(), 0) },
+    });
+    const schemaTypeChanged = defineContract('test.hash', {
+      methods: {
+        load: t.query(t.object({ id: t.number() }), t.string()),
+      },
+      streams: { events: t.stream(t.object({ message: t.string() })) },
+      state: { count: t.state(t.number(), 0) },
+    });
+    const contractScopeChanged = defineContract('test.other-scope', {
+      methods: {
+        load: t.query(t.object({ id: t.string() }), t.string()),
+      },
+      streams: { events: t.stream(t.object({ message: t.string() })) },
+      state: { count: t.state(t.number(), 0) },
+    });
+
+    expect(memberAdded.hash).not.toBe(baseline.hash);
+    expect(schemaTypeChanged.hash).not.toBe(baseline.hash);
+    expect(contractScopeChanged.hash).not.toBe(baseline.hash);
+    expect(memberHashes(memberAdded.descriptor)['methods.load']).toBe(
+      memberHashes(baseline.descriptor)['methods.load'],
+    );
+    expect(memberHashes(schemaTypeChanged.descriptor)['methods.load']).not.toBe(
+      memberHashes(baseline.descriptor)['methods.load'],
+    );
   });
 
   it('hash changes when a stream schema changes', () => {

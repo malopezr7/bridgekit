@@ -70,10 +70,10 @@ describe('defineContract – returned token', () => {
         count: t.state(t.number(), 0),
       },
     });
-    expect(c.descriptor.methods['ping']).toBeDefined();
-    expect(c.descriptor.methods['getData']).toBeDefined();
-    expect(c.descriptor.streams['events']).toBeDefined();
-    expect(c.descriptor.state['count']).toBeDefined();
+    expect(c.descriptor.methods.ping).toBeDefined();
+    expect(c.descriptor.methods.getData).toBeDefined();
+    expect(c.descriptor.streams.events).toBeDefined();
+    expect(c.descriptor.state.count).toBeDefined();
   });
 
   it('produces a stable hash string', () => {
@@ -126,6 +126,23 @@ describe('defineContract – state initial value validation', () => {
         state: { flag: t.state(t.boolean(), 'true' as unknown as boolean) },
       }),
     ).toThrow(/initial/i);
+  });
+
+  it('contract_web_int64_date_initials_define_without_hash_crash', () => {
+    expect(() =>
+      defineContract('foo.bar', {
+        state: { count: t.state(t.int64(), 0n) },
+      }),
+    ).not.toThrow();
+
+    const epoch = defineContract('foo.bar', {
+      state: { at: t.state(t.date(), new Date('2024-01-01T00:00:00.000Z')) },
+    });
+    const nextDay = defineContract('foo.bar', {
+      state: { at: t.state(t.date(), new Date('2024-01-02T00:00:00.000Z')) },
+    });
+
+    expect(epoch.hash).toBe(nextDay.hash);
   });
 });
 

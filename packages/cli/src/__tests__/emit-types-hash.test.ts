@@ -18,6 +18,6 @@ describe('emit type member hashes', () => {
         value: { kind: 'literals', values: ['é', '💩'] },
         initial: 'é',
       }),
-    ).toBe('1ee92d7f');
+    ).toBe('4f602849');
   });
 });
