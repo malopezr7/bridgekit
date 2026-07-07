@@ -14,6 +14,14 @@ import type {
 } from './markers';
 import type { BridgeScope } from './protocol';
 
+function isSafeMemberKey(key: string): boolean {
+  return key !== '__proto__' && key !== 'constructor' && key !== 'prototype';
+}
+
+function createNullProtoRecord<T>(): Record<string, T> {
+  return Object.create(null) as Record<string, T>;
+}
+
 function buildSnapshot<T extends MarkerContractInput>(
   bk: BridgeKitJs,
   contract: BridgeContract<unknown>,
@@ -22,8 +30,9 @@ function buildSnapshot<T extends MarkerContractInput>(
   const proxy = bk.bridge(contract, { scope }) as Record<string, unknown>;
   const desc = contract.descriptor;
 
-  const stateHandles: Record<string, StateHandle<unknown>> = {};
+  const stateHandles = createNullProtoRecord<StateHandle<unknown>>();
   for (const key of Object.keys(desc.state)) {
+    if (!isSafeMemberKey(key)) continue;
     const mirror = bk.state(contract, key, scope);
     stateHandles[key] = {
       get: () => mirror.get().value,
@@ -31,11 +40,13 @@ function buildSnapshot<T extends MarkerContractInput>(
     };
   }
 
-  const snap: Record<string, unknown> = {};
+  const snap = createNullProtoRecord<unknown>();
   for (const key of Object.keys(desc.methods)) {
+    if (!isSafeMemberKey(key)) continue;
     snap[key] = proxy[key];
   }
   for (const key of Object.keys(desc.streams)) {
+    if (!isSafeMemberKey(key)) continue;
     snap[key] = proxy[key];
   }
   snap.state = stateHandles;
@@ -72,8 +83,9 @@ export function buildContractHook<T extends MarkerContractInput>(
 
     const mirrors = useMemo(() => {
       const desc = contract.descriptor;
-      const result: Record<string, ReturnType<BridgeKitJs['state']>> = {};
+      const result = createNullProtoRecord<ReturnType<BridgeKitJs['state']>>();
       for (const key of Object.keys(desc.state)) {
+        if (!isSafeMemberKey(key)) continue;
         result[key] = bk.state(contract, key, scope);
       }
       return result;
@@ -121,8 +133,9 @@ export function buildContractHook<T extends MarkerContractInput>(
       }
 
       const desc = contract.descriptor;
-      const stateHandles: Record<string, StateHandle<unknown>> = {};
+      const stateHandles = createNullProtoRecord<StateHandle<unknown>>();
       for (const key of Object.keys(desc.state)) {
+        if (!isSafeMemberKey(key)) continue;
         const mirror = mirrors[key];
         if (!mirror) continue;
         stateHandles[key] = {
@@ -131,11 +144,13 @@ export function buildContractHook<T extends MarkerContractInput>(
         };
       }
 
-      const snap: Record<string, unknown> = {};
+      const snap = createNullProtoRecord<unknown>();
       for (const key of Object.keys(desc.methods)) {
+        if (!isSafeMemberKey(key)) continue;
         snap[key] = proxy[key];
       }
       for (const key of Object.keys(desc.streams)) {
+        if (!isSafeMemberKey(key)) continue;
         snap[key] = proxy[key];
       }
       snap.state = stateHandles;

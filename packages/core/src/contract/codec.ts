@@ -105,6 +105,14 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
+function isReservedObjectKey(key: string): boolean {
+  return key === '__proto__' || key === 'constructor' || key === 'prototype';
+}
+
+function createNullProtoRecord(): Record<string, unknown> {
+  return Object.create(null) as Record<string, unknown>;
+}
+
 /**
  * Deep-sanitize an arbitrary value for t.json():
  * - strips undefined fields from objects
@@ -122,8 +130,9 @@ export function sanitizeAny(value: unknown): unknown {
     return value.map(sanitizeAny).filter((v) => v !== undefined);
   }
   if (isObject(value)) {
-    const result: Record<string, unknown> = {};
+    const result = createNullProtoRecord();
     for (const [k, v] of Object.entries(value)) {
+      if (isReservedObjectKey(k)) continue;
       if (v === undefined || typeof v === 'function') continue;
       const sanitized = sanitizeAny(v);
       if (sanitized !== undefined) {
@@ -203,8 +212,9 @@ export function encode(schema: AnySchema, value: unknown): unknown {
     case 'record': {
       if (!isObject(value)) return value;
       const recordSchema = schema as RecordSchema;
-      const result: Record<string, unknown> = {};
+      const result = createNullProtoRecord();
       for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        if (isReservedObjectKey(k)) continue;
         if (v === undefined || typeof v === 'function') continue;
         const encoded = encode(recordSchema.value, v);
         if (encoded !== undefined) {
@@ -340,8 +350,9 @@ export function decode(schema: AnySchema, value: unknown): unknown {
     case 'record': {
       if (!isObject(value)) return value;
       const recordSchema = schema as RecordSchema;
-      const result: Record<string, unknown> = {};
+      const result = createNullProtoRecord();
       for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        if (isReservedObjectKey(k)) continue;
         result[k] = decode(recordSchema.value, v);
       }
       return result;

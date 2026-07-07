@@ -1,4 +1,4 @@
-import { decode, encode, validate } from '../codec';
+import { decode, encode, sanitizeAny, validate } from '../codec';
 import { t } from '../schema';
 
 // ---------------------------------------------------------------------------
@@ -166,6 +166,44 @@ describe('decode – tolerant, drops extra keys', () => {
     // Unknown value decoded as-is per spec
     expect(decode(schema, 'c')).toBe('c');
     expect(decode(schema, 'a')).toBe('a');
+  });
+});
+
+describe('codec_web_record_proto_payload_does_not_mutate_prototype', () => {
+  const assertPrototypeSafe = (value: unknown): void => {
+    expect(Object.getPrototypeOf(value)).toBeNull();
+    expect(Object.hasOwn(value as object, '__proto__')).toBe(false);
+    expect(Object.hasOwn(value as object, 'constructor')).toBe(false);
+    expect(Object.hasOwn(value as object, 'prototype')).toBe(false);
+  };
+
+  it('decodes record payloads with guarded keys without installing them as prototypes', () => {
+    const schema = t.record(t.json());
+    const payload = JSON.parse(
+      '{"safe":{"nested":true},"__proto__":{"polluted":"decoded"},"constructor":{"polluted":"ctor"},"prototype":{"polluted":"prototype"}}',
+    ) as Record<string, unknown>;
+
+    const decoded = decode(schema, payload) as Record<string, unknown>;
+
+    assertPrototypeSafe(decoded);
+    expect(decoded.safe).toEqual({ nested: true });
+    expect((decoded as { polluted?: unknown }).polluted).toBeUndefined();
+  });
+
+  it('sanitizes json payloads with guarded keys without installing them as prototypes', () => {
+    const payload = JSON.parse(
+      '{"safe":{"nested":true},"__proto__":{"polluted":"json"},"constructor":{"polluted":"ctor"},"prototype":{"polluted":"prototype"}}',
+    ) as Record<string, unknown>;
+
+    const sanitized = sanitizeAny(payload) as Record<string, unknown>;
+    const encoded = encode(t.json(), payload) as Record<string, unknown>;
+
+    assertPrototypeSafe(sanitized);
+    assertPrototypeSafe(encoded);
+    expect(sanitized.safe).toEqual({ nested: true });
+    expect(encoded.safe).toEqual({ nested: true });
+    expect((sanitized as { polluted?: unknown }).polluted).toBeUndefined();
+    expect((encoded as { polluted?: unknown }).polluted).toBeUndefined();
   });
 });
 
