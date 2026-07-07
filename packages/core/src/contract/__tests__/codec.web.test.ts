@@ -117,6 +117,18 @@ describe('encode – strips unknown keys and unsafe values', () => {
   });
 });
 
+describe('codec_web_oneof_unmatched_object_throws_at_encode', () => {
+  const schema = t.oneOf([t.string(), t.number()] as const);
+
+  it('throws while encoding an object that matches no oneOf option', () => {
+    expect(() => encode(schema, { kind: 'not-a-string-or-number' })).toThrow(/oneOf/i);
+  });
+
+  it('throws while decoding an envelope whose value does not match the selected option', () => {
+    expect(() => decode(schema, { '@k': 0, '@v': { unsafe: true } })).toThrow(/oneOf/i);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // decode
 // ---------------------------------------------------------------------------
@@ -299,14 +311,13 @@ describe('codec_web_decode_tolerant_passthrough_sanitizes_reserved_own_keys', ()
     expect(Object.hasOwn(value as object, 'prototype')).toBe(false);
   };
 
-  it('sanitizes oneOf primitive option @v object passthrough', () => {
-    const result = decode(t.oneOf([t.string()] as const), {
-      '@k': 0,
-      '@v': payloadWithReservedKeys(),
-    }) as Record<string, unknown>;
-
-    expectReservedKeysStripped(result);
-    expect(result.keep).toBe(true);
+  it('throws for oneOf primitive option @v object mismatches instead of passthrough', () => {
+    expect(() =>
+      decode(t.oneOf([t.string()] as const), {
+        '@k': 0,
+        '@v': payloadWithReservedKeys(),
+      }),
+    ).toThrow(/oneOf/i);
   });
 
   it.each([
@@ -386,12 +397,10 @@ describe('codec_web_decode_tolerant_passthrough_sanitizes_reserved_own_keys', ()
     expect(result.keep).toBe(true);
   });
 
-  it('sanitizes oneOf non-envelope array passthrough while preserving arrays', () => {
-    const result = decode(t.oneOf([t.string()] as const), arrayWithReservedObject()) as unknown[];
-
-    expect(Array.isArray(result)).toBe(true);
-    expectReservedKeysStripped(result[0]);
-    expect((result[0] as Record<string, unknown>).keep).toBe('array');
+  it('throws for oneOf non-envelope arrays instead of passthrough', () => {
+    expect(() => decode(t.oneOf([t.string()] as const), arrayWithReservedObject())).toThrow(
+      /oneOf/i,
+    );
   });
 
   it('preserves reserved words when they are primitive string values', () => {

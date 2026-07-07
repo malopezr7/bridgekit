@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it } from '@jest/globals';
-import { decode } from '../codec';
+import { decode, encode } from '../codec';
 import { t } from '../schema';
 
 // ---------------------------------------------------------------------------
@@ -92,5 +92,17 @@ describe('5.6 nullable/optional: null guard for union variants', () => {
   it('optional(oneOf): valid envelope decoded correctly after null guard', () => {
     const result = decode(optionalOneOf, { '@k': 1, '@v': 42 });
     expect(result).toBe(42);
+  });
+});
+
+describe('4.1 oneOf fail-fast symmetry', () => {
+  const schema = t.oneOf([t.string(), t.number()] as const);
+
+  it('encode throws before sending an unmatched object to the peer', () => {
+    expect(() => encode(schema, { unsafe: true })).toThrow(/oneOf/i);
+  });
+
+  it('decode throws when the selected branch cannot decode the envelope value', () => {
+    expect(() => decode(schema, { '@k': 0, '@v': { unsafe: true } })).toThrow(/oneOf/i);
   });
 });
