@@ -62,6 +62,15 @@ function _decodeAndValidateInbound(
   return decoded;
 }
 
+function _encodeBridgeError(err: unknown, contractId: string, member: string, scope: BridgeScope) {
+  const message = err instanceof Error ? err.message : String(err);
+  return createBridgeError(
+    'INCOMPATIBLE_CONTRACT',
+    `[bridgekit] INCOMPATIBLE_CONTRACT: ${contractId}.${member} payload encode failed: ${message}`,
+    { contractId, member, scope, details: { cause: message } },
+  );
+}
+
 /**
  * Encode stream params for transport.
  * t.* path: schema-driven encode. Marker path: deep-sanitize.
@@ -423,12 +432,24 @@ export class BridgeKitJs {
                 return;
               }
               // --- FALL-THROUGH: transport path ---
+              let payload: unknown;
+              try {
+                payload = _encodePayload(methodDesc, params);
+              } catch (err) {
+                diagnostics.incrementFiresDropped();
+                if (isBridgeKitDev()) {
+                  console.warn(
+                    `[bridgekit] fire ${desc.id}.${prop} dropped: ${_encodeBridgeError(err, desc.id, prop, scope).message}`,
+                  );
+                }
+                return;
+              }
               const env = {
                 op: 'invoke' as const,
                 contractId: desc.id,
                 member: prop,
                 scope,
-                payload: _encodePayload(methodDesc, params),
+                payload,
                 correlationId: nextCorrelationId(),
                 epoch: this._epoch,
                 contractHash: contract.hash,
@@ -455,12 +476,18 @@ export class BridgeKitJs {
               if (localEntry) {
                 return invokeLocalSync(localEntry.binding.impl, prop, desc.id, params);
               }
+              let payload: unknown;
+              try {
+                payload = _encodePayload(methodDesc, params);
+              } catch (err) {
+                throw _encodeBridgeError(err, desc.id, prop, scope);
+              }
               const env = {
                 op: 'invokeSync' as const,
                 contractId: desc.id,
                 member: prop,
                 scope,
-                payload: _encodePayload(methodDesc, params),
+                payload,
                 correlationId: nextCorrelationId(),
                 epoch: this._epoch,
                 contractHash: contract.hash,
@@ -542,12 +569,19 @@ export class BridgeKitJs {
               });
             }
 
+            let payload: unknown;
+            try {
+              payload = _encodePayload(methodDesc, params);
+            } catch (err) {
+              return Promise.reject(_encodeBridgeError(err, desc.id, prop, scope));
+            }
+
             const env = {
               op: 'invoke' as const,
               contractId: desc.id,
               member: prop,
               scope,
-              payload: _encodePayload(methodDesc, params),
+              payload,
               correlationId: nextCorrelationId(),
               epoch: this._epoch,
               contractHash: contract.hash,
@@ -663,18 +697,24 @@ export class BridgeKitJs {
               return wrapStreamSourceWithDiagnostics(localSource);
             }
 
-            const env = {
-              op: 'streamOpen' as const,
-              contractId: desc.id,
-              member: prop,
-              scope,
-              payload: _encodeStreamPayload(streamDesc, params),
-              correlationId: nextCorrelationId(),
-              epoch: this._epoch,
-              contractHash: contract.hash,
-              ...(streamDesc.latestOnly === true ? { latestOnly: true } : {}),
-              ...(streamDesc.sticky === true ? { sticky: true } : {}),
-            };
+            let preOpenError: ReturnType<typeof _encodeBridgeError> | null = null;
+            let env: Parameters<BridgeTransport['openStream']>[0] | null = null;
+            try {
+              env = {
+                op: 'streamOpen' as const,
+                contractId: desc.id,
+                member: prop,
+                scope,
+                payload: _encodeStreamPayload(streamDesc, params),
+                correlationId: nextCorrelationId(),
+                epoch: this._epoch,
+                contractHash: contract.hash,
+                ...(streamDesc.latestOnly === true ? { latestOnly: true } : {}),
+                ...(streamDesc.sticky === true ? { sticky: true } : {}),
+              };
+            } catch (err) {
+              preOpenError = _encodeBridgeError(err, desc.id, prop, scope);
+            }
 
             let streamId: string | null = null;
             const subscribers = new Set<(v: unknown) => void>();
@@ -692,6 +732,7 @@ export class BridgeKitJs {
             };
 
             const openIfNeeded = () => {
+              if (preOpenError !== null || env === null) return;
               if (streamId !== null) return;
               streamId = capturedTransport.openStream(
                 env,
@@ -711,6 +752,15 @@ export class BridgeKitJs {
 
             const transportSource: BridgeStreamSource<unknown> = {
               subscribe(cb: (v: unknown) => void): () => void {
+                if (preOpenError !== null) {
+                  diagnostics.incrementErrors();
+                  if (isBridgeKitDev()) {
+                    console.warn(
+                      `[bridgekit] stream ${desc.id}.${prop} failed: ${preOpenError.message}`,
+                    );
+                  }
+                  return () => {};
+                }
                 subscribers.add(cb);
                 openIfNeeded();
                 return () => {
@@ -721,6 +771,17 @@ export class BridgeKitJs {
                 };
               },
               [Symbol.asyncIterator](): AsyncIterator<unknown> {
+                if (preOpenError !== null) {
+                  diagnostics.incrementErrors();
+                  return {
+                    next(): Promise<IteratorResult<unknown>> {
+                      return Promise.reject(preOpenError);
+                    },
+                    return(): Promise<IteratorResult<unknown>> {
+                      return Promise.resolve({ value: undefined, done: true });
+                    },
+                  };
+                }
                 // Bounded ring buffer with DROP_OLDEST backpressure.
                 const QUEUE_CAPACITY = 64;
                 const ringBuf = new Array<unknown>(QUEUE_CAPACITY);

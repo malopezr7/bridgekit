@@ -117,6 +117,68 @@ describe('encode – strips unknown keys and unsafe values', () => {
   });
 });
 
+describe('codec_web_oneof_unmatched_object_throws_at_encode', () => {
+  const schema = t.oneOf([t.string(), t.number()] as const);
+
+  it('throws while encoding an object that matches no oneOf option', () => {
+    expect(() => encode(schema, { kind: 'not-a-string-or-number' })).toThrow(/oneOf/i);
+  });
+
+  it('throws while decoding an envelope whose value does not match the selected option', () => {
+    expect(() => decode(schema, { '@k': 0, '@v': { unsafe: true } })).toThrow(/oneOf/i);
+  });
+});
+
+describe('codec_web_optional_array_and_tuple_preserve_positions', () => {
+  it('encodes optional array gaps as null without shifting later elements', () => {
+    const schema = t.array(t.optional(t.string()));
+    const wire = encode(schema, ['first', undefined, 'third']) as unknown[];
+
+    expect(wire).toEqual(['first', null, 'third']);
+    expect(wire).toHaveLength(3);
+    expect(decode(schema, wire)).toEqual(['first', undefined, 'third']);
+  });
+
+  it('encodes optional tuple holes as null without changing tuple arity', () => {
+    const schema = t.tuple([t.string(), t.optional(t.number()), t.string()] as const);
+    const wire = encode(schema, ['left', undefined, 'right'] as const) as unknown[];
+
+    expect(wire).toEqual(['left', null, 'right']);
+    expect(wire).toHaveLength(3);
+    expect(decode(schema, wire)).toEqual(['left', undefined, 'right']);
+  });
+
+  it('pins optional(nullable(T)) collection null/undefined collapse as native parity', () => {
+    const schema = t.array(t.optional(t.nullable(t.number())));
+    const wire = encode(schema, [null, undefined, 1]) as unknown[];
+
+    expect(wire).toEqual([null, null, 1]);
+    expect(decode(schema, wire)).toEqual([undefined, undefined, 1]);
+  });
+});
+
+describe('codec_web_oneof_literal_enum_strictness_pin', () => {
+  it('keeps bare literal decode skew-tolerant while oneOf literal decode is strict', () => {
+    const literalSchema = t.literals('known');
+
+    expect(decode(literalSchema, 'skewed')).toBe('skewed');
+    // Deliberate asymmetry: oneOf validates the selected @v after decode so
+    // skewed literal envelopes fail fast, matching native strict literals.
+    expect(() => decode(t.oneOf([literalSchema] as const), { '@k': 0, '@v': 'skewed' })).toThrow(
+      /oneOf/i,
+    );
+  });
+
+  it('keeps bare enum decode skew-tolerant while oneOf enum decode is strict', () => {
+    const enumSchema = t.enum({ Ready: 1 });
+
+    expect(decode(enumSchema, 2)).toBe(2);
+    // Deliberate asymmetry: oneOf validates the selected @v after decode so
+    // skewed enum envelopes fail fast, matching native strict enums.
+    expect(() => decode(t.oneOf([enumSchema] as const), { '@k': 0, '@v': 2 })).toThrow(/oneOf/i);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // decode
 // ---------------------------------------------------------------------------
@@ -299,14 +361,13 @@ describe('codec_web_decode_tolerant_passthrough_sanitizes_reserved_own_keys', ()
     expect(Object.hasOwn(value as object, 'prototype')).toBe(false);
   };
 
-  it('sanitizes oneOf primitive option @v object passthrough', () => {
-    const result = decode(t.oneOf([t.string()] as const), {
-      '@k': 0,
-      '@v': payloadWithReservedKeys(),
-    }) as Record<string, unknown>;
-
-    expectReservedKeysStripped(result);
-    expect(result.keep).toBe(true);
+  it('throws for oneOf primitive option @v object mismatches instead of passthrough', () => {
+    expect(() =>
+      decode(t.oneOf([t.string()] as const), {
+        '@k': 0,
+        '@v': payloadWithReservedKeys(),
+      }),
+    ).toThrow(/oneOf/i);
   });
 
   it.each([
@@ -386,12 +447,10 @@ describe('codec_web_decode_tolerant_passthrough_sanitizes_reserved_own_keys', ()
     expect(result.keep).toBe(true);
   });
 
-  it('sanitizes oneOf non-envelope array passthrough while preserving arrays', () => {
-    const result = decode(t.oneOf([t.string()] as const), arrayWithReservedObject()) as unknown[];
-
-    expect(Array.isArray(result)).toBe(true);
-    expectReservedKeysStripped(result[0]);
-    expect((result[0] as Record<string, unknown>).keep).toBe('array');
+  it('throws for oneOf non-envelope arrays instead of passthrough', () => {
+    expect(() => decode(t.oneOf([t.string()] as const), arrayWithReservedObject())).toThrow(
+      /oneOf/i,
+    );
   });
 
   it('preserves reserved words when they are primitive string values', () => {

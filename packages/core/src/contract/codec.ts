@@ -154,6 +154,22 @@ function sanitizeDecodePassthrough(value: unknown): unknown {
   return value;
 }
 
+function isOptionalSchema(schema: AnySchema): schema is OptionalSchema {
+  return schema.kind === 'optional';
+}
+
+function encodeCollectionItem(schema: AnySchema, value: unknown): unknown {
+  const encoded = encode(schema, value);
+  // Positional null represents both an optional gap and a nullable null, matching
+  // native parity: Kotlin List<T?> / Swift [T?] cannot distinguish them in JSON arrays.
+  if (encoded === undefined && isOptionalSchema(schema)) return null;
+  return encoded;
+}
+
+function oneOfError(operation: 'encode' | 'decode', message: string): TypeError {
+  return new TypeError(`[bridgekit] oneOf ${operation}: ${message}`);
+}
+
 // ---- encode ---------------------------------------------------------------
 
 /**
@@ -210,7 +226,7 @@ export function encode(schema: AnySchema, value: unknown): unknown {
       if (!Array.isArray(value)) return value;
       const arraySchema = schema as ArraySchema;
       return (value as unknown[])
-        .map((item) => encode(arraySchema.item, item))
+        .map((item) => encodeCollectionItem(arraySchema.item, item))
         .filter((v) => v !== undefined);
     }
 
@@ -276,7 +292,9 @@ export function encode(schema: AnySchema, value: unknown): unknown {
     case 'tuple': {
       if (!Array.isArray(value)) return value;
       const tupleSchema = schema as TupleSchema;
-      return tupleSchema.items.map((itemSchema, i) => encode(itemSchema, (value as unknown[])[i]));
+      return tupleSchema.items.map((itemSchema, i) =>
+        encodeCollectionItem(itemSchema, (value as unknown[])[i]),
+      );
     }
 
     case 'oneOf': {
@@ -289,7 +307,7 @@ export function encode(schema: AnySchema, value: unknown): unknown {
           return { '@k': i, '@v': encode(opt, value) };
         }
       }
-      return value; // no match — pass through
+      throw oneOfError('encode', `value did not match any option (got ${typeof value})`);
     }
 
     default:
@@ -322,6 +340,8 @@ export function decode(schema: AnySchema, value: unknown): unknown {
       return sanitizeDecodePassthrough(value); // skew tolerance: unknown values pass through
 
     case 'optional': {
+      // Positional null represents both optional gaps and nullable nulls in collections;
+      // optional(nullable(T)) therefore decodes both wire null cases to undefined.
       if (value === undefined || value === null) return undefined;
       return decode((schema as OptionalSchema).inner, value);
     }
@@ -410,7 +430,12 @@ export function decode(schema: AnySchema, value: unknown): unknown {
     }
 
     case 'oneOf': {
-      if (!isObject(value)) return sanitizeDecodePassthrough(value);
+      if (!isObject(value)) {
+        throw oneOfError(
+          'decode',
+          `expected @k/@v envelope, got ${Array.isArray(value) ? 'array' : typeof value}`,
+        );
+      }
       const oneOfSchema = schema as OneOfSchema;
       const envelope = value as Record<string, unknown>;
       const rawK = envelope['@k'];
@@ -433,7 +458,12 @@ export function decode(schema: AnySchema, value: unknown): unknown {
           `[bridgekit] oneOf decode: @k=${rawK} is out of range (schema has ${oneOfSchema.options.length} option(s))`,
         );
       }
-      return decode(opt, envelope['@v']);
+      const decoded = decode(opt, envelope['@v']);
+      const result = validateAt(opt, decoded, '');
+      if (!result.ok) {
+        throw oneOfError('decode', `@v did not match option @k=${rawK}: ${result.message}`);
+      }
+      return decoded;
     }
 
     default:
