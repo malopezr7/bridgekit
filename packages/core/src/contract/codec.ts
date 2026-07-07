@@ -563,8 +563,8 @@ function validateAt(schema: AnySchema, value: unknown, path: string): Validation
       if (typeof value !== 'number') {
         return validationError(path, `Expected number, got ${typeof value}`);
       }
-      if (Number.isNaN(value)) {
-        return validationError(path, 'Expected finite number, got NaN');
+      if (!Number.isFinite(value)) {
+        return validationError(path, `Expected finite number, got ${String(value)}`);
       }
       return { ok: true };
 

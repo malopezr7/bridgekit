@@ -755,6 +755,23 @@ describe('codec_web_binary_nan_enum_edges_are_safe', () => {
     }
   });
 
+  it('rejects infinities at validation so number JSON round trips cannot corrupt them to null', () => {
+    for (const value of [Infinity, -Infinity]) {
+      const result = validate(t.number(), value);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.message).toMatch(/finite number/i);
+      }
+    }
+  });
+
+  it('keeps finite number validation accepted across representative values', () => {
+    for (const value of [0, -1, 3.14, Number.MAX_SAFE_INTEGER]) {
+      expect(validate(t.number(), value).ok).toBe(true);
+    }
+  });
+
   it('keeps enum wire values numeric while rejecting unknown validation values', () => {
     const schema = t.enum({ Red: 0, Green: 1, Blue: 2 });
 
