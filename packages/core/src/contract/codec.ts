@@ -74,13 +74,28 @@ function base64ToUint8Array(str: string): Uint8Array {
   // Pre-pass: count valid chars and padding to size the output buffer.
   let validChars = 0;
   let padCount = 0;
+  let seenPadding = false;
   for (let i = 0; i < str.length; i++) {
     const v = lookup(str.charCodeAt(i));
-    if (v === -1) padCount++;
-    else if (v >= 0) validChars++;
+    if (v === -1) {
+      padCount++;
+      seenPadding = true;
+    } else if (v >= 0) {
+      if (seenPadding) {
+        throw new TypeError('[bridgekit] binary decode: invalid base64 padding');
+      }
+      validChars++;
+    }
+  }
+  const totalChars = validChars + padCount;
+  if (padCount > 2 || (padCount > 0 && validChars < 2) || totalChars % 4 === 1) {
+    throw new TypeError('[bridgekit] binary decode: invalid base64 input');
   }
   // Standard formula: every 4 base64 chars → 3 bytes; subtract padding.
-  const byteLen = Math.floor(((validChars + padCount) * 3) / 4) - padCount;
+  const byteLen = Math.floor((totalChars * 3) / 4) - padCount;
+  if (byteLen < 0) {
+    throw new TypeError('[bridgekit] binary decode: invalid base64 input');
+  }
   const out = new Uint8Array(byteLen);
   let outIdx = 0;
   let buf = 0;
@@ -113,6 +128,10 @@ function createNullProtoRecord(): Record<string, unknown> {
   return Object.create(null) as Record<string, unknown>;
 }
 
+function cycleError(): TypeError {
+  return new TypeError('[bridgekit] codec sanitize: cycle detected in json value');
+}
+
 /**
  * Deep-sanitize an arbitrary value for t.json():
  * - strips undefined fields from objects
@@ -124,22 +143,73 @@ function createNullProtoRecord(): Record<string, unknown> {
  * Exported as sanitizeAny for use by the runtime.
  */
 export function sanitizeAny(value: unknown): unknown {
+  return sanitizeAnyWithSeen(value, new WeakSet<object>());
+}
+
+function sanitizeAnyWithSeen(value: unknown, seen: WeakSet<object>): unknown {
   if (value === null || value === undefined) return value;
   if (typeof value === 'function') return undefined;
+  if (value instanceof Date) return new Date(value.getTime());
+  if (value instanceof Uint8Array) return new Uint8Array(value);
   if (Array.isArray(value)) {
-    return value.map(sanitizeAny).filter((v) => v !== undefined);
+    if (seen.has(value)) throw cycleError();
+    seen.add(value);
+    try {
+      return value.map((item) => sanitizeAnyWithSeen(item, seen)).filter((v) => v !== undefined);
+    } finally {
+      seen.delete(value);
+    }
+  }
+  if (value instanceof Map) {
+    if (seen.has(value)) throw cycleError();
+    seen.add(value);
+    try {
+      const result = new Map<unknown, unknown>();
+      for (const [k, v] of value.entries()) {
+        const sanitizedKey = sanitizeAnyWithSeen(k, seen);
+        const sanitizedValue = sanitizeAnyWithSeen(v, seen);
+        if (sanitizedKey !== undefined && sanitizedValue !== undefined) {
+          result.set(sanitizedKey, sanitizedValue);
+        }
+      }
+      return result;
+    } finally {
+      seen.delete(value);
+    }
+  }
+  if (value instanceof Set) {
+    if (seen.has(value)) throw cycleError();
+    seen.add(value);
+    try {
+      const result = new Set<unknown>();
+      for (const item of value.values()) {
+        const sanitized = sanitizeAnyWithSeen(item, seen);
+        if (sanitized !== undefined) {
+          result.add(sanitized);
+        }
+      }
+      return result;
+    } finally {
+      seen.delete(value);
+    }
   }
   if (isObject(value)) {
+    if (seen.has(value)) throw cycleError();
+    seen.add(value);
     const result = createNullProtoRecord();
-    for (const [k, v] of Object.entries(value)) {
-      if (isReservedObjectKey(k)) continue;
-      if (v === undefined || typeof v === 'function') continue;
-      const sanitized = sanitizeAny(v);
-      if (sanitized !== undefined) {
-        result[k] = sanitized;
+    try {
+      for (const [k, v] of Object.entries(value)) {
+        if (isReservedObjectKey(k)) continue;
+        if (v === undefined || typeof v === 'function') continue;
+        const sanitized = sanitizeAnyWithSeen(v, seen);
+        if (sanitized !== undefined) {
+          result[k] = sanitized;
+        }
       }
+      return result;
+    } finally {
+      seen.delete(value);
     }
-    return result;
   }
   return value;
 }
@@ -283,9 +353,6 @@ export function encode(schema: AnySchema, value: unknown): unknown {
     }
 
     case 'enum': {
-      const enumSchema = schema as EnumSchema;
-      const isValid = enumSchema.members.some((m) => m.value === value);
-      if (!isValid) return value;
       return value; // wire is the numeric value
     }
 
@@ -495,6 +562,9 @@ function validateAt(schema: AnySchema, value: unknown, path: string): Validation
     case 'number':
       if (typeof value !== 'number') {
         return validationError(path, `Expected number, got ${typeof value}`);
+      }
+      if (!Number.isFinite(value)) {
+        return validationError(path, `Expected finite number, got ${String(value)}`);
       }
       return { ok: true };
 
