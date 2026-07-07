@@ -105,6 +105,14 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
+function isReservedObjectKey(key: string): boolean {
+  return key === '__proto__' || key === 'constructor' || key === 'prototype';
+}
+
+function createNullProtoRecord(): Record<string, unknown> {
+  return Object.create(null) as Record<string, unknown>;
+}
+
 /**
  * Deep-sanitize an arbitrary value for t.json():
  * - strips undefined fields from objects
@@ -122,8 +130,9 @@ export function sanitizeAny(value: unknown): unknown {
     return value.map(sanitizeAny).filter((v) => v !== undefined);
   }
   if (isObject(value)) {
-    const result: Record<string, unknown> = {};
+    const result = createNullProtoRecord();
     for (const [k, v] of Object.entries(value)) {
+      if (isReservedObjectKey(k)) continue;
       if (v === undefined || typeof v === 'function') continue;
       const sanitized = sanitizeAny(v);
       if (sanitized !== undefined) {
@@ -138,6 +147,11 @@ export function sanitizeAny(value: unknown): unknown {
 // sanitizeJson reuses sanitizeAny (same algorithm)
 function sanitizeJson(value: unknown): unknown {
   return sanitizeAny(value);
+}
+
+function sanitizeDecodePassthrough(value: unknown): unknown {
+  if (Array.isArray(value) || isObject(value)) return sanitizeAny(value);
+  return value;
 }
 
 // ---- encode ---------------------------------------------------------------
@@ -203,8 +217,9 @@ export function encode(schema: AnySchema, value: unknown): unknown {
     case 'record': {
       if (!isObject(value)) return value;
       const recordSchema = schema as RecordSchema;
-      const result: Record<string, unknown> = {};
+      const result = createNullProtoRecord();
       for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        if (isReservedObjectKey(k)) continue;
         if (v === undefined || typeof v === 'function') continue;
         const encoded = encode(recordSchema.value, v);
         if (encoded !== undefined) {
@@ -298,13 +313,13 @@ export function decode(schema: AnySchema, value: unknown): unknown {
     case 'number':
     case 'boolean':
     case 'void':
-      return value;
+      return sanitizeDecodePassthrough(value);
 
     case 'json':
-      return value;
+      return sanitizeJson(value);
 
     case 'literals':
-      return value; // skew tolerance: unknown values pass through
+      return sanitizeDecodePassthrough(value); // skew tolerance: unknown values pass through
 
     case 'optional': {
       if (value === undefined || value === null) return undefined;
@@ -318,7 +333,7 @@ export function decode(schema: AnySchema, value: unknown): unknown {
     }
 
     case 'object': {
-      if (!isObject(value)) return value;
+      if (!isObject(value)) return sanitizeDecodePassthrough(value);
       const objectSchema = schema as ObjectSchema;
       const result: Record<string, unknown> = {};
       for (const [key, fieldSchema] of Object.entries(objectSchema.fields)) {
@@ -332,28 +347,29 @@ export function decode(schema: AnySchema, value: unknown): unknown {
     }
 
     case 'array': {
-      if (!Array.isArray(value)) return value;
+      if (!Array.isArray(value)) return sanitizeDecodePassthrough(value);
       const arraySchema = schema as ArraySchema;
       return (value as unknown[]).map((item) => decode(arraySchema.item, item));
     }
 
     case 'record': {
-      if (!isObject(value)) return value;
+      if (!isObject(value)) return sanitizeDecodePassthrough(value);
       const recordSchema = schema as RecordSchema;
-      const result: Record<string, unknown> = {};
+      const result = createNullProtoRecord();
       for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+        if (isReservedObjectKey(k)) continue;
         result[k] = decode(recordSchema.value, v);
       }
       return result;
     }
 
     case 'union': {
-      if (!isObject(value)) return value;
+      if (!isObject(value)) return sanitizeDecodePassthrough(value);
       const unionSchema = schema as UnionSchema;
       const discriminantValue = (value as Record<string, unknown>)[unionSchema.discriminant];
-      if (typeof discriminantValue !== 'string') return value;
+      if (typeof discriminantValue !== 'string') return sanitizeDecodePassthrough(value);
       const variantSchema = unionSchema.variants[discriminantValue];
-      if (!variantSchema) return value;
+      if (!variantSchema) return sanitizeDecodePassthrough(value);
       const decoded = decode(variantSchema, value) as Record<string, unknown>;
       if (isObject(decoded)) {
         return { [unionSchema.discriminant]: discriminantValue, ...decoded };
@@ -368,7 +384,7 @@ export function decode(schema: AnySchema, value: unknown): unknown {
     }
 
     case 'date': {
-      if (value instanceof Date) return value;
+      if (value instanceof Date) return new Date(value.getTime());
       // C-1: Kotlin Long arrives as bigint via Nitro Int64; new Date(bigint) throws TypeError.
       // Handle both bigint (native bridge path) and number (JS self-invoke / older wire).
       const ms = typeof value === 'bigint' ? Number(value) : (value as number);
@@ -376,7 +392,7 @@ export function decode(schema: AnySchema, value: unknown): unknown {
     }
 
     case 'binary': {
-      if (value instanceof Uint8Array) return value;
+      if (value instanceof Uint8Array) return new Uint8Array(value);
       if (value instanceof ArrayBuffer) return new Uint8Array(value);
       // D6: wire is base64 string — decode without Buffer (Hermes/JSC/RN safe)
       return base64ToUint8Array(value as string);
@@ -384,17 +400,17 @@ export function decode(schema: AnySchema, value: unknown): unknown {
 
     case 'enum': {
       // wire is the numeric value — return as-is (skew tolerance)
-      return value;
+      return sanitizeDecodePassthrough(value);
     }
 
     case 'tuple': {
-      if (!Array.isArray(value)) return value;
+      if (!Array.isArray(value)) return sanitizeDecodePassthrough(value);
       const tupleSchema = schema as TupleSchema;
       return tupleSchema.items.map((itemSchema, i) => decode(itemSchema, (value as unknown[])[i]));
     }
 
     case 'oneOf': {
-      if (!isObject(value)) return value;
+      if (!isObject(value)) return sanitizeDecodePassthrough(value);
       const oneOfSchema = schema as OneOfSchema;
       const envelope = value as Record<string, unknown>;
       const rawK = envelope['@k'];
@@ -421,7 +437,7 @@ export function decode(schema: AnySchema, value: unknown): unknown {
     }
 
     default:
-      return value;
+      return sanitizeDecodePassthrough(value);
   }
 }
 

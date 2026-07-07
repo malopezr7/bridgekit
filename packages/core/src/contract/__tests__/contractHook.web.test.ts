@@ -32,6 +32,25 @@ const ProvideScopeContract = defineContract('contract-hook.provide-scope.test', 
   },
 });
 
+const ProtoHardenedContract = defineContract('contract-hook.proto-hardened.test', {
+  methods: (() => {
+    const methods: Record<string, ReturnType<typeof Async>> = Object.create(null);
+    methods.safeMethod = Async(t.string());
+    Reflect.set(methods, '__proto__', Async(t.string()));
+    Reflect.set(methods, 'constructor', Async(t.string()));
+    Reflect.set(methods, 'prototype', Async(t.string()));
+    return methods;
+  })(),
+  state: (() => {
+    const state: Record<string, ReturnType<typeof t.state>> = Object.create(null);
+    state.safeState = t.state(t.string(), 'initial');
+    Reflect.set(state, '__proto__', t.state(t.string(), 'polluted'));
+    Reflect.set(state, 'constructor', t.state(t.string(), 'ctor'));
+    Reflect.set(state, 'prototype', t.state(t.string(), 'proto'));
+    return state;
+  })(),
+});
+
 function makeScopeWrapper(feature?: string, instance?: string) {
   return function Wrapper({ children }: { children: React.ReactNode }) {
     return createElement(BridgeScopeProvider, { feature, instance }, children);
@@ -155,5 +174,23 @@ describe('hook.useProvide registers into ScopeContext scope, not global', () => 
     expect(inCtx).toBeUndefined();
 
     unmount();
+  });
+});
+
+describe('codec_web_record_proto_payload_does_not_mutate_prototype', () => {
+  test('hook.getState() skips guarded authored keys without mutating snapshot prototypes', () => {
+    const snapshot = ProtoHardenedContract.getState() as {
+      safeMethod?: unknown;
+      state: Record<string, unknown>;
+    };
+
+    expect(Object.getPrototypeOf(snapshot)).toBeNull();
+    expect(Object.getPrototypeOf(snapshot.state)).toBeNull();
+    expect(snapshot.safeMethod).toBeDefined();
+    expect(snapshot.state.safeState).toBeDefined();
+    for (const key of ['__proto__', 'constructor', 'prototype']) {
+      expect(Object.hasOwn(snapshot, key)).toBe(false);
+      expect(Object.hasOwn(snapshot.state, key)).toBe(false);
+    }
   });
 });
