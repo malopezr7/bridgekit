@@ -39,6 +39,19 @@ const ScopeContract = defineContract('scope.contract', {
   },
 });
 
+const OneOfOutboundContract = defineContract('oneof.outbound.contract', {
+  methods: {
+    send: t.fire(t.object({ value: t.oneOf([t.string()] as const) })),
+    ask: t.query(t.object({ value: t.oneOf([t.string()] as const) }), t.string()),
+    read: t.querySync(t.object({ value: t.oneOf([t.string()] as const) }), t.string()),
+  },
+  streams: {
+    values: t.stream(t.string(), {
+      params: t.object({ value: t.oneOf([t.string()] as const) }),
+    }),
+  },
+});
+
 // ---- Helpers ---------------------------------------------------------------
 
 function makeTestBridge() {
@@ -319,6 +332,42 @@ describe('BridgeKitJs proxy (bridge)', () => {
     // fire() must never throw — failures are async and counted
     expect(() => (proxy.fire as () => void)()).not.toThrow();
   });
+
+  test('fire drops unmatched oneOf param encode errors instead of throwing to caller', () => {
+    const { bridgekit } = makeTestBridge();
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const proxy = bridgekit.bridge(OneOfOutboundContract);
+
+    expect(() => (proxy.send as (params: { value: unknown }) => void)({ value: 1 })).not.toThrow();
+
+    warnSpy.mockRestore();
+  });
+
+  test('query rejects unmatched oneOf param encode errors through its returned promise', async () => {
+    const { bridgekit } = makeTestBridge();
+    const proxy = bridgekit.bridge(OneOfOutboundContract);
+    let promise: Promise<unknown> | undefined;
+
+    expect(() => {
+      promise = (proxy.ask as (params: { value: unknown }) => Promise<string>)({ value: 1 });
+    }).not.toThrow();
+
+    await expect(promise).rejects.toMatchObject({ code: 'INCOMPATIBLE_CONTRACT' });
+  });
+
+  test('querySync throws BridgeError for unmatched oneOf param encode errors', () => {
+    const { bridgekit } = makeTestBridge();
+    const proxy = bridgekit.bridge(OneOfOutboundContract);
+
+    try {
+      (proxy.read as (params: { value: unknown }) => string)({ value: 1 });
+      throw new Error('expected querySync to throw');
+    } catch (caught) {
+      expect(isBridgeError(caught)).toBe(true);
+      expect((caught as { code?: string }).code).toBe('INCOMPATIBLE_CONTRACT');
+      expect(caught).not.toBeInstanceOf(TypeError);
+    }
+  });
 });
 
 // ---- Stream tests ----------------------------------------------------------
@@ -584,6 +633,24 @@ describe('streams via loopback', () => {
     await loopDone;
     expect(collected).toEqual([1, 2]);
   }, 3000);
+
+  test('stream async iterator rejects unmatched oneOf param encode errors', async () => {
+    const { bridgekit } = makeTestBridge();
+    const proxy = bridgekit.bridge(OneOfOutboundContract);
+    let stream: { [Symbol.asyncIterator]: () => AsyncIterator<string> } | undefined;
+
+    expect(() => {
+      stream = (
+        proxy.values as (params: { value: unknown }) => {
+          [Symbol.asyncIterator]: () => AsyncIterator<string>;
+        }
+      )({ value: 1 });
+    }).not.toThrow();
+
+    await expect(stream?.[Symbol.asyncIterator]().next()).rejects.toMatchObject({
+      code: 'INCOMPATIBLE_CONTRACT',
+    });
+  });
 });
 
 // ---- State tests -----------------------------------------------------------
