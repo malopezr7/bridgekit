@@ -157,6 +157,28 @@ describe('codec_web_optional_array_and_tuple_preserve_positions', () => {
   });
 });
 
+describe('codec_web_oneof_literal_enum_strictness_pin', () => {
+  it('keeps bare literal decode skew-tolerant while oneOf literal decode is strict', () => {
+    const literalSchema = t.literals('known');
+
+    expect(decode(literalSchema, 'skewed')).toBe('skewed');
+    // Deliberate asymmetry: oneOf validates the selected @v after decode so
+    // skewed literal envelopes fail fast, matching native strict literals.
+    expect(() => decode(t.oneOf([literalSchema] as const), { '@k': 0, '@v': 'skewed' })).toThrow(
+      /oneOf/i,
+    );
+  });
+
+  it('keeps bare enum decode skew-tolerant while oneOf enum decode is strict', () => {
+    const enumSchema = t.enum({ Ready: 1 });
+
+    expect(decode(enumSchema, 2)).toBe(2);
+    // Deliberate asymmetry: oneOf validates the selected @v after decode so
+    // skewed enum envelopes fail fast, matching native strict enums.
+    expect(() => decode(t.oneOf([enumSchema] as const), { '@k': 0, '@v': 2 })).toThrow(/oneOf/i);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // decode
 // ---------------------------------------------------------------------------
