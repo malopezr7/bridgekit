@@ -177,6 +177,12 @@ describe('codec_web_record_proto_payload_does_not_mutate_prototype', () => {
     expect(Object.hasOwn(value as object, 'prototype')).toBe(false);
   };
 
+  const assertObjectPrototypeUnpolluted = (): void => {
+    expect((Object.prototype as Record<string, unknown>).polluted).toBeUndefined();
+    expect((Object.prototype as Record<string, unknown>).nestedPolluted).toBeUndefined();
+    expect((Object.prototype as Record<string, unknown>).ctorPolluted).toBeUndefined();
+  };
+
   it('decodes record payloads with guarded keys without installing them as prototypes', () => {
     const schema = t.record(t.json());
     const payload = JSON.parse(
@@ -204,6 +210,75 @@ describe('codec_web_record_proto_payload_does_not_mutate_prototype', () => {
     expect(encoded.safe).toEqual({ nested: true });
     expect((sanitized as { polluted?: unknown }).polluted).toBeUndefined();
     expect((encoded as { polluted?: unknown }).polluted).toBeUndefined();
+  });
+
+  it('decodes nested json record values with null prototypes and stripped guarded keys', () => {
+    const schema = t.record(t.json());
+    const payload = JSON.parse(
+      '{"safe":{"keep":true,"__proto__":{"nestedPolluted":1},"constructor":{"prototype":{"ctorPolluted":1}},"prototype":{"polluted":2}},"list":[{"keep":"array","__proto__":{"nestedPolluted":2},"constructor":{"prototype":{"ctorPolluted":2}},"prototype":{"polluted":3}}],"__proto__":{"polluted":1},"constructor":{"prototype":{"ctorPolluted":1}},"prototype":{"polluted":2}}',
+    ) as Record<string, unknown>;
+
+    const decoded = decode(schema, payload) as Record<string, unknown>;
+
+    assertPrototypeSafe(decoded);
+    assertObjectPrototypeUnpolluted();
+
+    const safe = decoded.safe as Record<string, unknown>;
+    assertPrototypeSafe(safe);
+    expect(safe.keep).toBe(true);
+    expect(safe.nestedPolluted).toBeUndefined();
+    expect(safe.ctorPolluted).toBeUndefined();
+    expect(safe.polluted).toBeUndefined();
+
+    const list = decoded.list as unknown[];
+    expect(Array.isArray(list)).toBe(true);
+    const listItem = list[0] as Record<string, unknown>;
+    assertPrototypeSafe(listItem);
+    expect(listItem.keep).toBe('array');
+    expect(listItem.nestedPolluted).toBeUndefined();
+    expect(listItem.ctorPolluted).toBeUndefined();
+    expect(listItem.polluted).toBeUndefined();
+  });
+
+  it('decodes bare json values with nested null-proto objects and stripped guarded keys', () => {
+    const payload = JSON.parse(
+      '{"safe":{"keep":true,"__proto__":{"nestedPolluted":1},"constructor":{"prototype":{"ctorPolluted":1}},"prototype":{"polluted":2}},"list":[{"keep":"array","__proto__":{"nestedPolluted":2},"constructor":{"prototype":{"ctorPolluted":2}},"prototype":{"polluted":3}}],"__proto__":{"polluted":1},"constructor":{"prototype":{"ctorPolluted":1}},"prototype":{"polluted":2}}',
+    ) as Record<string, unknown>;
+
+    const decoded = decode(t.json(), payload) as Record<string, unknown>;
+
+    assertPrototypeSafe(decoded);
+    assertObjectPrototypeUnpolluted();
+
+    const safe = decoded.safe as Record<string, unknown>;
+    assertPrototypeSafe(safe);
+    expect(safe.keep).toBe(true);
+    expect(safe.nestedPolluted).toBeUndefined();
+    expect(safe.ctorPolluted).toBeUndefined();
+    expect(safe.polluted).toBeUndefined();
+
+    const list = decoded.list as unknown[];
+    expect(Array.isArray(list)).toBe(true);
+    const listItem = list[0] as Record<string, unknown>;
+    assertPrototypeSafe(listItem);
+    expect(listItem.keep).toBe('array');
+    expect(listItem.nestedPolluted).toBeUndefined();
+    expect(listItem.ctorPolluted).toBeUndefined();
+    expect(listItem.polluted).toBeUndefined();
+  });
+
+  it('preserves legitimate json values through encode-decode round trips', () => {
+    const payload = {
+      nested: { keep: true, count: 3 },
+      list: [1, { name: 'two' }, null, false],
+      text: 'ok',
+    };
+
+    const decoded = decode(t.json(), payload);
+    const encoded = encode(t.json(), decoded);
+
+    expect(encoded).toEqual(payload);
+    expect((encoded as { list: unknown[] }).list).toEqual([1, { name: 'two' }, null, false]);
   });
 });
 

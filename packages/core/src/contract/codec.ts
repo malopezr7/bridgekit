@@ -311,7 +311,7 @@ export function decode(schema: AnySchema, value: unknown): unknown {
       return value;
 
     case 'json':
-      return value;
+      return sanitizeJson(value);
 
     case 'literals':
       return value; // skew tolerance: unknown values pass through
