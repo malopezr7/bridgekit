@@ -384,7 +384,7 @@ export function decode(schema: AnySchema, value: unknown): unknown {
     }
 
     case 'date': {
-      if (value instanceof Date) return value;
+      if (value instanceof Date) return new Date(value.getTime());
       // C-1: Kotlin Long arrives as bigint via Nitro Int64; new Date(bigint) throws TypeError.
       // Handle both bigint (native bridge path) and number (JS self-invoke / older wire).
       const ms = typeof value === 'bigint' ? Number(value) : (value as number);
@@ -392,7 +392,7 @@ export function decode(schema: AnySchema, value: unknown): unknown {
     }
 
     case 'binary': {
-      if (value instanceof Uint8Array) return value;
+      if (value instanceof Uint8Array) return new Uint8Array(value);
       if (value instanceof ArrayBuffer) return new Uint8Array(value);
       // D6: wire is base64 string — decode without Buffer (Hermes/JSC/RN safe)
       return base64ToUint8Array(value as string);

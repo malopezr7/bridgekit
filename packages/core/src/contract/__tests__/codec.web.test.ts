@@ -432,6 +432,115 @@ describe('codec_web_decode_tolerant_passthrough_sanitizes_reserved_own_keys', ()
   });
 });
 
+describe('codec_web_decode_typed_value_passthrough_strips_reserved_own_keys', () => {
+  const addReservedOwnKeys = <T extends object>(value: T): T => {
+    Object.defineProperty(value, '__proto__', {
+      configurable: true,
+      enumerable: true,
+      value: { polluted: 'proto' },
+    });
+    Object.defineProperty(value, 'constructor', {
+      configurable: true,
+      enumerable: true,
+      value: { polluted: 'constructor' },
+    });
+    Object.defineProperty(value, 'prototype', {
+      configurable: true,
+      enumerable: true,
+      value: { polluted: 'prototype' },
+    });
+    return value;
+  };
+
+  const expectNoReservedOwnKeys = (value: object): void => {
+    expect(Object.hasOwn(value, '__proto__')).toBe(false);
+    expect(Object.hasOwn(value, 'constructor')).toBe(false);
+    expect(Object.hasOwn(value, 'prototype')).toBe(false);
+  };
+
+  it('clones Date typed fallback values and strips reserved own keys', () => {
+    const input = addReservedOwnKeys(new Date('2025-06-14T12:00:00.000Z'));
+
+    const result = decode(t.date(), input) as Date;
+
+    expect(result).toBeInstanceOf(Date);
+    expect(result.getTime()).toBe(input.getTime());
+    expectNoReservedOwnKeys(result);
+    expect(result).not.toBe(input);
+  });
+
+  it('clones Uint8Array typed fallback values and strips reserved own keys', () => {
+    const input = addReservedOwnKeys(new Uint8Array([0x01, 0x02, 0xff]));
+
+    const result = decode(t.binary(), input) as Uint8Array;
+
+    expect(result).toBeInstanceOf(Uint8Array);
+    expect(Array.from(result)).toEqual([0x01, 0x02, 0xff]);
+    expectNoReservedOwnKeys(result);
+    expect(result).not.toBe(input);
+  });
+
+  it('keeps typed value semantics through declared containers without corruption', () => {
+    const dateInput = addReservedOwnKeys(new Date('2025-06-14T12:00:00.000Z'));
+    const binaryInput = addReservedOwnKeys(new Uint8Array([0x0a, 0x0b]));
+    const int64Input = 9007199254740993n;
+
+    const objectResult = decode(t.object({ at: t.date(), bytes: t.binary(), count: t.int64() }), {
+      at: dateInput,
+      bytes: binaryInput,
+      count: int64Input,
+    }) as { at: Date; bytes: Uint8Array; count: bigint };
+    const arrayResult = decode(t.array(t.date()), [dateInput]) as Date[];
+    const recordResult = decode(t.record(t.binary()), { payload: binaryInput }) as Record<
+      string,
+      Uint8Array
+    >;
+    const tupleResult = decode(t.tuple([t.date(), t.binary(), t.int64()] as const), [
+      dateInput,
+      binaryInput,
+      int64Input,
+    ]) as [Date, Uint8Array, bigint];
+    const oneOfDate = decode(t.oneOf([t.date(), t.binary(), t.int64()] as const), {
+      '@k': 0,
+      '@v': dateInput,
+    }) as Date;
+    const oneOfBinary = decode(t.oneOf([t.date(), t.binary(), t.int64()] as const), {
+      '@k': 1,
+      '@v': binaryInput,
+    }) as Uint8Array;
+    const oneOfInt64 = decode(t.oneOf([t.date(), t.binary(), t.int64()] as const), {
+      '@k': 2,
+      '@v': int64Input,
+    }) as bigint;
+
+    expect(objectResult.at).toBeInstanceOf(Date);
+    expect(objectResult.at.getTime()).toBe(dateInput.getTime());
+    expectNoReservedOwnKeys(objectResult.at);
+    expect(Array.from(objectResult.bytes)).toEqual([0x0a, 0x0b]);
+    expectNoReservedOwnKeys(objectResult.bytes);
+    expect(objectResult.count).toBe(int64Input);
+
+    expect(arrayResult[0]).toBeInstanceOf(Date);
+    expect(arrayResult[0].getTime()).toBe(dateInput.getTime());
+    expectNoReservedOwnKeys(arrayResult[0]);
+
+    expect(Array.from(recordResult.payload)).toEqual([0x0a, 0x0b]);
+    expectNoReservedOwnKeys(recordResult.payload);
+
+    expect(tupleResult[0].getTime()).toBe(dateInput.getTime());
+    expectNoReservedOwnKeys(tupleResult[0]);
+    expect(Array.from(tupleResult[1])).toEqual([0x0a, 0x0b]);
+    expectNoReservedOwnKeys(tupleResult[1]);
+    expect(tupleResult[2]).toBe(int64Input);
+
+    expect(oneOfDate.getTime()).toBe(dateInput.getTime());
+    expectNoReservedOwnKeys(oneOfDate);
+    expect(Array.from(oneOfBinary)).toEqual([0x0a, 0x0b]);
+    expectNoReservedOwnKeys(oneOfBinary);
+    expect(oneOfInt64).toBe(int64Input);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // validate
 // ---------------------------------------------------------------------------
