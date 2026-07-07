@@ -3,13 +3,21 @@
 // Recursively sorts object keys before stringifying for determinism.
 // ---------------------------------------------------------------------------
 
-import type { ContractDescriptor } from './contract';
+import type {
+  ContractDescriptor,
+  MethodDescriptor,
+  StateDescriptor,
+  StreamDescriptor,
+} from './contract';
+import type { AnySchema } from './schema';
 
 // ---- stable stringify -----------------------------------------------------
 
 function sortedStringify(value: unknown): string {
   if (value === null) return 'null';
   if (value === undefined) return 'undefined';
+  if (typeof value === 'bigint') return JSON.stringify(value.toString());
+  if (value instanceof Date) return JSON.stringify(value.getTime());
   if (Array.isArray(value)) {
     return `[${value.map(sortedStringify).join(',')}]`;
   }
@@ -21,6 +29,152 @@ function sortedStringify(value: unknown): string {
     return `{${sorted.join(',')}}`;
   }
   return JSON.stringify(value);
+}
+
+type HashableRecord = Record<string, unknown>;
+
+function withDefined(entries: [string, unknown][]): HashableRecord {
+  const result: HashableRecord = {};
+  for (const [key, value] of entries) {
+    if (value !== undefined) result[key] = value;
+  }
+  return result;
+}
+
+function isRecord(value: unknown): value is HashableRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isContractDescriptor(value: unknown): value is ContractDescriptor {
+  return isRecord(value) && value.$type === 'com.bridgekit.contract';
+}
+
+const MEMBER_DESCRIPTOR_KINDS = new Set(['fire', 'query', 'querySync', 'stream', 'state']);
+
+function isMemberDescriptor(
+  value: unknown,
+): value is MethodDescriptor | StreamDescriptor | StateDescriptor {
+  return isRecord(value) && MEMBER_DESCRIPTOR_KINDS.has(value.kind as string);
+}
+
+function projectSchema(schema: AnySchema | HashableRecord): HashableRecord {
+  switch (schema.kind) {
+    case 'object':
+      return withDefined([
+        ['kind', schema.kind],
+        ['fields', projectSchemaRecord((schema as { fields: Record<string, AnySchema> }).fields)],
+      ]);
+    case 'array':
+      return withDefined([
+        ['kind', schema.kind],
+        ['item', projectSchema((schema as { item: AnySchema }).item)],
+      ]);
+    case 'record':
+      return withDefined([
+        ['kind', schema.kind],
+        ['value', projectSchema((schema as { value: AnySchema }).value)],
+      ]);
+    case 'optional':
+    case 'nullable':
+      return withDefined([
+        ['kind', schema.kind],
+        ['inner', projectSchema((schema as { inner: AnySchema }).inner)],
+      ]);
+    case 'union':
+      return withDefined([
+        ['kind', schema.kind],
+        ['discriminant', (schema as { discriminant: string }).discriminant],
+        [
+          'variants',
+          projectSchemaRecord((schema as { variants: Record<string, AnySchema> }).variants),
+        ],
+      ]);
+    case 'literals':
+      return withDefined([
+        ['kind', schema.kind],
+        ['values', (schema as { values: readonly unknown[] }).values],
+      ]);
+    case 'enum':
+      return withDefined([
+        ['kind', schema.kind],
+        ['members', (schema as { members: readonly unknown[] }).members],
+      ]);
+    case 'tuple':
+      return withDefined([
+        ['kind', schema.kind],
+        ['items', (schema as { items: readonly AnySchema[] }).items.map(projectSchema)],
+      ]);
+    case 'oneOf':
+      return withDefined([
+        ['kind', schema.kind],
+        ['options', (schema as { options: readonly AnySchema[] }).options.map(projectSchema)],
+        ['tags', (schema as { tags?: readonly string[] }).tags],
+      ]);
+    default:
+      return schema as HashableRecord;
+  }
+}
+
+function projectSchemaRecord(record: Record<string, AnySchema>): Record<string, HashableRecord> {
+  return Object.fromEntries(
+    Object.entries(record).map(([key, schema]) => [key, projectSchema(schema)]),
+  );
+}
+
+function projectMemberDescriptor(
+  descriptor: MethodDescriptor | StreamDescriptor | StateDescriptor,
+): HashableRecord {
+  switch (descriptor.kind) {
+    case 'fire':
+      return withDefined([
+        ['kind', descriptor.kind],
+        ['params', descriptor.params !== undefined ? projectSchema(descriptor.params) : undefined],
+      ]);
+    case 'query':
+    case 'querySync':
+      return withDefined([
+        ['kind', descriptor.kind],
+        ['params', descriptor.params !== undefined ? projectSchema(descriptor.params) : undefined],
+        ['result', projectSchema(descriptor.result)],
+      ]);
+    case 'stream':
+      return withDefined([
+        ['kind', descriptor.kind],
+        ['params', descriptor.params !== undefined ? projectSchema(descriptor.params) : undefined],
+        ['value', projectSchema(descriptor.value)],
+      ]);
+    case 'state':
+      return withDefined([
+        ['kind', descriptor.kind],
+        ['value', projectSchema(descriptor.value)],
+      ]);
+    default:
+      return descriptor;
+  }
+}
+
+function projectMemberRecord<T extends MethodDescriptor | StreamDescriptor | StateDescriptor>(
+  record: Record<string, T>,
+): Record<string, HashableRecord> {
+  return Object.fromEntries(
+    Object.entries(record).map(([key, descriptor]) => [key, projectMemberDescriptor(descriptor)]),
+  );
+}
+
+function projectContractDescriptor(descriptor: ContractDescriptor): HashableRecord {
+  return {
+    $type: descriptor.$type,
+    id: descriptor.id,
+    methods: projectMemberRecord(descriptor.methods),
+    state: projectMemberRecord(descriptor.state),
+    streams: projectMemberRecord(descriptor.streams),
+  };
+}
+
+function wireIdentityProjection(value: unknown): unknown {
+  if (isContractDescriptor(value)) return projectContractDescriptor(value);
+  if (isMemberDescriptor(value)) return projectMemberDescriptor(value);
+  return value;
 }
 
 // ---- FNV-1a 32-bit --------------------------------------------------------
@@ -71,7 +225,7 @@ export function hash8hex(str: string): string {
  * Object keys are sorted recursively, so key insertion order does not affect the hash.
  */
 export function stableHash(value: unknown): string {
-  return hash8hex(sortedStringify(value));
+  return hash8hex(sortedStringify(wireIdentityProjection(value)));
 }
 
 /**
