@@ -160,6 +160,8 @@ function isOptionalSchema(schema: AnySchema): schema is OptionalSchema {
 
 function encodeCollectionItem(schema: AnySchema, value: unknown): unknown {
   const encoded = encode(schema, value);
+  // Positional null represents both an optional gap and a nullable null, matching
+  // native parity: Kotlin List<T?> / Swift [T?] cannot distinguish them in JSON arrays.
   if (encoded === undefined && isOptionalSchema(schema)) return null;
   return encoded;
 }
@@ -338,6 +340,8 @@ export function decode(schema: AnySchema, value: unknown): unknown {
       return sanitizeDecodePassthrough(value); // skew tolerance: unknown values pass through
 
     case 'optional': {
+      // Positional null represents both optional gaps and nullable nulls in collections;
+      // optional(nullable(T)) therefore decodes both wire null cases to undefined.
       if (value === undefined || value === null) return undefined;
       return decode((schema as OptionalSchema).inner, value);
     }

@@ -147,6 +147,14 @@ describe('codec_web_optional_array_and_tuple_preserve_positions', () => {
     expect(wire).toHaveLength(3);
     expect(decode(schema, wire)).toEqual(['left', undefined, 'right']);
   });
+
+  it('pins optional(nullable(T)) collection null/undefined collapse as native parity', () => {
+    const schema = t.array(t.optional(t.nullable(t.number())));
+    const wire = encode(schema, [null, undefined, 1]) as unknown[];
+
+    expect(wire).toEqual([null, null, 1]);
+    expect(decode(schema, wire)).toEqual([undefined, undefined, 1]);
+  });
 });
 
 // ---------------------------------------------------------------------------
