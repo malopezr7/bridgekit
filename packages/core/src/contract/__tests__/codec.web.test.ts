@@ -686,6 +686,52 @@ describe('codec_web_sanitize_any_preserves_special_values_and_rejects_cycles', (
     expect(() => sanitizeAny(cyclic)).toThrow(/cycle/i);
     expect(() => encode(t.json(), cyclic)).toThrow(/cycle/i);
   });
+
+  it('allows object diamond references through sanitize and json decode paths', () => {
+    const shared = { x: 1 };
+    const payload = { a: shared, b: shared };
+
+    expect(() => sanitizeAny(payload)).not.toThrow();
+    expect(() => decode(t.json(), payload)).not.toThrow();
+
+    expect(sanitizeAny(payload)).toEqual({ a: { x: 1 }, b: { x: 1 } });
+    expect(decode(t.json(), payload)).toEqual({ a: { x: 1 }, b: { x: 1 } });
+  });
+
+  it('allows array diamond references through the json encode path', () => {
+    const shared = { x: 1 };
+
+    expect(() => encode(t.json(), [shared, shared])).not.toThrow();
+    expect(encode(t.json(), [shared, shared])).toEqual([{ x: 1 }, { x: 1 }]);
+  });
+
+  it('allows Map entries to share the same object value through the json encode path', () => {
+    const shared = { x: 1 };
+    const payload = new Map<string, unknown>([
+      ['first', shared],
+      ['second', shared],
+    ]);
+
+    expect(() => encode(t.json(), payload)).not.toThrow();
+
+    const encoded = encode(t.json(), payload) as Map<string, Record<string, unknown>>;
+    expect(encoded.get('first')).toEqual({ x: 1 });
+    expect(encoded.get('second')).toEqual({ x: 1 });
+  });
+
+  it('allows Set contents to share objects with sibling branches through the json encode path', () => {
+    const shared = { x: 1 };
+    const payload = { set: new Set([shared]), sibling: shared };
+
+    expect(() => encode(t.json(), payload)).not.toThrow();
+
+    const encoded = encode(t.json(), payload) as {
+      set: Set<Record<string, unknown>>;
+      sibling: Record<string, unknown>;
+    };
+    expect(Array.from(encoded.set)).toEqual([{ x: 1 }]);
+    expect(encoded.sibling).toEqual({ x: 1 });
+  });
 });
 
 describe('codec_web_binary_nan_enum_edges_are_safe', () => {
