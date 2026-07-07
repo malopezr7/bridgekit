@@ -282,6 +282,156 @@ describe('codec_web_record_proto_payload_does_not_mutate_prototype', () => {
   });
 });
 
+describe('codec_web_decode_tolerant_passthrough_sanitizes_reserved_own_keys', () => {
+  const payloadWithReservedKeys = (): Record<string, unknown> =>
+    JSON.parse(
+      '{"__proto__":{"polluted":1},"constructor":{"polluted":2},"prototype":{"polluted":3},"keep":true,"nested":{"__proto__":{"polluted":4},"keep":"nested"}}',
+    ) as Record<string, unknown>;
+
+  const arrayWithReservedObject = (): unknown[] =>
+    JSON.parse(
+      '[{"__proto__":{"polluted":1},"constructor":{"polluted":2},"prototype":{"polluted":3},"keep":"array"}]',
+    ) as unknown[];
+
+  const expectReservedKeysStripped = (value: unknown): void => {
+    expect(Object.hasOwn(value as object, '__proto__')).toBe(false);
+    expect(Object.hasOwn(value as object, 'constructor')).toBe(false);
+    expect(Object.hasOwn(value as object, 'prototype')).toBe(false);
+  };
+
+  it('sanitizes oneOf primitive option @v object passthrough', () => {
+    const result = decode(t.oneOf([t.string()] as const), {
+      '@k': 0,
+      '@v': payloadWithReservedKeys(),
+    }) as Record<string, unknown>;
+
+    expectReservedKeysStripped(result);
+    expect(result.keep).toBe(true);
+  });
+
+  it.each([
+    ['string', t.string()],
+    ['number', t.number()],
+    ['boolean', t.boolean()],
+    ['void', t.void()],
+  ] as const)('sanitizes %s schema object mismatch passthrough', (_name, schema) => {
+    const result = decode(schema, payloadWithReservedKeys()) as Record<string, unknown>;
+
+    expectReservedKeysStripped(result);
+    expect(result.keep).toBe(true);
+  });
+
+  it('sanitizes literals skew object passthrough', () => {
+    const result = decode(t.literals('allowed'), payloadWithReservedKeys()) as Record<
+      string,
+      unknown
+    >;
+
+    expectReservedKeysStripped(result);
+    expect(result.keep).toBe(true);
+  });
+
+  it('sanitizes enum skew object passthrough', () => {
+    const result = decode(t.enum({ Known: 1 }), payloadWithReservedKeys()) as Record<
+      string,
+      unknown
+    >;
+
+    expectReservedKeysStripped(result);
+    expect(result.keep).toBe(true);
+  });
+
+  it('sanitizes array schema object mismatch passthrough', () => {
+    const result = decode(t.array(t.string()), payloadWithReservedKeys()) as Record<
+      string,
+      unknown
+    >;
+
+    expectReservedKeysStripped(result);
+    expect(result.keep).toBe(true);
+  });
+
+  it.each([
+    ['object', t.object({ keep: t.string() })],
+    ['record', t.record(t.string())],
+    ['union non-object', t.union('kind', { ok: t.object({ keep: t.string() }) })],
+  ] as const)('sanitizes %s schema array mismatch passthrough while preserving arrays', (_name, schema) => {
+    const result = decode(schema, arrayWithReservedObject()) as unknown[];
+
+    expect(Array.isArray(result)).toBe(true);
+    expectReservedKeysStripped(result[0]);
+    expect((result[0] as Record<string, unknown>).keep).toBe('array');
+  });
+
+  it('sanitizes tuple schema object mismatch passthrough', () => {
+    const result = decode(t.tuple([t.string()] as const), payloadWithReservedKeys()) as Record<
+      string,
+      unknown
+    >;
+
+    expectReservedKeysStripped(result);
+    expect(result.keep).toBe(true);
+  });
+
+  it.each([
+    ['non-string discriminant', { kind: 1, ...payloadWithReservedKeys() }],
+    ['unknown variant', { kind: 'missing', ...payloadWithReservedKeys() }],
+  ] as const)('sanitizes union %s passthrough', (_name, payload) => {
+    const result = decode(
+      t.union('kind', { ok: t.object({ keep: t.boolean() }) }),
+      payload,
+    ) as Record<string, unknown>;
+
+    expectReservedKeysStripped(result);
+    expect(result.keep).toBe(true);
+  });
+
+  it('sanitizes oneOf non-envelope array passthrough while preserving arrays', () => {
+    const result = decode(t.oneOf([t.string()] as const), arrayWithReservedObject()) as unknown[];
+
+    expect(Array.isArray(result)).toBe(true);
+    expectReservedKeysStripped(result[0]);
+    expect((result[0] as Record<string, unknown>).keep).toBe('array');
+  });
+
+  it('preserves reserved words when they are primitive string values', () => {
+    expect(decode(t.string(), '__proto__')).toBe('__proto__');
+  });
+
+  it('preserves legitimate similar data keys inside decoded objects', () => {
+    const result = decode(t.json(), {
+      constructorName: 'Widget',
+      prototypeChain: 'BaseWidget',
+    }) as Record<string, unknown>;
+
+    expect(result.constructorName).toBe('Widget');
+    expect(result.prototypeChain).toBe('BaseWidget');
+  });
+
+  it('preserves arrays as arrays when sanitizing passthrough values', () => {
+    const result = decode(t.record(t.string()), arrayWithReservedObject()) as unknown[];
+
+    expect(Array.isArray(result)).toBe(true);
+    expect((result[0] as Record<string, unknown>).keep).toBe('array');
+  });
+
+  it('keeps encode(decode(value)) lossless for legitimate nested json data', () => {
+    const payload = {
+      object: { constructorName: 'Widget', prototypeChain: 'BaseWidget' },
+      array: [1, { keep: true }, null, false, 'text'],
+      primitive: 'value',
+      nothing: null,
+      emptyObject: {},
+      emptyArray: [],
+    };
+
+    const decoded = decode(t.json(), payload);
+    const encoded = encode(t.json(), decoded);
+
+    expect(encoded).toEqual(payload);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // validate
 // ---------------------------------------------------------------------------
