@@ -698,6 +698,59 @@ describe('codec_web_sanitize_any_preserves_special_values_and_rejects_cycles', (
     expect(decode(t.json(), payload)).toEqual({ a: { x: 1 }, b: { x: 1 } });
   });
 
+  it('allows shared array container diamonds through the json encode and decode paths', () => {
+    const shared = [1, 2];
+    const payload = { a: shared, b: shared };
+
+    expect(() => encode(t.json(), payload)).not.toThrow();
+    expect(() => decode(t.json(), payload)).not.toThrow();
+
+    expect(encode(t.json(), payload)).toEqual({ a: [1, 2], b: [1, 2] });
+    expect(decode(t.json(), payload)).toEqual({ a: [1, 2], b: [1, 2] });
+  });
+
+  it('allows shared Map container diamonds through the json encode and decode paths', () => {
+    const shared = new Map<string, string>([['k', 'v']]);
+    const payload = { a: shared, b: shared };
+
+    expect(() => encode(t.json(), payload)).not.toThrow();
+    expect(() => decode(t.json(), payload)).not.toThrow();
+
+    const encoded = encode(t.json(), payload) as {
+      a: Map<string, string>;
+      b: Map<string, string>;
+    };
+    const decoded = decode(t.json(), payload) as {
+      a: Map<string, string>;
+      b: Map<string, string>;
+    };
+    expect(Array.from(encoded.a.entries())).toEqual([['k', 'v']]);
+    expect(Array.from(encoded.b.entries())).toEqual([['k', 'v']]);
+    expect(Array.from(decoded.a.entries())).toEqual([['k', 'v']]);
+    expect(Array.from(decoded.b.entries())).toEqual([['k', 'v']]);
+  });
+
+  it('allows shared Set container diamonds through the json encode and decode paths', () => {
+    const shared = new Set([1, 2]);
+    const payload = { a: shared, b: shared };
+
+    expect(() => encode(t.json(), payload)).not.toThrow();
+    expect(() => decode(t.json(), payload)).not.toThrow();
+
+    const encoded = encode(t.json(), payload) as {
+      a: Set<number>;
+      b: Set<number>;
+    };
+    const decoded = decode(t.json(), payload) as {
+      a: Set<number>;
+      b: Set<number>;
+    };
+    expect(Array.from(encoded.a.values())).toEqual([1, 2]);
+    expect(Array.from(encoded.b.values())).toEqual([1, 2]);
+    expect(Array.from(decoded.a.values())).toEqual([1, 2]);
+    expect(Array.from(decoded.b.values())).toEqual([1, 2]);
+  });
+
   it('allows array diamond references through the json encode path', () => {
     const shared = { x: 1 };
 
