@@ -106,3 +106,13 @@ describe('4.1 oneOf fail-fast symmetry', () => {
     expect(() => decode(schema, { '@k': 0, '@v': { unsafe: true } })).toThrow(/oneOf/i);
   });
 });
+
+describe('4.1 optional collection position preservation', () => {
+  it('array optional elements round-trip null positionally without index shifts', () => {
+    const schema = t.array(t.optional(t.number()));
+    const wire = encode(schema, [1, undefined, 3]) as unknown[];
+
+    expect(wire).toEqual([1, null, 3]);
+    expect(decode(schema, wire)).toEqual([1, undefined, 3]);
+  });
+});

@@ -129,6 +129,26 @@ describe('codec_web_oneof_unmatched_object_throws_at_encode', () => {
   });
 });
 
+describe('codec_web_optional_array_and_tuple_preserve_positions', () => {
+  it('encodes optional array gaps as null without shifting later elements', () => {
+    const schema = t.array(t.optional(t.string()));
+    const wire = encode(schema, ['first', undefined, 'third']) as unknown[];
+
+    expect(wire).toEqual(['first', null, 'third']);
+    expect(wire).toHaveLength(3);
+    expect(decode(schema, wire)).toEqual(['first', undefined, 'third']);
+  });
+
+  it('encodes optional tuple holes as null without changing tuple arity', () => {
+    const schema = t.tuple([t.string(), t.optional(t.number()), t.string()] as const);
+    const wire = encode(schema, ['left', undefined, 'right'] as const) as unknown[];
+
+    expect(wire).toEqual(['left', null, 'right']);
+    expect(wire).toHaveLength(3);
+    expect(decode(schema, wire)).toEqual(['left', undefined, 'right']);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // decode
 // ---------------------------------------------------------------------------

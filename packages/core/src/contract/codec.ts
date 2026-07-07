@@ -154,6 +154,16 @@ function sanitizeDecodePassthrough(value: unknown): unknown {
   return value;
 }
 
+function isOptionalSchema(schema: AnySchema): schema is OptionalSchema {
+  return schema.kind === 'optional';
+}
+
+function encodeCollectionItem(schema: AnySchema, value: unknown): unknown {
+  const encoded = encode(schema, value);
+  if (encoded === undefined && isOptionalSchema(schema)) return null;
+  return encoded;
+}
+
 function oneOfError(operation: 'encode' | 'decode', message: string): TypeError {
   return new TypeError(`[bridgekit] oneOf ${operation}: ${message}`);
 }
@@ -214,7 +224,7 @@ export function encode(schema: AnySchema, value: unknown): unknown {
       if (!Array.isArray(value)) return value;
       const arraySchema = schema as ArraySchema;
       return (value as unknown[])
-        .map((item) => encode(arraySchema.item, item))
+        .map((item) => encodeCollectionItem(arraySchema.item, item))
         .filter((v) => v !== undefined);
     }
 
@@ -280,7 +290,9 @@ export function encode(schema: AnySchema, value: unknown): unknown {
     case 'tuple': {
       if (!Array.isArray(value)) return value;
       const tupleSchema = schema as TupleSchema;
-      return tupleSchema.items.map((itemSchema, i) => encode(itemSchema, (value as unknown[])[i]));
+      return tupleSchema.items.map((itemSchema, i) =>
+        encodeCollectionItem(itemSchema, (value as unknown[])[i]),
+      );
     }
 
     case 'oneOf': {
