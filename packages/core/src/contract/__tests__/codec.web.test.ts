@@ -600,6 +600,125 @@ describe('codec_web_decode_typed_value_passthrough_strips_reserved_own_keys', ()
   });
 });
 
+describe('codec_web_sanitize_any_preserves_special_values_and_rejects_cycles', () => {
+  const addReservedOwnKeys = <T extends object>(value: T): T => {
+    Object.defineProperty(value, '__proto__', {
+      configurable: true,
+      enumerable: true,
+      value: { polluted: 'proto' },
+    });
+    Object.defineProperty(value, 'constructor', {
+      configurable: true,
+      enumerable: true,
+      value: { polluted: 'constructor' },
+    });
+    Object.defineProperty(value, 'prototype', {
+      configurable: true,
+      enumerable: true,
+      value: { polluted: 'prototype' },
+    });
+    return value;
+  };
+
+  const expectNoReservedOwnKeys = (value: object): void => {
+    expect(Object.hasOwn(value, '__proto__')).toBe(false);
+    expect(Object.hasOwn(value, 'constructor')).toBe(false);
+    expect(Object.hasOwn(value, 'prototype')).toBe(false);
+  };
+
+  it('preserves special values as fresh sanitized instances inside t.json values', () => {
+    const date = addReservedOwnKeys(new Date('2025-06-14T12:00:00.000Z'));
+    const bytes = addReservedOwnKeys(new Uint8Array([0x01, 0x02, 0xff]));
+    const map = addReservedOwnKeys(
+      new Map<string, unknown>([
+        [
+          'nested',
+          JSON.parse(
+            '{"keep":true,"__proto__":{"polluted":1},"constructor":{"polluted":2},"prototype":{"polluted":3}}',
+          ),
+        ],
+      ]),
+    );
+    const set = addReservedOwnKeys(
+      new Set<unknown>([
+        JSON.parse(
+          '{"keep":"set","__proto__":{"polluted":1},"constructor":{"polluted":2},"prototype":{"polluted":3}}',
+        ),
+      ]),
+    );
+
+    const sanitized = encode(t.json(), { date, bytes, map, set }) as {
+      date: Date;
+      bytes: Uint8Array;
+      map: Map<string, Record<string, unknown>>;
+      set: Set<Record<string, unknown>>;
+    };
+
+    expect(sanitized.date).toBeInstanceOf(Date);
+    expect(sanitized.date.getTime()).toBe(date.getTime());
+    expect(sanitized.date).not.toBe(date);
+    expectNoReservedOwnKeys(sanitized.date);
+
+    expect(sanitized.bytes).toBeInstanceOf(Uint8Array);
+    expect(Array.from(sanitized.bytes)).toEqual([0x01, 0x02, 0xff]);
+    expect(sanitized.bytes).not.toBe(bytes);
+    expectNoReservedOwnKeys(sanitized.bytes);
+
+    expect(sanitized.map).toBeInstanceOf(Map);
+    expect(sanitized.map).not.toBe(map);
+    const mapValue = sanitized.map.get('nested') as Record<string, unknown>;
+    expect(Object.getPrototypeOf(mapValue)).toBeNull();
+    expect(mapValue.keep).toBe(true);
+    expectNoReservedOwnKeys(mapValue);
+
+    expect(sanitized.set).toBeInstanceOf(Set);
+    expect(sanitized.set).not.toBe(set);
+    const [setValue] = Array.from(sanitized.set);
+    expect(Object.getPrototypeOf(setValue)).toBeNull();
+    expect(setValue.keep).toBe('set');
+    expectNoReservedOwnKeys(setValue);
+  });
+
+  it('rejects cyclic json values with a codec cycle error instead of stack overflow', () => {
+    const cyclic: Record<string, unknown> = { keep: true };
+    cyclic.self = cyclic;
+
+    expect(() => sanitizeAny(cyclic)).toThrow(/cycle/i);
+    expect(() => encode(t.json(), cyclic)).toThrow(/cycle/i);
+  });
+});
+
+describe('codec_web_binary_nan_enum_edges_are_safe', () => {
+  it('throws a binary/base64 codec error for malformed padding-only base64', () => {
+    try {
+      decode(t.binary(), '=');
+      throw new Error('decode unexpectedly accepted malformed base64');
+    } catch (error) {
+      expect(error).not.toBeInstanceOf(RangeError);
+      expect((error as Error).message).toMatch(/base64|binary|codec/i);
+    }
+  });
+
+  it('rejects NaN at validation so number JSON round trips cannot corrupt it to null', () => {
+    const result = validate(t.number(), Number.NaN);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.message).toMatch(/number/i);
+      expect(result.message).toMatch(/NaN/i);
+    }
+  });
+
+  it('keeps enum wire values numeric while rejecting unknown validation values', () => {
+    const schema = t.enum({ Red: 0, Green: 1, Blue: 2 });
+
+    expect(encode(schema, 1)).toBe(1);
+    expect(decode(schema, 1)).toBe(1);
+    expect(validate(schema, 1).ok).toBe(true);
+    expect(validate(schema, 99).ok).toBe(false);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // validate
 // ---------------------------------------------------------------------------
