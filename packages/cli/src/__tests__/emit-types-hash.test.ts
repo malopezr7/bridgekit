@@ -13,6 +13,20 @@ describe('emit type member hashes', () => {
     expect(hashMember(methodDescriptor)).toBe('f7232f5d');
     expect(hashMember(methodDescriptor)).toBe(stableHash(methodDescriptor));
 
+    const oneOfMethodDescriptor = {
+      kind: 'query',
+      params: {
+        kind: 'oneOf',
+        options: [
+          { kind: 'object', fields: { id: { kind: 'string' }, count: { kind: 'number' } } },
+          { kind: 'string' },
+        ],
+      },
+      result: { kind: 'string' },
+    };
+    expect(hashMember(oneOfMethodDescriptor)).toBe('1670b71c');
+    expect(hashMember(oneOfMethodDescriptor)).toBe(stableHash(oneOfMethodDescriptor));
+
     expect(
       hashMember({
         kind: 'state',

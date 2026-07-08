@@ -13,6 +13,17 @@ const descriptor: RawContractToken['descriptor'] = {
       params: { kind: 'literals', values: ['é', '💩'] },
       result: { kind: 'string' },
     },
+    choose: {
+      kind: 'query',
+      params: {
+        kind: 'oneOf',
+        options: [
+          { kind: 'object', fields: { id: { kind: 'string' }, count: { kind: 'number' } } },
+          { kind: 'string' },
+        ],
+      },
+      result: { kind: 'string' },
+    },
   },
   streams: {
     updates: {
@@ -35,6 +46,7 @@ describe('buildLock member hashes', () => {
     const lock = buildLock([{ descriptor, hash: 'contract-hash' }]);
 
     expect(lock.contracts['fixture.hash']?.members).toEqual({
+      'methods.choose': '1670b71c',
       'methods.translate': 'f7232f5d',
       'state.mood': '4f602849',
       'streams.updates': 'f2b12f34',

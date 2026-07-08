@@ -125,7 +125,8 @@ describe('codec_web_oneof_unmatched_object_throws_at_encode', () => {
   });
 
   it('throws while decoding an envelope whose value does not match the selected option', () => {
-    expect(() => decode(schema, { '@k': 0, '@v': { unsafe: true } })).toThrow(/oneOf/i);
+    const stringTag = (encode(schema, 'ok') as Record<string, unknown>)['@t'];
+    expect(() => decode(schema, { '@t': stringTag, '@v': { unsafe: true } })).toThrow(/oneOf/i);
   });
 });
 
@@ -164,9 +165,9 @@ describe('codec_web_oneof_literal_enum_strictness_pin', () => {
     expect(decode(literalSchema, 'skewed')).toBe('skewed');
     // Deliberate asymmetry: oneOf validates the selected @v after decode so
     // skewed literal envelopes fail fast, matching native strict literals.
-    expect(() => decode(t.oneOf([literalSchema] as const), { '@k': 0, '@v': 'skewed' })).toThrow(
-      /oneOf/i,
-    );
+    const literalOneOf = t.oneOf([literalSchema] as const);
+    const literalTag = (encode(literalOneOf, 'known') as Record<string, unknown>)['@t'];
+    expect(() => decode(literalOneOf, { '@t': literalTag, '@v': 'skewed' })).toThrow(/oneOf/i);
   });
 
   it('keeps bare enum decode skew-tolerant while oneOf enum decode is strict', () => {
@@ -175,7 +176,70 @@ describe('codec_web_oneof_literal_enum_strictness_pin', () => {
     expect(decode(enumSchema, 2)).toBe(2);
     // Deliberate asymmetry: oneOf validates the selected @v after decode so
     // skewed enum envelopes fail fast, matching native strict enums.
-    expect(() => decode(t.oneOf([enumSchema] as const), { '@k': 0, '@v': 2 })).toThrow(/oneOf/i);
+    const enumOneOf = t.oneOf([enumSchema] as const);
+    const enumTag = (encode(enumOneOf, 1) as Record<string, unknown>)['@t'];
+    expect(() => decode(enumOneOf, { '@t': enumTag, '@v': 2 })).toThrow(/oneOf/i);
+  });
+});
+
+describe('codec_web_oneof_stable_t_tag_survives_reorder', () => {
+  it('emits the same stable tag for an option when oneOf options are reordered', () => {
+    const originalOrder = t.oneOf([t.string(), t.number()] as const);
+    const reordered = t.oneOf([t.number(), t.string()] as const);
+
+    const originalWire = encode(originalOrder, 'hello') as Record<string, unknown>;
+    const reorderedWire = encode(reordered, 'hello') as Record<string, unknown>;
+
+    expect(originalWire['@k']).toBeUndefined();
+    expect(reorderedWire['@k']).toBeUndefined();
+    expect(originalWire['@t']).toMatch(/^string:[0-9a-f]{8}$/);
+    expect(reorderedWire['@t']).toBe(originalWire['@t']);
+    expect(originalWire['@v']).toBe('hello');
+    expect(reorderedWire['@v']).toBe('hello');
+
+    expect(decode(originalOrder, reorderedWire)).toBe('hello');
+    expect(decode(reordered, originalWire)).toBe('hello');
+  });
+
+  it('keeps nested oneOf option tags stable when nested options are reordered', () => {
+    const originalOrder = t.oneOf([
+      t.object({ nested: t.oneOf([t.string(), t.number()] as const) }),
+      t.boolean(),
+    ] as const);
+    const reorderedNestedOptions = t.oneOf([
+      t.object({ nested: t.oneOf([t.number(), t.string()] as const) }),
+      t.boolean(),
+    ] as const);
+
+    const originalWire = encode(originalOrder, { nested: 'hello' }) as {
+      '@t': string;
+      '@v': { nested: { '@t': string; '@v': unknown; '@k'?: unknown } };
+      '@k'?: unknown;
+    };
+    const reorderedWire = encode(reorderedNestedOptions, { nested: 'hello' }) as {
+      '@t': string;
+      '@v': { nested: { '@t': string; '@v': unknown; '@k'?: unknown } };
+      '@k'?: unknown;
+    };
+
+    expect(originalWire['@k']).toBeUndefined();
+    expect(reorderedWire['@k']).toBeUndefined();
+    expect(originalWire['@t']).toBe(reorderedWire['@t']);
+    expect(originalWire['@v'].nested['@k']).toBeUndefined();
+    expect(reorderedWire['@v'].nested['@k']).toBeUndefined();
+    expect(originalWire['@v'].nested['@t']).toMatch(/^string:[0-9a-f]{8}$/);
+    expect(reorderedWire['@v'].nested['@t']).toBe(originalWire['@v'].nested['@t']);
+
+    expect(decode(originalOrder, reorderedWire)).toEqual({ nested: 'hello' });
+    expect(decode(reorderedNestedOptions, originalWire)).toEqual({ nested: 'hello' });
+  });
+});
+
+describe('codec_web_oneof_duplicate_structural_tags_throw', () => {
+  it('throws while constructing oneOf schemas with duplicate structural options', () => {
+    expect(() =>
+      t.oneOf([t.object({ value: t.string() }), t.object({ value: t.string() })] as const),
+    ).toThrow(/oneOf.*duplicate.*tag/i);
   });
 });
 
@@ -364,7 +428,7 @@ describe('codec_web_decode_tolerant_passthrough_sanitizes_reserved_own_keys', ()
   it('throws for oneOf primitive option @v object mismatches instead of passthrough', () => {
     expect(() =>
       decode(t.oneOf([t.string()] as const), {
-        '@k': 0,
+        '@t': (encode(t.oneOf([t.string()] as const), 'ok') as Record<string, unknown>)['@t'],
         '@v': payloadWithReservedKeys(),
       }),
     ).toThrow(/oneOf/i);
@@ -559,16 +623,17 @@ describe('codec_web_decode_typed_value_passthrough_strips_reserved_own_keys', ()
       binaryInput,
       int64Input,
     ]) as [Date, Uint8Array, bigint];
-    const oneOfDate = decode(t.oneOf([t.date(), t.binary(), t.int64()] as const), {
-      '@k': 0,
+    const typedOneOf = t.oneOf([t.date(), t.binary(), t.int64()] as const);
+    const oneOfDate = decode(typedOneOf, {
+      '@t': (encode(typedOneOf, dateInput) as Record<string, unknown>)['@t'],
       '@v': dateInput,
     }) as Date;
-    const oneOfBinary = decode(t.oneOf([t.date(), t.binary(), t.int64()] as const), {
-      '@k': 1,
+    const oneOfBinary = decode(typedOneOf, {
+      '@t': (encode(typedOneOf, binaryInput) as Record<string, unknown>)['@t'],
       '@v': binaryInput,
     }) as Uint8Array;
-    const oneOfInt64 = decode(t.oneOf([t.date(), t.binary(), t.int64()] as const), {
-      '@k': 2,
+    const oneOfInt64 = decode(typedOneOf, {
+      '@t': (encode(typedOneOf, int64Input) as Record<string, unknown>)['@t'],
       '@v': int64Input,
     }) as bigint;
 
@@ -1151,40 +1216,44 @@ describe('W2 T09 — t.tuple() round-trip (positional array)', () => {
   });
 });
 
-describe('W2 T10 — t.oneOf() round-trip (primitive union, @k/@v envelope)', () => {
+describe('W2 T10 — t.oneOf() round-trip (primitive union, @t/@v envelope)', () => {
   const schema = t.oneOf([t.string(), t.number()] as const);
 
-  it('string branch: encode → {"@k":0, "@v":"hello"}', () => {
-    const wire = encode(schema, 'hello') as { '@k': number; '@v': unknown };
-    expect(wire['@k']).toBe(0);
+  it('string branch: encode → {"@t":"string:<hash>", "@v":"hello"}', () => {
+    const wire = encode(schema, 'hello') as { '@t': string; '@v': unknown; '@k'?: unknown };
+    expect(wire['@k']).toBeUndefined();
+    expect(wire['@t']).toMatch(/^string:[0-9a-f]{8}$/);
     expect(wire['@v']).toBe('hello');
   });
 
-  it('number branch: encode → {"@k":1, "@v":99}', () => {
-    const wire = encode(schema, 99) as { '@k': number; '@v': unknown };
-    expect(wire['@k']).toBe(1);
+  it('number branch: encode → {"@t":"number:<hash>", "@v":99}', () => {
+    const wire = encode(schema, 99) as { '@t': string; '@v': unknown; '@k'?: unknown };
+    expect(wire['@k']).toBeUndefined();
+    expect(wire['@t']).toMatch(/^number:[0-9a-f]{8}$/);
     expect(wire['@v']).toBe(99);
   });
 
-  it('string branch: decode {"@k":0, "@v":"hello"} → "hello"', () => {
-    const result = decode(schema, { '@k': 0, '@v': 'hello' });
+  it('string branch: decode {"@t":"string:<hash>", "@v":"hello"} → "hello"', () => {
+    const tag = (encode(schema, 'tag-source') as Record<string, unknown>)['@t'];
+    const result = decode(schema, { '@t': tag, '@v': 'hello' });
     expect(result).toBe('hello');
   });
 
-  it('number branch: decode {"@k":1, "@v":99} → 99', () => {
-    const result = decode(schema, { '@k': 1, '@v': 99 });
+  it('number branch: decode {"@t":"number:<hash>", "@v":99} → 99', () => {
+    const tag = (encode(schema, 0) as Record<string, unknown>)['@t'];
+    const result = decode(schema, { '@t': tag, '@v': 99 });
     expect(result).toBe(99);
   });
 
   it('full round-trip: string branch', () => {
     const wire = encode(schema, 'world');
-    const back = decode(schema, wire as { '@k': number; '@v': unknown });
+    const back = decode(schema, wire as { '@t': string; '@v': unknown });
     expect(back).toBe('world');
   });
 
   it('full round-trip: number branch', () => {
     const wire = encode(schema, 3.14);
-    const back = decode(schema, wire as { '@k': number; '@v': unknown });
+    const back = decode(schema, wire as { '@t': string; '@v': unknown });
     expect(back).toBe(3.14);
   });
 
@@ -1209,7 +1278,8 @@ describe('W2 T10 — t.oneOf() round-trip (primitive union, @k/@v envelope)', ()
       value: unknown;
       tag: string;
     };
-    expect((encodedStr.value as { '@k': number })['@k']).toBe(0);
+    expect((encodedStr.value as { '@k'?: unknown })['@k']).toBeUndefined();
+    expect((encodedStr.value as { '@t': string })['@t']).toMatch(/^string:[0-9a-f]{8}$/);
     const decodedStr = decode(objSchema, encodedStr) as { value: unknown; tag: string };
     expect(decodedStr.value).toBe('hello');
 
@@ -1217,7 +1287,8 @@ describe('W2 T10 — t.oneOf() round-trip (primitive union, @k/@v envelope)', ()
       value: unknown;
       tag: string;
     };
-    expect((encodedNum.value as { '@k': number })['@k']).toBe(1);
+    expect((encodedNum.value as { '@k'?: unknown })['@k']).toBeUndefined();
+    expect((encodedNum.value as { '@t': string })['@t']).toMatch(/^number:[0-9a-f]{8}$/);
     const decodedNum = decode(objSchema, encodedNum) as { value: unknown; tag: string };
     expect(decodedNum.value).toBe(99);
   });
@@ -1225,7 +1296,8 @@ describe('W2 T10 — t.oneOf() round-trip (primitive union, @k/@v envelope)', ()
   it('first-match-by-validate: number also matches a "number|string" schema at opt 0 position', () => {
     // When number is option 0, it matches before string can
     const reversedSchema = t.oneOf([t.number(), t.string()] as const);
-    const wire = encode(reversedSchema, 5) as { '@k': number; '@v': unknown };
-    expect(wire['@k']).toBe(0); // number is first
+    const wire = encode(reversedSchema, 5) as { '@t': string; '@v': unknown; '@k'?: unknown };
+    expect(wire['@k']).toBeUndefined();
+    expect(wire['@t']).toMatch(/^number:[0-9a-f]{8}$/);
   });
 });

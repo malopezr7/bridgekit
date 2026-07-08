@@ -3,6 +3,8 @@
 // All nodes are plain objects that JSON.stringify cleanly.
 // ---------------------------------------------------------------------------
 
+import { deriveOneOfOptionTags } from './hash';
+
 // ---- node kinds -----------------------------------------------------------
 
 export interface StringSchema {
@@ -96,6 +98,7 @@ export interface TupleSchema<TItems extends readonly AnySchema[] = readonly AnyS
 export interface OneOfSchema<TOptions extends readonly AnySchema[] = readonly AnySchema[]> {
   readonly kind: 'oneOf';
   readonly options: TOptions;
+  readonly tags: readonly string[];
 }
 
 // ---- union type -----------------------------------------------------------
@@ -334,7 +337,7 @@ export const t = {
   }),
 
   /**
-   * Primitive / non-discriminated union. Wire: `{ "@k": branchIndex, "@v": value }` envelope.
+   * Primitive / non-discriminated union. Wire: `{ "@t": stableTag, "@v": value }` envelope.
    * Encoding picks the FIRST branch whose validate passes (first-match-by-validate).
    * When two branches accept the same value, the first match wins — document this at author sites.
    *
@@ -348,6 +351,7 @@ export const t = {
   ): OneOfSchema<TOptions> => ({
     kind: 'oneOf',
     options,
+    tags: deriveOneOfOptionTags(options),
   }),
 } as const;
 
