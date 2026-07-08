@@ -47,7 +47,7 @@ private object BridgekitDemoFeatureCodecs {
         map["name"] = value.name
         return map
     }
-    
+
     fun decodeGetGreetingParams(raw: Map<*, *>): GetGreetingParams = GetGreetingParams(
         name = (raw["name"] as? String) ?: throw BridgeKitDecodeException("name", "String"),
     )
@@ -56,7 +56,7 @@ private object BridgekitDemoFeatureCodecs {
         is ChooseValueResult.Opt0 -> mapOf("@t" to "string:2ce29730", "@v" to value.value)
         is ChooseValueResult.Opt1 -> mapOf("@t" to "number:18e41cc0", "@v" to value.value)
     }
-    
+
     fun decodeChooseValueResult(raw: Map<*, *>): ChooseValueResult {
         val tag = raw["@t"] as? String ?: throw BridgeKitDecodeException("@t", "ChooseValueResult")
         val v = raw["@v"]

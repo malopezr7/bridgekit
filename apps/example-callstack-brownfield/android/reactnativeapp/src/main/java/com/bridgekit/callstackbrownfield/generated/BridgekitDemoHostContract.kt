@@ -58,7 +58,7 @@ private object BridgekitDemoHostCodecs {
         map["epoch"] = value.epoch
         return map
     }
-    
+
     fun decodePingResult(raw: Map<*, *>): PingResult = PingResult(
         reply = (raw["reply"] as? String) ?: throw BridgeKitDecodeException("reply", "String"),
         epoch = when (val v = raw["epoch"]) { is Number -> v.toDouble(); else -> throw BridgeKitDecodeException("epoch", "Double") },
@@ -69,7 +69,7 @@ private object BridgekitDemoHostCodecs {
         map["message"] = value.message
         return map
     }
-    
+
     fun decodePingParams(raw: Map<*, *>): PingParams = PingParams(
         message = (raw["message"] as? String) ?: throw BridgeKitDecodeException("message", "String"),
     )
@@ -79,7 +79,7 @@ private object BridgekitDemoHostCodecs {
         map["text"] = value.text
         return map
     }
-    
+
     fun decodeSayParams(raw: Map<*, *>): SayParams = SayParams(
         text = (raw["text"] as? String) ?: throw BridgeKitDecodeException("text", "String"),
     )

@@ -287,7 +287,7 @@ export const t = {
 
   /**
    * 64-bit integer. JS carrier: `bigint`. Kotlin: `Long`.
-   * Wire: native Int64 (AnyMap.ValueType includes bigint as Int64).
+   * Wire: decimal string. JS carrier: `bigint`.
    * Use this when values may exceed 2^53 (Number.MAX_SAFE_INTEGER).
    */
   int64: (): Int64Schema => ({ kind: 'int64' }),

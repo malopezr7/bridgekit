@@ -32,7 +32,7 @@ private enum BridgekitDemoFeatureCodecs {
         map["name"] = value.name
         return map
     }
-    
+
     static func decodeGetGreetingParams(_ raw: [String: Any?]) throws -> GetGreetingParams {
         return GetGreetingParams(
             name: try ((raw["name"] as Any? as? String) ?? bridgeKitThrow(field: "name", expectedType: "String"))

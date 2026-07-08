@@ -46,7 +46,7 @@ private object BridgekitDemoJsinfoCodecs {
         map["label"] = value.label
         return map
     }
-    
+
     fun decodeGetUserLevelResult(raw: Map<*, *>): GetUserLevelResult = GetUserLevelResult(
         level = when (val v = raw["level"]) { is Number -> v.toDouble(); else -> throw BridgeKitDecodeException("level", "Double") },
         label = (raw["label"] as? String) ?: throw BridgeKitDecodeException("label", "String"),

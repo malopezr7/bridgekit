@@ -36,7 +36,7 @@ private enum BridgekitLocalhostCodecs {
         map["name"] = value.name
         return map
     }
-    
+
     static func decodeGreetParams(_ raw: [String: Any?]) throws -> GreetParams {
         return GreetParams(
             name: try ((raw["name"] as Any? as? String) ?? bridgeKitThrow(field: "name", expectedType: "String"))

@@ -49,7 +49,7 @@ private object BridgekitDemoReverseCodecs {
         map["name"] = value.name
         return map
     }
-    
+
     fun decodeGreetFromJsParams(raw: Map<*, *>): GreetFromJsParams = GreetFromJsParams(
         name = (raw["name"] as? String) ?: throw BridgeKitDecodeException("name", "String"),
     )
@@ -60,7 +60,7 @@ private object BridgekitDemoReverseCodecs {
         value.payload?.let { map["payload"] = it }
         return map
     }
-    
+
     fun decodeOnNativeEventParams(raw: Map<*, *>): OnNativeEventParams = OnNativeEventParams(
         type = (raw["type"] as? String) ?: throw BridgeKitDecodeException("type", "String"),
         payload = if (raw["payload"] == null) null else raw["payload"],

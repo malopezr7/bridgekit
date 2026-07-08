@@ -42,7 +42,7 @@ private object BridgekitLocalhostCodecs {
         map["name"] = value.name
         return map
     }
-    
+
     fun decodeGreetParams(raw: Map<*, *>): GreetParams = GreetParams(
         name = (raw["name"] as? String) ?: throw BridgeKitDecodeException("name", "String"),
     )

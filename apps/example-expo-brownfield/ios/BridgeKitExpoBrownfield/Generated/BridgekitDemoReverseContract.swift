@@ -43,7 +43,7 @@ private enum BridgekitDemoReverseCodecs {
         map["name"] = value.name
         return map
     }
-    
+
     static func decodeGreetFromJsParams(_ raw: [String: Any?]) throws -> GreetFromJsParams {
         return GreetFromJsParams(
             name: try ((raw["name"] as Any? as? String) ?? bridgeKitThrow(field: "name", expectedType: "String"))
@@ -56,7 +56,7 @@ private enum BridgekitDemoReverseCodecs {
         if let v = value.payload { map["payload"] = v }
         return map
     }
-    
+
     static func decodeOnNativeEventParams(_ raw: [String: Any?]) throws -> OnNativeEventParams {
         return OnNativeEventParams(
             type: try ((raw["type"] as Any? as? String) ?? bridgeKitThrow(field: "type", expectedType: "String")),

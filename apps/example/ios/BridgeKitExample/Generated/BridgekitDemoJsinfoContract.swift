@@ -40,7 +40,7 @@ private enum BridgekitDemoJsinfoCodecs {
         map["label"] = value.label
         return map
     }
-    
+
     static func decodeGetUserLevelResult(_ raw: [String: Any?]) throws -> GetUserLevelResult {
         return GetUserLevelResult(
             level: try ((raw["level"] as Any? as? Double) ?? Double(try ((raw["level"] as Any? as? Int) ?? bridgeKitThrow(field: "level", expectedType: "Double")))),

@@ -52,7 +52,7 @@ private enum BridgekitDemoHostCodecs {
         map["epoch"] = value.epoch
         return map
     }
-    
+
     static func decodePingResult(_ raw: [String: Any?]) throws -> PingResult {
         return PingResult(
             reply: try ((raw["reply"] as Any? as? String) ?? bridgeKitThrow(field: "reply", expectedType: "String")),
@@ -65,7 +65,7 @@ private enum BridgekitDemoHostCodecs {
         map["message"] = value.message
         return map
     }
-    
+
     static func decodePingParams(_ raw: [String: Any?]) throws -> PingParams {
         return PingParams(
             message: try ((raw["message"] as Any? as? String) ?? bridgeKitThrow(field: "message", expectedType: "String"))
@@ -77,7 +77,7 @@ private enum BridgekitDemoHostCodecs {
         map["text"] = value.text
         return map
     }
-    
+
     static func decodeSayParams(_ raw: [String: Any?]) throws -> SayParams {
         return SayParams(
             text: try ((raw["text"] as Any? as? String) ?? bridgeKitThrow(field: "text", expectedType: "String"))

@@ -38,7 +38,7 @@ private object BridgekitDemoFeatureCodecs {
         map["name"] = value.name
         return map
     }
-    
+
     fun decodeGetGreetingParams(raw: Map<*, *>): GetGreetingParams = GetGreetingParams(
         name = (raw["name"] as? String) ?: throw BridgeKitDecodeException("name", "String"),
     )

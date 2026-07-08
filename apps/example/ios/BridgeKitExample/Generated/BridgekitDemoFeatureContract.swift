@@ -41,7 +41,7 @@ private enum BridgekitDemoFeatureCodecs {
         map["name"] = value.name
         return map
     }
-    
+
     static func decodeGetGreetingParams(_ raw: [String: Any?]) throws -> GetGreetingParams {
         return GetGreetingParams(
             name: try ((raw["name"] as Any? as? String) ?? bridgeKitThrow(field: "name", expectedType: "String"))
@@ -54,7 +54,7 @@ private enum BridgekitDemoFeatureCodecs {
         case .opt1(let v): return ["@t": "number:18e41cc0", "@v": v]
         }
     }
-    
+
     static func decodeChooseValueResult(_ raw: [String: Any?]) throws -> ChooseValueResult {
         guard let tag = raw["@t"] as? String else { throw BridgeKitDecodeError(field: "@t", expectedType: "ChooseValueResult") }
         let v = raw["@v"] as Any?
