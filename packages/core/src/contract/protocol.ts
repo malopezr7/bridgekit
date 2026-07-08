@@ -60,19 +60,6 @@ export interface CallEnvelope {
   seq?: number;
 }
 
-// ---- handshake / connect envelope -----------------------------------------
-
-/**
- * Connect-time handshake payload. Carries per-contract hashes so the receiving
- * side learns the caller's contract identities up front.
- * `memberHashes` rides the handshake (and the INCOMPATIBLE_CONTRACT error) for
- * diffing; the per-call envelope only re-sends `contractHash` for the hot path.
- */
-export interface ConnectEnvelope {
-  contractHashes?: Record<string, string>;
-  memberHashes?: Record<string, Record<string, string>>;
-}
-
 export interface ResultOk {
   ok: true;
   value?: unknown;

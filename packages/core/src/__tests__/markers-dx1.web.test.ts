@@ -142,6 +142,7 @@ type _stv2 = Expect<
 // ---- Zustand hook overloads ------------------------------------------------
 
 function _demoDestructure() {
+  // biome-ignore lint/correctness/useHookAtTopLevel: type-level DX sample, not executed as React component.
   const { getLiteral, getAppVersion, trackEvent, getCount, checkPerm } = useLiaHost();
   const _lit: string = getLiteral({ key: 'welcome' });
   const _v: string = getAppVersion();
@@ -158,6 +159,7 @@ function _demoDestructure() {
 }
 
 function _demoSelector() {
+  // biome-ignore lint/correctness/useHookAtTopLevel: type-level DX sample, not executed as React component.
   const getLiteral = useLiaHost((c) => c.getLiteral);
   type _chk = Expect<Equal<typeof getLiteral, (params: { key: string }) => string>>;
   const _s: string = getLiteral({ key: 'x' });
@@ -171,6 +173,7 @@ function _demoImperative() {
 }
 
 function _demoState() {
+  // biome-ignore lint/correctness/useHookAtTopLevel: type-level DX sample, not executed as React component.
   const { state } = useLiaHost();
   const _cur: number = state.counter.get();
   const _unsub = state.counter.subscribe((v) => {
@@ -217,6 +220,7 @@ type Media = ConsumerOf<typeof useLiaMedia>;
 type _ref = Expect<Equal<Media['refresh'], () => void>>;
 
 // Collect all assertion types so noUnusedLocals wouldn't fire (if on)
+// biome-ignore lint/suspicious/noExportsInTest: exported to keep compile-time assertions live in this DX test file.
 export const _assertions: [
   _k1,
   _k2,
@@ -590,7 +594,7 @@ describe('ContractHook: statics and getState', () => {
   test('descriptor matches BridgeContract shape for codegen', () => {
     const d = useLiaHost.descriptor;
     expect(d.$type).toBe('com.bridgekit.contract');
-    expect(d.descriptorVersion).toBe(1);
+    expect(d).not.toHaveProperty('descriptorVersion');
     expect(d.id).toBe('lia.host');
   });
 

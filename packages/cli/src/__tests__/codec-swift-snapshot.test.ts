@@ -9,7 +9,6 @@ function emitOneOfContract(oneOfSchema: ReturnType<typeof t.oneOf>): string {
     hash: 'contract-hash',
     descriptor: {
       $type: 'com.bridgekit.contract',
-      descriptorVersion: 1,
       id: 'fixture.codec',
       methods: {
         choose: {
