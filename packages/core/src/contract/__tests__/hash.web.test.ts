@@ -208,6 +208,45 @@ describe('contract hash – integration', () => {
     );
   });
 
+  it('hash_web_oneof_option_order_is_wire_insignificant', () => {
+    const objectOption = t.object({ id: t.string(), count: t.number() });
+    const stringOption = t.string();
+    const objectFirst = defineContract('test.hash', {
+      methods: {
+        choose: t.query(t.oneOf([objectOption, stringOption]), t.string()),
+      },
+    });
+    const stringFirst = defineContract('test.hash', {
+      methods: {
+        choose: t.query(t.oneOf([stringOption, objectOption]), t.string()),
+      },
+    });
+
+    expect(stringFirst.hash).toBe(objectFirst.hash);
+    expect(memberHashes(stringFirst.descriptor)['methods.choose']).toBe(
+      memberHashes(objectFirst.descriptor)['methods.choose'],
+    );
+  });
+
+  it('hash_web_oneof_option_inner_shape_remains_wire_relevant', () => {
+    const stringOption = t.string();
+    const numberPayload = defineContract('test.hash', {
+      methods: {
+        choose: t.query(t.oneOf([t.object({ value: t.number() }), stringOption]), t.string()),
+      },
+    });
+    const stringPayload = defineContract('test.hash', {
+      methods: {
+        choose: t.query(t.oneOf([t.object({ value: t.string() }), stringOption]), t.string()),
+      },
+    });
+
+    expect(stringPayload.hash).not.toBe(numberPayload.hash);
+    expect(memberHashes(stringPayload.descriptor)['methods.choose']).not.toBe(
+      memberHashes(numberPayload.descriptor)['methods.choose'],
+    );
+  });
+
   it('hash_web_schema_fields_named_like_local_config_remain_wire_relevant', () => {
     const baseline = defineContract('test.hash', {
       methods: {
