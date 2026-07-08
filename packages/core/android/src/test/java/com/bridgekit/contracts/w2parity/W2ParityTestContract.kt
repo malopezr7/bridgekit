@@ -81,17 +81,17 @@ internal object W2ParityTestCodecs {
     }
 
     fun encodeGetValueResult(value: GetValueResult): Map<String, Any?> = when (value) {
-        is GetValueResult.Opt0 -> mapOf("@k" to 0, "@v" to value.value)
-        is GetValueResult.Opt1 -> mapOf("@k" to 1, "@v" to value.value)
+        is GetValueResult.Opt0 -> mapOf("@t" to "string:2ce29730", "@v" to value.value)
+        is GetValueResult.Opt1 -> mapOf("@t" to "number:18e41cc0", "@v" to value.value)
     }
 
     fun decodeGetValueResult(raw: Map<*, *>): GetValueResult {
-        val k = (raw["@k"] as? Number)?.toInt() ?: throw BridgeKitDecodeException("@k", "GetValueResult")
+        val tag = raw["@t"] as? String ?: throw BridgeKitDecodeException("@t", "GetValueResult")
         val v = raw["@v"]
-        return when (k) {
-            0 -> GetValueResult.Opt0((v as? String) ?: throw BridgeKitDecodeException("opt0", "String"))
-            1 -> GetValueResult.Opt1(when (val v = v) { is Number -> v.toDouble(); else -> throw BridgeKitDecodeException("opt1", "Double") })
-            else -> throw BridgeKitDecodeException("@k=$k", "GetValueResult")
+        return when (tag) {
+            "string:2ce29730" -> GetValueResult.Opt0((v as? String) ?: throw BridgeKitDecodeException("opt0", "String"))
+            "number:18e41cc0" -> GetValueResult.Opt1(when (val v = v) { is Number -> v.toDouble(); else -> throw BridgeKitDecodeException("opt1", "Double") })
+            else -> throw BridgeKitDecodeException("@t=$tag", "GetValueResult")
         }
     }
 }
@@ -117,7 +117,7 @@ object W2ParityTestContract : BridgeContractDefinition<W2ParityTest, W2ParityTes
 
             override suspend fun invoke(member: String, payload: Map<String, Any?>?): Any? =
                 when (member) {
-                    "getCounter" -> impl.getCounter()
+                    "getCounter" -> impl.getCounter().toString()
                     "getTimestamp" -> impl.getTimestamp()
                     "getBytes" -> impl.getBytes()
                     "getColor" -> impl.getColor()
@@ -147,7 +147,8 @@ object W2ParityTestContract : BridgeContractDefinition<W2ParityTest, W2ParityTes
             override suspend fun getCounter(): Long {
                 val result = caller.invoke("getCounter", null)
                 @Suppress("UNCHECKED_CAST")
-                return result as? Long ?: throw IllegalStateException("Unexpected null result for getCounter")
+                return (result as? String)?.toLong()
+                    ?: throw IllegalStateException("Unexpected null result for getCounter")
             }
 
             override suspend fun getTimestamp(): Instant {

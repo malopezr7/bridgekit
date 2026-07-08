@@ -126,7 +126,7 @@ export class CodecWalker {
       case 'date':
         return `java.time.Instant.ofEpochMilli(when (val v = ${expr}) { is Number -> v.toLong(); else -> throw BridgeKitDecodeException("result", "Instant") })`;
       case 'int64':
-        return `when (val v = ${expr}) { is Long -> v; is Number -> v.toLong(); else -> throw BridgeKitDecodeException("result", "Long") }`;
+        return `when (val v = ${expr}) { is String -> v.toLong(); else -> throw BridgeKitDecodeException("result", "Long") }`;
       case 'binary':
         return `android.util.Base64.decode(${expr} as? String ?: throw BridgeKitDecodeException("result", "ByteArray"), android.util.Base64.NO_WRAP)`;
       default:
@@ -173,8 +173,7 @@ export class CodecWalker {
       }
 
       case 'int64':
-        // bigint passes through as Int64 on the wire
-        return expr;
+        return `${expr}.toString()`;
 
       case 'date':
         // encode Date → epoch millis (Long)
@@ -249,7 +248,7 @@ export class CodecWalker {
       }
 
       case 'int64':
-        return `when (val v = ${raw}) { is Long -> v; is Number -> v.toLong(); else -> throw BridgeKitDecodeException(${fieldLit}, "Long") }`;
+        return `when (val v = ${raw}) { is String -> v.toLong(); else -> throw BridgeKitDecodeException(${fieldLit}, "Long") }`;
 
       case 'date':
         return `java.time.Instant.ofEpochMilli(when (val v = ${raw}) { is Number -> v.toLong(); else -> throw BridgeKitDecodeException(${fieldLit}, "Instant") })`;

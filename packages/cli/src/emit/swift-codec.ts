@@ -79,7 +79,7 @@ export class SwiftCodecWalker {
       case 'date':
         return `try Date(timeIntervalSince1970: Double((${expr} as? Int64) ?? Int64(try ((${expr} as? Double) ?? bridgeKitThrow(field: "result", expectedType: "Date")))) / 1000.0)`;
       case 'int64':
-        return `try (Int64(exactly: try ((${expr} as? NSNumber) ?? bridgeKitThrow(field: "result", expectedType: "Int64"))) ?? Int64(try ((${expr} as? Double) ?? bridgeKitThrow(field: "result", expectedType: "Int64"))))`;
+        return `try Int64((${expr} as? String) ?? bridgeKitThrow(field: "result", expectedType: "Int64")) ?? bridgeKitThrow(field: "result", expectedType: "Int64")`;
       case 'binary':
         return `try (Data(base64Encoded: try ((${expr} as? String) ?? bridgeKitThrow(field: "result", expectedType: "Data"))) ?? bridgeKitThrow(field: "result", expectedType: "Data"))`;
       default:
@@ -121,7 +121,7 @@ export class SwiftCodecWalker {
       }
 
       case 'int64':
-        return expr;
+        return `String(${expr})`;
 
       case 'date':
         // encode Date → epoch millis (Int64)
@@ -198,7 +198,7 @@ export class SwiftCodecWalker {
       }
 
       case 'int64':
-        return `try ((${raw} as? Int64) ?? Int64(try ((${raw} as? Double) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Int64"))))`;
+        return `try Int64((${raw} as? String) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Int64")) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Int64")`;
 
       case 'date':
         return `try Date(timeIntervalSince1970: Double((${raw} as? Int64) ?? Int64(try ((${raw} as? Double) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Date")))) / 1000.0)`;

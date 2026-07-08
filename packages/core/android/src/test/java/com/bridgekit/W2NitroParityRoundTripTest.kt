@@ -37,7 +37,7 @@ import org.junit.Test
  *  3. binary — ByteArray round-trips through base64 wire encoding
  *  4. enum   — numeric enum decodes via fromWire + encodes back to wire Int
  *  5. tuple  — positional data class decodes arity + typed values; encodes to List
- *  6. oneOf  — sealed class both branches decode via @k/@v envelope
+ *  6. oneOf  — sealed class both branches decode via @t/@v envelope
  */
 class W2NitroParityRoundTripTest {
 
@@ -66,9 +66,10 @@ class W2NitroParityRoundTripTest {
         val adapter = W2ParityTestContract.inbound(impl)
         val result = adapter.invoke("getCounter", null)
 
-        // The inbound adapter returns the Long directly (no codec wrapping for primitives).
-        assertTrue("int64 must be returned as Long", result is Long)
-        assertEquals("Long value > 2^53 must preserve full precision", highPrecisionValue, result as Long)
+        // The inbound adapter returns the decimal string wire value.
+        assertTrue("int64 wire value must be returned as String", result is String)
+        assertEquals("Long value > 2^53 must encode as decimal string", highPrecisionValue.toString(), result as String)
+        assertEquals("String wire value must parse back to full precision", highPrecisionValue, result.toLong())
 
         // Verify that Double cannot represent this value (proves the Long path is necessary)
         val asDouble = highPrecisionValue.toDouble()
@@ -84,7 +85,7 @@ class W2NitroParityRoundTripTest {
 
         val caller = object : OutboundCaller {
             override suspend fun invoke(member: String, payload: Map<String, Any?>?): Any? =
-                if (member == "getCounter") expected else null
+                if (member == "getCounter") expected.toString() else null
             override fun fire(member: String, payload: Map<String, Any?>?) {}
             override fun invokeSync(member: String, payload: Map<String, Any?>?): Any? = null
             override fun stream(member: String, payload: Map<String, Any?>?): Flow<Any?> = emptyFlow()
@@ -294,42 +295,47 @@ class W2NitroParityRoundTripTest {
     }
 
     // =========================================================================
-    // 6. oneOf — sealed class @k/@v envelope, both branches
+    // 6. oneOf — sealed class @t/@v envelope, both branches
     // =========================================================================
 
+    private val stringOneOfTag = "string:2ce29730"
+    private val numberOneOfTag = "number:18e41cc0"
+
     @Test
-    fun `oneOf Opt0 branch encodes to envelope with k=0 and v=string`() {
+    fun `oneOf Opt0 branch encodes to envelope with t string tag and v=string`() {
         val value = GetValueResult.Opt0("hello")
         val encoded = W2ParityTestCodecs.encodeGetValueResult(value)
 
-        assertEquals("oneOf Opt0 must encode @k=0", 0, encoded["@k"])
+        assertEquals("oneOf Opt0 must encode stable string @t", stringOneOfTag, encoded["@t"])
+        assertNull("oneOf Opt0 must not encode positional @k", encoded["@k"])
         assertEquals("oneOf Opt0 must encode @v=string value", "hello", encoded["@v"])
     }
 
     @Test
-    fun `oneOf Opt1 branch encodes to envelope with k=1 and v=number`() {
+    fun `oneOf Opt1 branch encodes to envelope with t number tag and v=number`() {
         val value = GetValueResult.Opt1(3.14)
         val encoded = W2ParityTestCodecs.encodeGetValueResult(value)
 
-        assertEquals("oneOf Opt1 must encode @k=1", 1, encoded["@k"])
+        assertEquals("oneOf Opt1 must encode stable number @t", numberOneOfTag, encoded["@t"])
+        assertNull("oneOf Opt1 must not encode positional @k", encoded["@k"])
         assertEquals("oneOf Opt1 must encode @v=Double value", 3.14, encoded["@v"] as Double, 0.0001)
     }
 
     @Test
-    fun `oneOf Opt0 branch decodes from k=0 wire envelope`() {
-        val wire: Map<String, Any?> = mapOf("@k" to 0, "@v" to "decoded-string")
+    fun `oneOf Opt0 branch decodes from t string tag wire envelope`() {
+        val wire: Map<String, Any?> = mapOf("@t" to stringOneOfTag, "@v" to "decoded-string")
         val result = W2ParityTestCodecs.decodeGetValueResult(wire)
 
-        assertTrue("oneOf @k=0 must decode to Opt0", result is GetValueResult.Opt0)
+        assertTrue("oneOf string @t must decode to Opt0", result is GetValueResult.Opt0)
         assertEquals("Opt0 value must match @v", "decoded-string", (result as GetValueResult.Opt0).value)
     }
 
     @Test
-    fun `oneOf Opt1 branch decodes from k=1 wire envelope`() {
-        val wire: Map<String, Any?> = mapOf("@k" to 1, "@v" to 99.5)
+    fun `oneOf Opt1 branch decodes from t number tag wire envelope`() {
+        val wire: Map<String, Any?> = mapOf("@t" to numberOneOfTag, "@v" to 99.5)
         val result = W2ParityTestCodecs.decodeGetValueResult(wire)
 
-        assertTrue("oneOf @k=1 must decode to Opt1", result is GetValueResult.Opt1)
+        assertTrue("oneOf number @t must decode to Opt1", result is GetValueResult.Opt1)
         assertEquals("Opt1 value must match @v", 99.5, (result as GetValueResult.Opt1).value, 0.0001)
     }
 
@@ -349,15 +355,15 @@ class W2NitroParityRoundTripTest {
     }
 
     @Test
-    fun `oneOf decode throws BridgeKitDecodeException for unknown k index`() {
-        val wire: Map<String, Any?> = mapOf("@k" to 99, "@v" to "anything")
+    fun `oneOf decode throws BridgeKitDecodeException for unknown t tag`() {
+        val wire: Map<String, Any?> = mapOf("@t" to "unknown:deadbeef", "@v" to "anything")
         assertThrows(BridgeKitDecodeException::class.java) {
             W2ParityTestCodecs.decodeGetValueResult(wire)
         }
     }
 
     @Test
-    fun `oneOf decode throws BridgeKitDecodeException when k key is missing`() {
+    fun `oneOf decode throws BridgeKitDecodeException when t key is missing`() {
         val wire: Map<String, Any?> = mapOf("@v" to "no-key")
         assertThrows(BridgeKitDecodeException::class.java) {
             W2ParityTestCodecs.decodeGetValueResult(wire)
@@ -365,7 +371,7 @@ class W2NitroParityRoundTripTest {
     }
 
     @Test
-    fun `oneOf inbound adapter returns k-v envelope encoded map via codec`() = runTest {
+    fun `oneOf inbound adapter returns t-v envelope encoded map via codec`() = runTest {
         val impl = object : W2ParityTest {
             override suspend fun getCounter(): Long = 0L
             override suspend fun getTimestamp(): Instant = Instant.EPOCH
@@ -380,7 +386,8 @@ class W2NitroParityRoundTripTest {
 
         assertTrue("oneOf inbound result must be a Map", result is Map<*, *>)
         val map = result as Map<*, *>
-        assertEquals("@k must be 1 for Opt1", 1, map["@k"])
+        assertEquals("@t must be number tag for Opt1", numberOneOfTag, map["@t"])
+        assertNull("oneOf inbound map must not include positional @k", map["@k"])
         assertEquals("@v must be 1.5 for Opt1", 1.5, map["@v"] as Double, 0.0001)
     }
 }

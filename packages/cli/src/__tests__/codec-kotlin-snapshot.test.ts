@@ -23,11 +23,48 @@ function emitOneOfContract(oneOfSchema: ReturnType<typeof t.oneOf>): string {
   return emitKotlinContract(token, 'com.bridgekit.fixtures').content;
 }
 
+function emitInt64Contract(): string {
+  const token: RawContractToken = {
+    hash: 'contract-hash',
+    descriptor: {
+      $type: 'com.bridgekit.contract',
+      id: 'fixture.int64',
+      methods: {
+        getCounter: {
+          kind: 'query',
+          result: t.int64(),
+        },
+        getBox: {
+          kind: 'query',
+          result: t.object({ count: t.int64() }),
+        },
+      },
+      streams: {},
+      state: {},
+    },
+  };
+
+  return emitKotlinContract(token, 'com.bridgekit.fixtures').content;
+}
+
 function coreOneOfTags(oneOfSchema: ReturnType<typeof t.oneOf>): readonly string[] {
   return (oneOfSchema as unknown as { tags: readonly string[] }).tags;
 }
 
 describe('Kotlin codec snapshots', () => {
+  it('cli_codec_snapshots_emit_int64_string_kotlin_swift emits decimal string int64 boundaries', () => {
+    const kotlin = emitInt64Contract();
+
+    expect(kotlin).toContain('"getCounter" -> {\n                    impl.getCounter().toString()\n                }');
+    expect(kotlin).toContain(
+      'return when (val v = result) { is String -> v.toLong(); else -> throw BridgeKitDecodeException("result", "Long") }',
+    );
+    expect(kotlin).toContain('map["count"] = value.count.toString()');
+    expect(kotlin).toContain(
+      'count = when (val v = raw["count"]) { is String -> v.toLong(); else -> throw BridgeKitDecodeException("count", "Long") },',
+    );
+  });
+
   it('cli_codec_snapshots_emit_oneof_t_tags_kotlin_swift bakes core-derived @t tag literals', () => {
     const stringOption = t.string();
     const objectOption = t.object({ id: t.string(), count: t.number() });

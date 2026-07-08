@@ -331,8 +331,8 @@ export function encode(schema: AnySchema, value: unknown): unknown {
     }
 
     case 'int64': {
-      // bigint passes through as Int64 on the AnyMap wire
-      return value;
+      if (typeof value !== 'bigint') return value;
+      return value.toString();
     }
 
     case 'date': {
@@ -467,9 +467,10 @@ export function decode(schema: AnySchema, value: unknown): unknown {
     }
 
     case 'int64': {
-      if (typeof value === 'bigint') return value;
-      if (typeof value === 'number') return BigInt(Math.trunc(value));
-      return BigInt(String(value));
+      if (typeof value !== 'string') {
+        throw new TypeError(`[bridgekit] int64 decode: expected decimal string, got ${typeof value}`);
+      }
+      return BigInt(value);
     }
 
     case 'date': {

@@ -25,6 +25,30 @@ function emitOneOfContract(oneOfSchema: ReturnType<typeof t.oneOf>): string {
   return emitSwiftContract(token, 'BridgeKitFixtures').content;
 }
 
+function emitInt64Contract(): string {
+  const token: RawContractToken = {
+    hash: 'contract-hash',
+    descriptor: {
+      $type: 'com.bridgekit.contract',
+      id: 'fixture.int64',
+      methods: {
+        getCounter: {
+          kind: 'query',
+          result: t.int64(),
+        },
+        getBox: {
+          kind: 'query',
+          result: t.object({ count: t.int64() }),
+        },
+      },
+      streams: {},
+      state: {},
+    },
+  };
+
+  return emitSwiftContract(token, 'BridgeKitFixtures').content;
+}
+
 function coreOneOfTags(oneOfSchema: ReturnType<typeof t.oneOf>): readonly string[] {
   return (oneOfSchema as unknown as { tags: readonly string[] }).tags;
 }
@@ -34,6 +58,19 @@ function jsRuntimeTag(oneOfSchema: ReturnType<typeof t.oneOf>, value: unknown): 
 }
 
 describe('Swift codec snapshots', () => {
+  it('cli_codec_snapshots_emit_int64_string_kotlin_swift emits decimal string int64 boundaries', () => {
+    const swift = emitInt64Contract();
+
+    expect(swift).toContain('case "getCounter":\n            return String(try await impl.getCounter())');
+    expect(swift).toContain(
+      'return try Int64((result as? String) ?? bridgeKitThrow(field: "result", expectedType: "Int64")) ?? bridgeKitThrow(field: "result", expectedType: "Int64")',
+    );
+    expect(swift).toContain('map["count"] = String(value.count)');
+    expect(swift).toContain(
+      'count: try Int64((raw["count"] as Any? as? String) ?? bridgeKitThrow(field: "count", expectedType: "Int64")) ?? bridgeKitThrow(field: "count", expectedType: "Int64")',
+    );
+  });
+
   it('cli_codec_snapshots_emit_oneof_t_tags_kotlin_swift bakes JS-runtime-equivalent @t tag literals', () => {
     const stringOption = t.string();
     const numberOption = t.number();
