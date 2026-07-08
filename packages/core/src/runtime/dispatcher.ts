@@ -29,7 +29,10 @@ type ReplayCloneResult<T> = { ok: true; value: T } | { ok: false };
 interface DispatcherOptions {
   nativeReadiness?: NativeReadinessMirror;
   getEpoch?: () => number;
+  strictHashCheck?: boolean;
 }
+
+type ContractHashCheckResult = { ok: true } | { ok: false; result: ResultEnvelope & { ok: false } };
 
 function stableSerialize(value: unknown): string {
   if (Array.isArray(value)) {
@@ -122,6 +125,8 @@ export class Dispatcher implements JsDispatcher {
 
   async onInvoke(env: CallEnvelope): Promise<ResultEnvelope> {
     const start = Date.now();
+    const hashCheck = this._checkContractHash(env);
+    if (!hashCheck.ok) return hashCheck.result;
     try {
       const entry = this._registry.resolve(env.contractId, env.scope);
       if (!entry) {
@@ -160,6 +165,12 @@ export class Dispatcher implements JsDispatcher {
   onStreamOpen(env: CallEnvelope, streamId: string): void {
     const transport = this._transport;
     if (!transport) return;
+
+    const hashCheck = this._checkContractHash(env);
+    if (!hashCheck.ok) {
+      transport.endFromJs(streamId, hashCheck.result);
+      return;
+    }
 
     const entry = this._registry.resolve(env.contractId, env.scope);
     if (!entry) {
@@ -340,14 +351,17 @@ export class Dispatcher implements JsDispatcher {
 
   // ---- onStateWrite --------------------------------------------------------
 
-  onStateWrite(env: CallEnvelope): void {
+  onStateWrite(env: CallEnvelope): ResultEnvelope {
     if (env.op === 'provide' || env.op === 'unprovide') {
       this._applyReadinessDelta({ ...env, op: env.op });
-      return;
+      return { ok: true };
     }
 
+    const hashCheck = this._checkContractHash(env);
+    if (!hashCheck.ok) return hashCheck.result;
+
     const entry = this._registry.resolve(env.contractId, env.scope);
-    if (!entry) return;
+    if (!entry) return { ok: true };
 
     const contract = this._contracts.get(env.contractId);
     const stateDesc = contract?.descriptor.state[env.member];
@@ -358,6 +372,7 @@ export class Dispatcher implements JsDispatcher {
     }
     // Marker path: no schema → pass-through (value already JSON-shaped)
     entry.binding.setState(env.member, value);
+    return { ok: true };
   }
 
   /** Clean up all open producers (on epoch change) */
@@ -408,6 +423,41 @@ export class Dispatcher implements JsDispatcher {
       member: env.member,
       scope: env.scope,
     };
+  }
+
+  private _checkContractHash(env: CallEnvelope): ContractHashCheckResult {
+    const callerHash = env.contractHash;
+    if (callerHash === undefined) return { ok: true };
+
+    const receiverHash = this._contracts.get(env.contractId)?.hash;
+    if (receiverHash === undefined || callerHash === receiverHash) return { ok: true };
+
+    const details = { callerHash, receiverHash };
+    const result: ResultEnvelope & { ok: false } = {
+      ok: false,
+      code: 'INCOMPATIBLE_CONTRACT',
+      message: `[bridgekit] INCOMPATIBLE_CONTRACT: ${env.contractId} caller hash ${callerHash} does not match receiver hash ${receiverHash}`,
+      contractId: env.contractId,
+      member: env.member,
+      scope: env.scope,
+      details,
+    };
+
+    diagnostics.trace({
+      op: 'hashSkew',
+      contractId: env.contractId,
+      member: env.member,
+      scopeKey: JSON.stringify(env.scope),
+      durationMs: 0,
+      side: 'js',
+      code: result.code,
+    });
+    diagnostics.warnOnce(
+      `hashSkew:${env.contractId}:${callerHash}:${receiverHash}`,
+      result.message,
+    );
+
+    return this._opts.strictHashCheck === true ? { ok: false, result } : { ok: true };
   }
 
   private _applyReadinessDelta(env: CallEnvelope & { op: 'provide' | 'unprovide' }): void {

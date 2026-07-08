@@ -82,6 +82,7 @@ function resultToMap(res: ResultEnvelope): Record<string, unknown> {
   if (res.contractId !== undefined) map.contractId = res.contractId;
   if (res.member !== undefined) map.member = res.member;
   if (res.scope !== undefined) map.scope = res.scope;
+  if (res.details !== undefined) map.details = res.details;
   return map;
 }
 
@@ -174,6 +175,9 @@ export class NitroBridgeTransport implements BridgeTransport {
       // onStateWrite: native pushes a state-change to JS mirrors.
       (envMap: AnyMap): void => {
         const env = mapToEnvelope(envMap as unknown as Record<string, unknown>);
+        // Frozen Nitro JSI seam: native callback type is void. The dispatcher
+        // still observes hash skew here, but strict rejections cannot be
+        // returned to native writers through this generated callback.
         dispatcher.onStateWrite(env);
       },
     ) as unknown as Record<string, unknown>;

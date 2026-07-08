@@ -44,10 +44,10 @@ describe('defineContract – returned token', () => {
     expect(Object.isFrozen(c)).toBe(true);
   });
 
-  it('descriptor has correct $type and version', () => {
+  it('descriptor has correct $type without dead descriptorVersion', () => {
     const c = defineContract('foo.bar', {});
     expect(c.descriptor.$type).toBe('com.bridgekit.contract');
-    expect(c.descriptor.descriptorVersion).toBe(1);
+    expect(c.descriptor).not.toHaveProperty('descriptorVersion');
     expect(c.descriptor.id).toBe('foo.bar');
   });
 

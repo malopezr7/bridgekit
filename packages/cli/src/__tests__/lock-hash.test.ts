@@ -5,7 +5,6 @@ import { buildLock } from '../lock.js';
 
 const descriptor: RawContractToken['descriptor'] = {
   $type: 'com.bridgekit.contract',
-  descriptorVersion: 1,
   id: 'fixture.hash',
   methods: {
     translate: {
@@ -54,5 +53,6 @@ describe('buildLock member hashes', () => {
     expect(lock.contracts['fixture.hash']?.members).toEqual(
       memberHashes(descriptor as ContractDescriptor),
     );
+    expect(lock).not.toHaveProperty('descriptorVersion');
   });
 });

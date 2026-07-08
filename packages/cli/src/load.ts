@@ -24,7 +24,6 @@ import { CliError } from './cliError.js';
 export interface RawContractToken {
   descriptor: {
     $type: 'com.bridgekit.contract';
-    descriptorVersion: number;
     id: string;
     methods: Record<string, unknown>;
     streams: Record<string, unknown>;

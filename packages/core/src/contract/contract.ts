@@ -104,7 +104,6 @@ export interface StateTypedDescriptor<V extends AnySchema = AnySchema> extends S
 
 export interface ContractDescriptor {
   readonly $type: 'com.bridgekit.contract';
-  readonly descriptorVersion: 1;
   readonly id: string;
   readonly methods: Record<string, MethodDescriptor>;
   readonly streams: Record<string, StreamDescriptor>;
@@ -326,7 +325,6 @@ export function defineContract(
 
   const descriptor: ContractDescriptor = {
     $type: 'com.bridgekit.contract',
-    descriptorVersion: 1,
     id,
     methods,
     streams,

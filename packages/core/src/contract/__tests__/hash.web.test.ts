@@ -162,7 +162,6 @@ describe('contract hash – integration', () => {
     });
 
     expect(localConfigOnly.hash).toBe(baseline.hash);
-    expect(stableHash({ ...localConfigOnly.descriptor, descriptorVersion: 2 })).toBe(baseline.hash);
     expect(memberHashes(localConfigOnly.descriptor)).toEqual(memberHashes(baseline.descriptor));
   });
 

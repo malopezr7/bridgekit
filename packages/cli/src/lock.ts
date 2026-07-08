@@ -15,7 +15,6 @@ export interface LockEntry {
 }
 
 export interface LockFile {
-  descriptorVersion: number;
   platform?: 'kotlin' | 'swift';
   contracts: Record<string, LockEntry>;
 }
@@ -51,7 +50,6 @@ export function buildLock(tokens: RawContractToken[], platform?: 'kotlin' | 'swi
   }
 
   const result: LockFile = {
-    descriptorVersion: 1,
     contracts: sortedContracts,
   };
   if (platform) result.platform = platform;

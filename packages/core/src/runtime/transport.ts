@@ -35,7 +35,7 @@ export interface JsDispatcher {
   /** Dispose JS producer */
   onStreamClose(streamId: string, reason: string): void;
   /** Other side pushed a state change for a contract it provides */
-  onStateWrite(env: CallEnvelope): void;
+  onStateWrite(env: CallEnvelope): ResultEnvelope;
 }
 
 // ---- BridgeTransport ------------------------------------------------------
