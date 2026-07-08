@@ -417,6 +417,10 @@ export class SwiftCodecWalker {
     if (!this.registered.has(typeName)) this.registered.add(typeName);
     const encodeLines: string[] = [];
     const decodeLines: string[] = [];
+    const tags = node.tags;
+    if (tags === undefined || tags.length !== node.options.length) {
+      throw new Error(`[bridgekit] oneOf ${typeName} is missing stable option tags.`);
+    }
 
     encodeLines.push(`static func encode${typeName}(_ value: ${typeName}) -> [String: Any?] {`);
     encodeLines.push(`    switch value {`);
@@ -424,7 +428,9 @@ export class SwiftCodecWalker {
       const opt = node.options[i];
       const optCtx = `${typeName}Opt${i}`;
       const encodeV = this.encodeExpr('v', opt, optCtx);
-      encodeLines.push(`    case .opt${i}(let v): return ["@k": ${i}, "@v": ${encodeV}]`);
+      encodeLines.push(
+        `    case .opt${i}(let v): return ["@t": ${JSON.stringify(tags[i])}, "@v": ${encodeV}]`,
+      );
     }
     encodeLines.push(`    }`);
     encodeLines.push(`}`);
@@ -433,18 +439,18 @@ export class SwiftCodecWalker {
       `static func decode${typeName}(_ raw: [String: Any?]) throws -> ${typeName} {`,
     );
     decodeLines.push(
-      `    guard let k = (raw["@k"] as? NSNumber).map(Int.init) else { throw BridgeKitDecodeError(field: "@k", expectedType: "${typeName}") }`,
+      `    guard let tag = raw["@t"] as? String else { throw BridgeKitDecodeError(field: "@t", expectedType: "${typeName}") }`,
     );
     decodeLines.push(`    let v = raw["@v"] as Any?`);
-    decodeLines.push(`    switch k {`);
+    decodeLines.push(`    switch tag {`);
     for (let i = 0; i < node.options.length; i++) {
       const opt = node.options[i];
       const optCtx = `${typeName}Opt${i}`;
       const decodeV = this.decodeExpr('v', opt, optCtx, `opt${i}`);
-      decodeLines.push(`    case ${i}: return .opt${i}(${decodeV})`);
+      decodeLines.push(`    case ${JSON.stringify(tags[i])}: return .opt${i}(${decodeV})`);
     }
     decodeLines.push(
-      `    default: throw BridgeKitDecodeError(field: "@k=\\(k)", expectedType: "${typeName}")`,
+      `    default: throw BridgeKitDecodeError(field: "@t=\\(tag)", expectedType: "${typeName}")`,
     );
     decodeLines.push(`    }`);
     decodeLines.push(`}`);
