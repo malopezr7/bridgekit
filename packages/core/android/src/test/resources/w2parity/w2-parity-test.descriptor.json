@@ -1,0 +1,46 @@
+{
+  "$type": "com.bridgekit.contract",
+  "id": "w2.parity.test",
+  "methods": {
+    "getCounter": {
+      "kind": "query",
+      "result": { "kind": "int64" }
+    },
+    "getTimestamp": {
+      "kind": "query",
+      "result": { "kind": "date" }
+    },
+    "getBytes": {
+      "kind": "query",
+      "result": { "kind": "binary" }
+    },
+    "getColor": {
+      "kind": "query",
+      "result": {
+        "kind": "enum",
+        "members": [
+          { "name": "Red", "value": 0 },
+          { "name": "Green", "value": 1 },
+          { "name": "Blue", "value": 2 }
+        ]
+      }
+    },
+    "getPair": {
+      "kind": "query",
+      "result": {
+        "kind": "tuple",
+        "items": [{ "kind": "string" }, { "kind": "number" }]
+      }
+    },
+    "getValue": {
+      "kind": "query",
+      "result": {
+        "kind": "oneOf",
+        "options": [{ "kind": "string" }, { "kind": "number" }],
+        "tags": ["string:2ce29730", "number:18e41cc0"]
+      }
+    }
+  },
+  "streams": {},
+  "state": {}
+}

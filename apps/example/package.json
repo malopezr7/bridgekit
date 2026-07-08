@@ -7,7 +7,7 @@
     "start": "react-native start --reset-cache",
     "android": "react-native run-android",
     "typecheck": "tsc --noEmit",
-    "generate": "node ../../packages/cli/dist/index.js generate --contracts \"src/demo/contracts/*.contract.ts\" --out-dir android/app/src/main/java/com/bridgekit/example/generated --platform kotlin",
+    "generate": "node ../../packages/cli/dist/index.js generate --contracts \"src/demo/contracts/*.contract.ts\" --out-dir android/app/src/main/java/com/bridgekit/example/generated --platform kotlin --package com.bridgekit.example.generated",
     "ios": "react-native run-ios",
     "generate:ios": "node ../../packages/cli/dist/index.js generate --contracts \"src/demo/contracts/*.contract.ts\" --out-dir ios/BridgeKitExample/Generated --platform swift"
   },
