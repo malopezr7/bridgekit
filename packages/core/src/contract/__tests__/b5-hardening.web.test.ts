@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
 // B5 hardening tests — WU-6
 //
-// 5.1-5.3: oneOf decode — missing @v and out-of-range @k throw descriptively.
+// 5.1-5.3: oneOf decode — missing @v and unknown @t throw descriptively.
 // 5.4-5.5: boundaryDecode fail-fast — type mismatch throws instead of silent default.
-// 5.6: nullable/optional — null envelope { @k:0, @v:null } decoded correctly.
+// 5.6: nullable/optional — null envelope { @t, @v:null } decoded correctly.
 // 5.7: dispatcher _openProducers leak in catch path.
 // 5.8: registry.ts grace dead-code (pendingCallers never populated → safe remove).
 // 5.9: contractHook getSnapshot cache-mutation — getSnapshot must be pure (stable ref).
@@ -19,50 +19,45 @@ import { t } from '../schema';
 
 describe('5.1 oneOf decode: missing @v throws descriptively', () => {
   const schema = t.oneOf([t.string(), t.number()] as const);
+  const stringTag = (encode(schema, 'hello') as { '@t': string })['@t'];
 
   it('throws when @v is absent from the envelope', () => {
-    // Wire envelope with valid @k but no @v property at all
-    expect(() => decode(schema, { '@k': 0 })).toThrow(/@v/);
+    // Wire envelope with valid @t but no @v property at all
+    expect(() => decode(schema, { '@t': stringTag })).toThrow(/@v/);
   });
 
   it('error message names the schema kind', () => {
-    expect(() => decode(schema, { '@k': 0 })).toThrow(/oneOf/i);
+    expect(() => decode(schema, { '@t': stringTag })).toThrow(/oneOf/i);
   });
 });
 
 // ---------------------------------------------------------------------------
-// 5.2 – oneOf decode: @k present but not a number throws descriptively
+// 5.2 – oneOf decode: @t present but not a string throws descriptively
 // ---------------------------------------------------------------------------
 
-describe('5.2 oneOf decode: non-numeric @k throws descriptively', () => {
+describe('5.2 oneOf decode: non-string @t throws descriptively', () => {
   const schema = t.oneOf([t.string(), t.number()] as const);
 
-  it('throws when @k is a string instead of number', () => {
-    expect(() => decode(schema, { '@k': 'zero', '@v': 'hello' })).toThrow(/@k/);
+  it('throws when @t is a number instead of string', () => {
+    expect(() => decode(schema, { '@t': 0, '@v': 'hello' })).toThrow(/@t/);
   });
 
-  it('throws when @k is undefined', () => {
-    expect(() => decode(schema, { '@v': 'hello' })).toThrow(/@k/);
+  it('throws when @t is undefined', () => {
+    expect(() => decode(schema, { '@v': 'hello' })).toThrow(/@t/);
   });
 });
 
 // ---------------------------------------------------------------------------
-// 5.3 – oneOf decode: out-of-range @k throws descriptively
+// 5.3 – oneOf decode: unknown @t throws descriptively
 // ---------------------------------------------------------------------------
 
-describe('5.3 oneOf decode: out-of-range @k throws descriptively', () => {
+describe('5.3 oneOf decode: unknown @t throws descriptively', () => {
   const schema = t.oneOf([t.string(), t.number()] as const);
 
-  it('throws when @k is negative', () => {
-    expect(() => decode(schema, { '@k': -1, '@v': 'hello' })).toThrow(/-1/);
-  });
-
-  it('throws when @k equals options.length', () => {
-    expect(() => decode(schema, { '@k': 2, '@v': 'hello' })).toThrow(/2/);
-  });
-
-  it('throws when @k is out of range and error mentions "out of range" or the index', () => {
-    expect(() => decode(schema, { '@k': 99, '@v': 'hello' })).toThrow(/99/);
+  it('throws when @t is not one of the schema option tags', () => {
+    expect(() => decode(schema, { '@t': 'unknown:deadbeef', '@v': 'hello' })).toThrow(
+      /unknown:deadbeef/,
+    );
   });
 });
 
@@ -85,12 +80,16 @@ describe('5.6 nullable/optional: null guard for union variants', () => {
   });
 
   it('nullable(oneOf): valid envelope decoded correctly after null guard', () => {
-    const result = decode(nullableOneOf, { '@k': 0, '@v': 'hello' });
+    const tag = (encode(t.oneOf([t.string(), t.number()] as const), 'hello') as { '@t': string })[
+      '@t'
+    ];
+    const result = decode(nullableOneOf, { '@t': tag, '@v': 'hello' });
     expect(result).toBe('hello');
   });
 
   it('optional(oneOf): valid envelope decoded correctly after null guard', () => {
-    const result = decode(optionalOneOf, { '@k': 1, '@v': 42 });
+    const tag = (encode(t.oneOf([t.string(), t.number()] as const), 42) as { '@t': string })['@t'];
+    const result = decode(optionalOneOf, { '@t': tag, '@v': 42 });
     expect(result).toBe(42);
   });
 });
@@ -103,7 +102,8 @@ describe('4.1 oneOf fail-fast symmetry', () => {
   });
 
   it('decode throws when the selected branch cannot decode the envelope value', () => {
-    expect(() => decode(schema, { '@k': 0, '@v': { unsafe: true } })).toThrow(/oneOf/i);
+    const tag = (encode(schema, 'hello') as { '@t': string })['@t'];
+    expect(() => decode(schema, { '@t': tag, '@v': { unsafe: true } })).toThrow(/oneOf/i);
   });
 });
 

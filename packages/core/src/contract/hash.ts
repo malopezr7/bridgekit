@@ -32,6 +32,7 @@ function sortedStringify(value: unknown): string {
 }
 
 type HashableRecord = Record<string, unknown>;
+type ProjectedOneOfOption = { readonly tag: string; readonly schema: HashableRecord };
 
 function withDefined(entries: [string, unknown][]): HashableRecord {
   const result: HashableRecord = {};
@@ -47,6 +48,19 @@ function isRecord(value: unknown): value is HashableRecord {
 
 function isContractDescriptor(value: unknown): value is ContractDescriptor {
   return isRecord(value) && value.$type === 'com.bridgekit.contract';
+}
+
+function tagProjectedSchema(projected: HashableRecord): string {
+  return `${projected.kind as string}:${hash8hex(sortedStringify(projected))}`;
+}
+
+function projectOneOfOptions(options: readonly AnySchema[]): readonly ProjectedOneOfOption[] {
+  return options
+    .map((option) => {
+      const projected = projectSchema(option);
+      return { tag: tagProjectedSchema(projected), schema: projected };
+    })
+    .sort((left, right) => left.tag.localeCompare(right.tag));
 }
 
 const MEMBER_DESCRIPTOR_KINDS = new Set(['fire', 'query', 'querySync', 'stream', 'state']);
@@ -104,12 +118,16 @@ function projectSchema(schema: AnySchema | HashableRecord): HashableRecord {
         ['kind', schema.kind],
         ['items', (schema as { items: readonly AnySchema[] }).items.map(projectSchema)],
       ]);
-    case 'oneOf':
+    case 'oneOf': {
+      const projectedOptions = projectOneOfOptions(
+        (schema as { options: readonly AnySchema[] }).options,
+      );
       return withDefined([
         ['kind', schema.kind],
-        ['options', (schema as { options: readonly AnySchema[] }).options.map(projectSchema)],
-        ['tags', (schema as { tags?: readonly string[] }).tags],
+        ['options', projectedOptions.map((option) => option.schema)],
+        ['tags', projectedOptions.map((option) => option.tag)],
       ]);
+    }
     default:
       return schema as HashableRecord;
   }
@@ -226,6 +244,29 @@ export function hash8hex(str: string): string {
  */
 export function stableHash(value: unknown): string {
   return hash8hex(sortedStringify(wireIdentityProjection(value)));
+}
+
+export function stableSchemaHash(schema: AnySchema): string {
+  return hash8hex(sortedStringify(projectSchema(schema)));
+}
+
+export function oneOfOptionTag(schema: AnySchema): string {
+  return `${schema.kind}:${stableSchemaHash(schema)}`;
+}
+
+export function deriveOneOfOptionTags(options: readonly AnySchema[]): readonly string[] {
+  const tags = options.map(oneOfOptionTag);
+  const seen = new Set<string>();
+  for (const tag of tags) {
+    if (seen.has(tag)) {
+      throw new Error(
+        `[bridgekit] oneOf duplicate structural tag "${tag}". ` +
+          'oneOf options must have unique wire identity.',
+      );
+    }
+    seen.add(tag);
+  }
+  return tags;
 }
 
 /**
