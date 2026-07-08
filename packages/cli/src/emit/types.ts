@@ -74,6 +74,7 @@ export interface TupleNode extends SchemaNode {
 export interface OneOfNode extends SchemaNode {
   kind: 'oneOf';
   options: SchemaNode[];
+  tags?: readonly string[];
 }
 
 // ---- identifier helpers ----------------------------------------------------

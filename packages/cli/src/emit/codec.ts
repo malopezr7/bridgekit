@@ -448,14 +448,18 @@ export class CodecWalker {
   }
 
   /**
-   * Emits `encode<T>` + `decode<T>` for a oneOf (primitive union, sealed class, @k/@v envelope).
-   * encode: when (value) { is T.Opt0 -> mapOf("@k" to 0, "@v" to ...) }
-   * decode: when ((raw["@k"] as Number).toInt()) { 0 -> T.Opt0(...) }
+   * Emits `encode<T>` + `decode<T>` for a oneOf (primitive union, sealed class, @t/@v envelope).
+   * encode: when (value) { is T.Opt0 -> mapOf("@t" to "<stableTag>", "@v" to ...) }
+   * decode: when (raw["@t"] as String) { "<stableTag>" -> T.Opt0(...) }
    */
   emitOneOfCodec(typeName: string, node: OneOfNode): string {
     if (!this.registered.has(typeName)) this.registered.add(typeName);
     const encodeLines: string[] = [];
     const decodeLines: string[] = [];
+    const tags = node.tags;
+    if (tags === undefined || tags.length !== node.options.length) {
+      throw new Error(`[bridgekit] oneOf ${typeName} is missing stable option tags.`);
+    }
 
     encodeLines.push(
       `fun encode${typeName}(value: ${typeName}): Map<String, Any?> = when (value) {`,
@@ -464,23 +468,25 @@ export class CodecWalker {
       const opt = node.options[i];
       const optCtx = `${typeName}Opt${i}`;
       const encodeV = this.encodeExpr('value.value', opt, optCtx);
-      encodeLines.push(`    is ${typeName}.Opt${i} -> mapOf("@k" to ${i}, "@v" to ${encodeV})`);
+      encodeLines.push(
+        `    is ${typeName}.Opt${i} -> mapOf("@t" to ${JSON.stringify(tags[i])}, "@v" to ${encodeV})`,
+      );
     }
     encodeLines.push(`}`);
 
     decodeLines.push(`fun decode${typeName}(raw: Map<*, *>): ${typeName} {`);
     decodeLines.push(
-      `    val k = (raw["@k"] as? Number)?.toInt() ?: throw BridgeKitDecodeException("@k", "${typeName}")`,
+      `    val tag = raw["@t"] as? String ?: throw BridgeKitDecodeException("@t", "${typeName}")`,
     );
     decodeLines.push(`    val v = raw["@v"]`);
-    decodeLines.push(`    return when (k) {`);
+    decodeLines.push(`    return when (tag) {`);
     for (let i = 0; i < node.options.length; i++) {
       const opt = node.options[i];
       const optCtx = `${typeName}Opt${i}`;
       const decodeV = this.decodeExpr('v', opt, optCtx, `opt${i}`);
-      decodeLines.push(`        ${i} -> ${typeName}.Opt${i}(${decodeV})`);
+      decodeLines.push(`        ${JSON.stringify(tags[i])} -> ${typeName}.Opt${i}(${decodeV})`);
     }
-    decodeLines.push(`        else -> throw BridgeKitDecodeException("@k=$k", "${typeName}")`);
+    decodeLines.push(`        else -> throw BridgeKitDecodeException("@t=$tag", "${typeName}")`);
     decodeLines.push(`    }`);
     decodeLines.push(`}`);
 
