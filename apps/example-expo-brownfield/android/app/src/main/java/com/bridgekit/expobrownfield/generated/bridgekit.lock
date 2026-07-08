@@ -1,47 +1,46 @@
 {
-  "descriptorVersion": 1,
   "contracts": {
     "bridgekit.demo-feature": {
-      "hash": "a6c0d910",
+      "hash": "9495a290",
       "members": {
-        "methods.getGreeting": "372547b8"
+        "methods.getGreeting": "ce4afe6b"
       }
     },
     "bridgekit.demo-host": {
-      "hash": "dceb75e0",
+      "hash": "37c69ff7",
       "members": {
-        "methods.increment": "5f97d680",
-        "methods.ping": "289cf580",
-        "methods.say": "3bb327c0",
-        "state.counter": "b4c77128",
-        "streams.echoes": "872b3628",
-        "streams.ticker": "678db3f8"
+        "methods.increment": "6c6f31cf",
+        "methods.ping": "a65e4d35",
+        "methods.say": "0432c111",
+        "state.counter": "83f1adea",
+        "streams.echoes": "45c6b5cb",
+        "streams.ticker": "4725c2c3"
       }
     },
     "bridgekit.demo-jsinfo": {
-      "hash": "360492b0",
+      "hash": "9e097f3b",
       "members": {
-        "methods.getReactNativeVersion": "37784868",
-        "methods.getUserLevel": "a158b626",
-        "methods.getUserSegments": "540320f8",
-        "streams.clockTicks": "678db3f8"
+        "methods.getReactNativeVersion": "ef2c701f",
+        "methods.getUserLevel": "920ab966",
+        "methods.getUserSegments": "314af6df",
+        "streams.clockTicks": "4725c2c3"
       }
     },
     "bridgekit.demo-reverse": {
-      "hash": "acb5aa97",
+      "hash": "d0f9e5e7",
       "members": {
-        "methods.greetFromJs": "372547b8",
-        "methods.onNativeEvent": "5a86fd27",
-        "state.jsStatus": "8becf540",
-        "streams.jsCounter": "678db3f8"
+        "methods.greetFromJs": "ce4afe6b",
+        "methods.onNativeEvent": "742296da",
+        "state.jsStatus": "cfab7f4e",
+        "streams.jsCounter": "4725c2c3"
       }
     },
     "bridgekit.localhost": {
-      "hash": "7d0b554f",
+      "hash": "54d414a7",
       "members": {
-        "methods.getMotto": "71ff3fa0",
-        "methods.greet": "372547b8",
-        "state.mood": "23062cf8"
+        "methods.getMotto": "a338fcfe",
+        "methods.greet": "ce4afe6b",
+        "state.mood": "cfab7f4e"
       }
     }
   },

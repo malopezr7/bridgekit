@@ -607,11 +607,12 @@ describe('codec_web_decode_typed_value_passthrough_strips_reserved_own_keys', ()
     const dateInput = addReservedOwnKeys(new Date('2025-06-14T12:00:00.000Z'));
     const binaryInput = addReservedOwnKeys(new Uint8Array([0x0a, 0x0b]));
     const int64Input = 9007199254740993n;
+    const int64Wire = int64Input.toString();
 
     const objectResult = decode(t.object({ at: t.date(), bytes: t.binary(), count: t.int64() }), {
       at: dateInput,
       bytes: binaryInput,
-      count: int64Input,
+      count: int64Wire,
     }) as { at: Date; bytes: Uint8Array; count: bigint };
     const arrayResult = decode(t.array(t.date()), [dateInput]) as Date[];
     const recordResult = decode(t.record(t.binary()), { payload: binaryInput }) as Record<
@@ -621,7 +622,7 @@ describe('codec_web_decode_typed_value_passthrough_strips_reserved_own_keys', ()
     const tupleResult = decode(t.tuple([t.date(), t.binary(), t.int64()] as const), [
       dateInput,
       binaryInput,
-      int64Input,
+      int64Wire,
     ]) as [Date, Uint8Array, bigint];
     const typedOneOf = t.oneOf([t.date(), t.binary(), t.int64()] as const);
     const oneOfDate = decode(typedOneOf, {
@@ -634,7 +635,7 @@ describe('codec_web_decode_typed_value_passthrough_strips_reserved_own_keys', ()
     }) as Uint8Array;
     const oneOfInt64 = decode(typedOneOf, {
       '@t': (encode(typedOneOf, int64Input) as Record<string, unknown>)['@t'],
-      '@v': int64Input,
+      '@v': int64Wire,
     }) as bigint;
 
     expect(objectResult.at).toBeInstanceOf(Date);
@@ -1018,22 +1019,56 @@ describe('W2 T05 — t.int64() round-trip (bigint, precision above 2^53)', () =>
   const schema = t.int64();
   const VALUE_ABOVE_MAX_SAFE = 9007199254740993n; // 2^53 + 1
 
-  it('encode passes bigint through (wire = bigint)', () => {
-    expect(encode(schema, VALUE_ABOVE_MAX_SAFE)).toBe(VALUE_ABOVE_MAX_SAFE);
+  it('codec_web_nested_int64_encodes_decimal_string', () => {
+    const nestedSchema = t.object({
+      count: t.int64(),
+      items: t.array(t.object({ value: t.int64() })),
+      tuple: t.tuple([t.string(), t.int64()] as const),
+    });
+
+    const wire = encode(nestedSchema, {
+      count: VALUE_ABOVE_MAX_SAFE,
+      items: [{ value: VALUE_ABOVE_MAX_SAFE + 2n }],
+      tuple: ['tuple', VALUE_ABOVE_MAX_SAFE + 4n],
+    }) as {
+      count: string;
+      items: Array<{ value: string }>;
+      tuple: [string, string];
+    };
+
+    expect(wire.count).toBe('9007199254740993');
+    expect(typeof wire.count).toBe('string');
+    expect(wire.items[0]?.value).toBe('9007199254740995');
+    expect(typeof wire.items[0]?.value).toBe('string');
+    expect(wire.tuple[1]).toBe('9007199254740997');
+    expect(typeof wire.tuple[1]).toBe('string');
+
+    const decoded = decode(nestedSchema, wire) as {
+      count: bigint;
+      items: Array<{ value: bigint }>;
+      tuple: [string, bigint];
+    };
+    expect(decoded.count).toBe(VALUE_ABOVE_MAX_SAFE);
+    expect(decoded.items[0]?.value).toBe(VALUE_ABOVE_MAX_SAFE + 2n);
+    expect(decoded.tuple[1]).toBe(VALUE_ABOVE_MAX_SAFE + 4n);
   });
 
-  it('decode bigint → bigint', () => {
-    expect(decode(schema, VALUE_ABOVE_MAX_SAFE)).toBe(VALUE_ABOVE_MAX_SAFE);
+  it('encode emits a decimal string on the wire', () => {
+    expect(encode(schema, VALUE_ABOVE_MAX_SAFE)).toBe('9007199254740993');
   });
 
-  it('decode number → bigint (from wire)', () => {
-    // Small values may arrive as number from AnyMap
-    expect(decode(schema, 42 as unknown as bigint)).toBe(42n);
+  it('decode decimal string → bigint', () => {
+    expect(decode(schema, '9007199254740993')).toBe(VALUE_ABOVE_MAX_SAFE);
+  });
+
+  it('decode rejects numeric wire values', () => {
+    expect(() => decode(schema, 42)).toThrow(/int64|string/i);
   });
 
   it('full round-trip preserves value above 2^53', () => {
     const wire = encode(schema, VALUE_ABOVE_MAX_SAFE);
-    const back = decode(schema, wire as bigint);
+    expect(typeof wire).toBe('string');
+    const back = decode(schema, wire);
     expect(back).toBe(VALUE_ABOVE_MAX_SAFE);
   });
 

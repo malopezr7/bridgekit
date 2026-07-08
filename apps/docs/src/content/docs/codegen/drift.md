@@ -31,7 +31,6 @@ The lock carries a `platform` field recording which emitter produced it:
 
 ```jsonc
 {
-  "descriptorVersion": 1,
   "platform": "kotlin",       // or "swift"
   "contracts": {
     "example.host": {

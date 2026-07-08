@@ -205,7 +205,7 @@ export function assembleSwiftContractFile(parts: {
     lines.push(`private enum ${className}Codecs {`);
     for (const fn of encodeDecodeFns) {
       // indent each line by 4 spaces
-      for (const l of fn.split('\n')) lines.push(`    ${l}`);
+      for (const l of fn.split('\n')) lines.push(l === '' ? '' : `    ${l}`);
       lines.push('');
     }
     lines.push('}');

@@ -58,7 +58,7 @@ export interface ContractFileParts {
 function indentBlock(fragment: string, pad: string): string {
   return fragment
     .split('\n')
-    .map((l) => `${pad}${l}`)
+    .map((l) => (l === '' ? '' : `${pad}${l}`))
     .join('\n');
 }
 
