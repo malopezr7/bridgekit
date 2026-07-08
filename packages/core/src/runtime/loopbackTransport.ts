@@ -181,6 +181,11 @@ export class LoopbackTransport implements BridgeTransport {
   // ---- stateWrite ----------------------------------------------------------
 
   stateWrite(env: CallEnvelope): ResultEnvelope {
+    const dispatcher = this._dispatcher;
+    if (dispatcher) {
+      const result = dispatcher.onStateWrite(env);
+      if (!result.ok) return result;
+    }
     const key = `${env.contractId}|${JSON.stringify(env.scope)}|${env.member}`;
     this._stateStore.set(key, env.payload);
     // Notify all observers for this key
@@ -193,8 +198,6 @@ export class LoopbackTransport implements BridgeTransport {
         entry.onChange(env.payload);
       }
     }
-    // Also route through dispatcher for JS-provided contracts
-    this._dispatcher?.onStateWrite(env);
     return { ok: true };
   }
 
