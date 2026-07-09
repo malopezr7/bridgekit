@@ -3,6 +3,7 @@
 import type { RawContractToken } from '../load.js';
 import { assembleContractFile, type EmitResult } from './assemble.js';
 import { CodecWalker, schemaNeedsCodec } from './codec.js';
+import { buildStateFlowDecodeExpr, buildStateFlowEncodeExpr } from './kotlin-state-codec.js';
 import {
   type ArrayNode,
   contractIdToClassName,
@@ -355,9 +356,22 @@ export function emitKotlinContract(token: RawContractToken, kotlinPackage: strin
       `    val ${kName}: kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<${valueResult.typeName}>>`,
     );
 
-    outboundImpls.push(
-      `            override val ${kName}: kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<${valueResult.typeName}>>\n                get() = @Suppress("UNCHECKED_CAST") caller.state("${memberName}") as kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<${valueResult.typeName}>>`,
-    );
+    if (schemaNeedsCodec(desc.value)) {
+      outboundImpls.push(
+        `            override val ${kName}: kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<${valueResult.typeName}>>\n                get() = ${buildStateFlowDecodeExpr(
+          memberName,
+          desc.value,
+          valueResult.typeName,
+          toPascalCase(kName),
+          `${kName}.value`,
+          walker,
+        )}`,
+      );
+    } else {
+      outboundImpls.push(
+        `            override val ${kName}: kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<${valueResult.typeName}>>\n                get() = @Suppress("UNCHECKED_CAST") caller.state("${memberName}") as kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<${valueResult.typeName}>>`,
+      );
+    }
   }
 
   // ---- encode/decode for params objects (covers fire/Void params too) ----
@@ -419,8 +433,19 @@ export function emitKotlinContract(token: RawContractToken, kotlinPackage: strin
     const desc = rawDesc as StateDescRaw;
     return `                "${memberName}" to ${kotlinLiteral(desc.initial)},`;
   });
-  const stateFlowEntries = Object.keys(descriptor.state).map((memberName) => {
+  const stateFlowEntries = Object.entries(descriptor.state).map(([memberName, rawDesc]) => {
+    const desc = rawDesc as StateDescRaw;
     const kName = toKotlinMemberName(memberName);
+    const valueResult = typeEmitter.emit(desc.value, toPascalCase(kName));
+    if (schemaNeedsCodec(desc.value)) {
+      return `                    "${memberName}" to ${buildStateFlowEncodeExpr(
+        `impl.${kName}`,
+        desc.value,
+        valueResult.typeName,
+        toPascalCase(kName),
+        walker,
+      )}`;
+    }
     return `                    "${memberName}" to @Suppress("UNCHECKED_CAST") impl.${kName} as kotlinx.coroutines.flow.StateFlow<Any?>`;
   });
 

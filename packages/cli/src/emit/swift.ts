@@ -599,9 +599,16 @@ export function emitSwiftContract(token: RawContractToken, _contractPackage: str
 
     // stateFlowEntries are emitted inside the INBOUND adapter (no `caller`).
     // Bridge the provider's AsyncStream<T> to AsyncStream<Any?> via a wrapping stream.
-    stateFlowEntries.push(
-      `${JSON.stringify(memberName)}: AsyncStream<Any?> { cont in Task { for await v in self.impl.${swiftName} { cont.yield(v) }; cont.finish() } }`,
-    );
+    if (schemaNeedsCodec(desc.value)) {
+      const encodeStateValue = walker.encodeExpr('v', desc.value, toPascalCase(swiftName));
+      stateFlowEntries.push(
+        `${JSON.stringify(memberName)}: AsyncStream<Any?> { cont in Task { for await v in self.impl.${swiftName} { cont.yield(${encodeStateValue}) }; cont.finish() } }`,
+      );
+    } else {
+      stateFlowEntries.push(
+        `${JSON.stringify(memberName)}: AsyncStream<Any?> { cont in Task { for await v in self.impl.${swiftName} { cont.yield(v) }; cont.finish() } }`,
+      );
+    }
 
     // caller.state() yields AsyncStream<BridgeValue<Any?>>. AsyncStream is an
     // invariant generic struct, so `as! AsyncStream<BridgeValue<T>>` traps at
