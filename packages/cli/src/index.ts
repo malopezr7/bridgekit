@@ -6,14 +6,14 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { glob } from 'node:fs/promises';
 import path from 'node:path';
-import { checkDrift, listBridgeKitGeneratedFiles } from './check.js';
+import { checkDrift, listPrunableGeneratedOrphans } from './check.js';
 import { CliError } from './cliError.js';
 import { resolveContractNames } from './emit/assemble.js';
 import { contractIdToPackage, emitKotlinContract } from './emit/kotlin.js';
 import { emitSwiftContract } from './emit/swift.js';
 import type { RawContractToken } from './load.js';
 import { loadContractsFromFile } from './load.js';
-import { buildLock, writeLock } from './lock.js';
+import { buildLock, type LockFile, readLock, writeLock } from './lock.js';
 import { dim, ok, warn } from './theme.js';
 
 // ---- help ------------------------------------------------------------------
@@ -121,6 +121,41 @@ async function findContractFiles(pattern: string, cwd: string): Promise<string[]
 
 // ---- generate --------------------------------------------------------------
 
+function generatedFileNamesFromLock(
+  lock: LockFile | null,
+  platform: 'kotlin' | 'swift',
+): Set<string> {
+  if (!lock) return new Set();
+
+  try {
+    const contractIds = Object.keys(lock.contracts).sort();
+    const contractNames = resolveContractNames(contractIds);
+    const extension = (lock.platform ?? platform) === 'swift' ? 'swift' : 'kt';
+    return new Set(
+      contractIds.map((contractId) => `${contractNames.get(contractId)}Contract.${extension}`),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function pruneGeneratedOrphans(
+  directory: string,
+  previousGeneratedFiles: ReadonlySet<string>,
+  currentGeneratedFiles: ReadonlySet<string>,
+): string[] {
+  const removed: string[] = [];
+  for (const fileName of listPrunableGeneratedOrphans(
+    directory,
+    previousGeneratedFiles,
+    currentGeneratedFiles,
+  )) {
+    rmSync(path.join(directory, fileName));
+    removed.push(fileName);
+  }
+  return removed;
+}
+
 async function runGenerate(opts: BridgekitOptions, cwd: string): Promise<number> {
   // Validate --into if provided
   if (opts.into !== undefined) {
@@ -174,11 +209,13 @@ async function runGenerate(opts: BridgekitOptions, cwd: string): Promise<number>
 
   // Build lock
   const lock = buildLock(tokens, opts.platform);
+  const outDir = path.resolve(cwd, opts.outDir);
+  const previousLock = readLock(outDir);
+  const previousGeneratedFiles = generatedFileNamesFromLock(previousLock, opts.platform);
 
   // --check mode: diff and exit
   if (opts.check) {
-    const outDir = path.resolve(cwd, opts.outDir);
-    const diffs = checkDrift(emitResults, lock, outDir);
+    const diffs = checkDrift(emitResults, lock, outDir, previousGeneratedFiles);
     if (diffs.length === 0) {
       process.stdout.write(ok('No drift detected. Contract bindings are up to date.\n'));
       return 0;
@@ -193,7 +230,6 @@ async function runGenerate(opts: BridgekitOptions, cwd: string): Promise<number>
   }
 
   // Write mode
-  const outDir = path.resolve(cwd, opts.outDir);
   mkdirSync(outDir, { recursive: true });
 
   for (const result of emitResults) {
@@ -203,9 +239,7 @@ async function runGenerate(opts: BridgekitOptions, cwd: string): Promise<number>
   }
 
   const expectedFiles = new Set(emitResults.map((result) => result.fileName));
-  for (const fileName of listBridgeKitGeneratedFiles(outDir)) {
-    if (expectedFiles.has(fileName)) continue;
-    rmSync(path.join(outDir, fileName));
+  for (const fileName of pruneGeneratedOrphans(outDir, previousGeneratedFiles, expectedFiles)) {
     process.stdout.write(ok(`  ✔ removed orphan ${fileName}\n`));
   }
 
@@ -220,6 +254,9 @@ async function runGenerate(opts: BridgekitOptions, cwd: string): Promise<number>
     const files = readdirSync(outDir);
     for (const f of files) {
       cpSync(path.join(outDir, f), path.join(intoPath, f));
+    }
+    for (const fileName of pruneGeneratedOrphans(intoPath, previousGeneratedFiles, expectedFiles)) {
+      process.stdout.write(ok(`  ✔ removed mirror orphan ${fileName}\n`));
     }
     process.stdout.write(ok(`Mirrored ${files.length} file(s) to ${dim(intoPath)}\n`));
   }

@@ -31,6 +31,19 @@ export function listBridgeKitGeneratedFiles(outDir: string): string[] {
     .sort();
 }
 
+export function listPrunableGeneratedOrphans(
+  outDir: string,
+  previousGeneratedFiles: ReadonlySet<string>,
+  currentGeneratedFiles: ReadonlySet<string>,
+): string[] {
+  if (!existsSync(outDir)) return [];
+
+  return [...previousGeneratedFiles]
+    .filter((fileName) => !currentGeneratedFiles.has(fileName))
+    .filter((fileName) => isBridgeKitGeneratedFile(path.join(outDir, fileName)))
+    .sort();
+}
+
 /**
  * Compare freshly generated output against the existing out-dir.
  * Returns list of diffs (empty = no drift).
@@ -39,6 +52,7 @@ export function checkDrift(
   emitResults: EmitResult[],
   newLock: LockFile,
   outDir: string,
+  previousGeneratedFiles: ReadonlySet<string>,
 ): CheckDiff[] {
   const diffs: CheckDiff[] = [];
 
@@ -56,10 +70,12 @@ export function checkDrift(
   }
 
   const expectedFiles = new Set(emitResults.map((result) => result.fileName));
-  for (const fileName of listBridgeKitGeneratedFiles(outDir)) {
-    if (!expectedFiles.has(fileName)) {
-      diffs.push({ file: fileName, reason: 'extra generated file in out-dir' });
-    }
+  for (const fileName of listPrunableGeneratedOrphans(
+    outDir,
+    previousGeneratedFiles,
+    expectedFiles,
+  )) {
+    diffs.push({ file: fileName, reason: 'extra generated file in out-dir' });
   }
 
   // Check lock
