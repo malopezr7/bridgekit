@@ -1,6 +1,8 @@
 // emit/swift-types.ts — Swift type emitter.
 // Kept < 500 LOC per D9 split rule.
 
+import { type AnySchema, encode } from '@malopezr7/bridgekit/contract';
+
 import {
   type ArrayNode,
   type EnumNode,
@@ -376,18 +378,5 @@ function swiftLiteral(value: unknown): string {
 }
 
 export function swiftLiteralForSchema(value: unknown, schema: SchemaNode): string {
-  if (value === null || value === undefined) return 'nil';
-  if (schema.kind === 'optional' || schema.kind === 'nullable') {
-    return swiftLiteralForSchema(value, (schema as OptionalNode | NullableNode).inner);
-  }
-  if (schema.kind === 'int64' && (typeof value === 'number' || typeof value === 'bigint')) {
-    return swiftStringLiteral(String(value));
-  }
-  if (schema.kind === 'date' && value instanceof Date && Number.isFinite(value.getTime())) {
-    return String(value.getTime());
-  }
-  if (schema.kind === 'binary' && value instanceof Uint8Array) {
-    return swiftStringLiteral(Buffer.from(value).toString('base64'));
-  }
-  return swiftLiteral(value);
+  return swiftLiteral(encode(schema as AnySchema, value));
 }

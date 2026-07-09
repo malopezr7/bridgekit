@@ -1,6 +1,6 @@
 // emit/types.ts — schema node shapes, identifier helpers, Kotlin type emitter.
 
-import { stableHash } from '@malopezr7/bridgekit/contract';
+import { type AnySchema, encode, stableHash } from '@malopezr7/bridgekit/contract';
 
 import { CliError } from '../cliError.js';
 
@@ -516,18 +516,5 @@ export function kotlinLiteral(value: unknown): string {
 }
 
 export function kotlinLiteralForSchema(value: unknown, schema: SchemaNode): string {
-  if (value === null || value === undefined) return 'null';
-  if (schema.kind === 'optional' || schema.kind === 'nullable') {
-    return kotlinLiteralForSchema(value, (schema as OptionalNode | NullableNode).inner);
-  }
-  if (schema.kind === 'int64' && (typeof value === 'number' || typeof value === 'bigint')) {
-    return kotlinStringLiteral(String(value));
-  }
-  if (schema.kind === 'date' && value instanceof Date && Number.isFinite(value.getTime())) {
-    return `${value.getTime()}L`;
-  }
-  if (schema.kind === 'binary' && value instanceof Uint8Array) {
-    return kotlinStringLiteral(Buffer.from(value).toString('base64'));
-  }
-  return kotlinLiteral(value);
+  return kotlinLiteral(encode(schema as AnySchema, value));
 }

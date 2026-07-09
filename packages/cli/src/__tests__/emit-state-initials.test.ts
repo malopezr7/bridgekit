@@ -20,6 +20,24 @@ const token: RawContractToken = {
         value: { kind: 'binary' },
         initial: new Uint8Array([0, 1, 2, 254, 255]),
       },
+      profile: {
+        kind: 'state',
+        value: {
+          kind: 'object',
+          fields: {
+            updatedAt: { kind: 'date' },
+            status: {
+              kind: 'union',
+              discriminant: 'kind',
+              variants: { active: { kind: 'object', fields: { since: { kind: 'date' } } } },
+            },
+          },
+        },
+        initial: {
+          updatedAt: new Date('2024-03-04T05:06:07.890Z'),
+          status: { kind: 'active', since: new Date('2024-03-05T06:07:08.000Z') },
+        },
+      },
     },
   },
   hash: '12345678',
@@ -30,8 +48,11 @@ describe('generated state initial wire literals', () => {
     const source = emitKotlinContract(token, 'com.bridgekit.generated').content;
 
     expect(source).toContain('"large" to "9007199254740993"');
-    expect(source).toContain('"updatedAt" to 1709528767890L');
+    expect(source).toContain('"updatedAt" to 1709528767890');
     expect(source).toContain('"payload" to "AAEC/v8="');
+    expect(source).toContain(
+      '"profile" to mapOf("updatedAt" to 1709528767890, "status" to mapOf("kind" to "active", "since" to 1709618828000))',
+    );
   });
 
   it('emits Swift state initials as int64 strings, epoch milliseconds, and base64', () => {
@@ -40,5 +61,8 @@ describe('generated state initial wire literals', () => {
     expect(source).toContain('"large": "9007199254740993"');
     expect(source).toContain('"updatedAt": 1709528767890');
     expect(source).toContain('"payload": "AAEC/v8="');
+    expect(source).toContain(
+      '"profile": ["updatedAt": 1709528767890, "status": ["kind": "active", "since": 1709618828000]]',
+    );
   });
 });

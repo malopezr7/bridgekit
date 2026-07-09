@@ -49,7 +49,7 @@ describe('emit escaping helpers', () => {
     const date = new Date('2024-03-04T05:06:07.890Z');
     const bytes = new Uint8Array([0, 1, 2, 254, 255]);
 
-    expect(kotlinLiteralForSchema(date, dateSchema)).toBe('1709528767890L');
+    expect(kotlinLiteralForSchema(date, dateSchema)).toBe('1709528767890');
     expect(swiftLiteralForSchema(date, dateSchema)).toBe('1709528767890');
     expect(kotlinLiteralForSchema(bytes, binarySchema)).toBe('"AAEC/v8="');
     expect(swiftLiteralForSchema(bytes, binarySchema)).toBe('"AAEC/v8="');
