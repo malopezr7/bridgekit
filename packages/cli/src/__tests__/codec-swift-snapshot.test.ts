@@ -61,7 +61,9 @@ describe('Swift codec snapshots', () => {
   it('cli_codec_snapshots_emit_int64_string_kotlin_swift emits decimal string int64 boundaries', () => {
     const swift = emitInt64Contract();
 
-    expect(swift).toContain('case "getCounter":\n            return String(try await impl.getCounter())');
+    expect(swift).toContain(
+      'case "getCounter":\n            return String(try await impl.getCounter())',
+    );
     expect(swift).toContain(
       'return try Int64((result as? String) ?? bridgeKitThrow(field: "result", expectedType: "Int64")) ?? bridgeKitThrow(field: "result", expectedType: "Int64")',
     );

@@ -55,7 +55,9 @@ describe('Kotlin codec snapshots', () => {
   it('cli_codec_snapshots_emit_int64_string_kotlin_swift emits decimal string int64 boundaries', () => {
     const kotlin = emitInt64Contract();
 
-    expect(kotlin).toContain('"getCounter" -> {\n                    impl.getCounter().toString()\n                }');
+    expect(kotlin).toContain(
+      '"getCounter" -> {\n                    impl.getCounter().toString()\n                }',
+    );
     expect(kotlin).toContain(
       'return when (val v = result) { is String -> v.toLong(); else -> throw BridgeKitDecodeException("result", "Long") }',
     );

@@ -23,7 +23,7 @@
     "cli"
   ],
   "engines": {
-    "node": ">=22.6.0"
+    "node": ">=22.15.0"
   },
   "bin": {
     "bridgekit": "./dist/index.js"
@@ -39,6 +39,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "check": "biome check src/",
     "prepack": "tsc",
     "test": "jest --config ./jest.config.cjs",
     "test:codec": "jest --config ./jest.config.cjs --testPathPattern=codec --passWithNoTests",

@@ -118,7 +118,7 @@ function readOptionValue(args: string[], index: number, option: string): string 
 async function findContractFiles(pattern: string, cwd: string): Promise<string[]> {
   const files: string[] = [];
 
-  // Use Node 26 native fs.glob
+  // Use native fs.glob available throughout the supported Node range.
   for await (const entry of glob(pattern, {
     cwd,
     exclude: (f) => {
