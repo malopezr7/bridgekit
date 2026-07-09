@@ -122,6 +122,39 @@ export const Impure = defineContract('impure.nodenext', {
 void marker;
 `);
   });
+
+  it('allows import-like text inside comments and string literals', async () => {
+    const workspace = mkdtempSync(path.join(cliRoot, 'build/load-purity-comment-'));
+    const contractPath = path.join(workspace, 'comment.contract.ts');
+    try {
+      writeFileSync(
+        contractPath,
+        `import { defineContract, t } from '@malopezr7/bridgekit/contract';
+
+// Documentation note: do not write import(x) in real code.
+const guidance = 'avoid require(x) in contract files';
+
+export const CommentSafe = defineContract('comment.safe', {
+  methods: {
+    ping: t.query(t.object({ value: t.string() }), t.string()),
+  },
+});
+void guidance;
+`,
+        'utf8',
+      );
+
+      await expect(loadContractsFromFile(contractPath)).resolves.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            descriptor: expect.objectContaining({ id: 'comment.safe' }),
+          }),
+        ]),
+      );
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('missing CLI flag values', () => {

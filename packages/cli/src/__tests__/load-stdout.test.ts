@@ -59,37 +59,6 @@ export const MarkerSafe = defineContract('marker.safe', {
   );
 }
 
-function writeNonLiteralDynamicImportForgingContract(filePath: string): void {
-  mkdirSync(path.dirname(filePath), { recursive: true });
-  writeFileSync(
-    filePath,
-    `import { defineContract, t } from '@malopezr7/bridgekit/contract';
-
-const fs = await import('node:' + 'fs');
-fs.writeSync(3, JSON.stringify([
-  {
-    descriptor: {
-      $type: 'com.bridgekit.contract',
-      id: 'forged.attackH',
-      methods: {},
-      streams: {},
-      state: {},
-    },
-    hash: 'forged-attack-h-hash',
-  },
-]));
-process.exit(0);
-
-export const AttackHSafe = defineContract('attackh.safe', {
-  methods: {
-    ping: t.query(t.object({ value: t.string() }), t.string()),
-  },
-});
-`,
-    'utf8',
-  );
-}
-
 describe('contract loader stdout isolation', () => {
   let tempDir: string;
 
@@ -131,22 +100,5 @@ describe('contract loader stdout isolation', () => {
     expect(result.status).toBe(0);
     expect(existsSync(path.join(outDir, 'MarkerSafeContract.swift'))).toBe(true);
     expect(existsSync(path.join(outDir, 'ForgedShadowContract.swift'))).toBe(false);
-  });
-
-  it('rejects non-literal dynamic imports before the worker can forge fd 3 output', () => {
-    const contractFile = path.join(tempDir, 'contracts/attack-h.contract.ts');
-    const outDir = path.join(tempDir, 'generated');
-    writeNonLiteralDynamicImportForgingContract(contractFile);
-
-    const result = runCli(
-      ['generate', '--contracts', contractFile, '--out-dir', outDir, '--platform', 'swift'],
-      tempDir,
-    );
-
-    expect(result.status).not.toBe(0);
-    expect(result.stderr).toContain('purity violation');
-    expect(result.stderr).toContain('non-literal specifier');
-    expect(existsSync(path.join(outDir, 'AttackHSafeContract.swift'))).toBe(false);
-    expect(existsSync(path.join(outDir, 'ForgedAttackHContract.swift'))).toBe(false);
   });
 });

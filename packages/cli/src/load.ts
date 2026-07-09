@@ -37,6 +37,19 @@ export interface RawContractToken {
 const ALLOWED_SPECIFIER_REGEX = /^@malopezr7\/bridgekit\/contract/;
 
 /**
+ * Loader threat model:
+ * - CLI-08: accidental contract stdout/stderr noise cannot corrupt codegen because
+ *   token JSON travels on out-of-band fd 3, not stdout.
+ * - CLI-09: side-effecting local imports are blocked by rejecting relative import,
+ *   export, dynamic import(), and require() specifiers before worker execution.
+ * - Non-goal: maliciously-authored contract files. This loader executes the
+ *   contract with import(), so contract code is arbitrary code. A malicious
+ *   contract can reach raw file descriptors through Node internals (for example
+ *   process.binding('fs')) and forge fd-3 output without any import/require token.
+ *   Defending that boundary requires a real worker sandbox and is future work.
+ */
+
+/**
  * Scan import statements in a .ts file and fail if any import is not:
  * - '@malopezr7/bridgekit/contract'
  *
@@ -49,13 +62,6 @@ function checkFilePurity(filePath: string): string[] {
     source = readFileSync(filePath, 'utf8');
   } catch {
     return [`${filePath}: cannot read file`];
-  }
-
-  for (const match of findNonLiteralDynamicSpecifierCalls(source)) {
-    const line = lineNumberForOffset(source, match.index);
-    violations.push(
-      `${filePath}:${line}: purity violation — dynamic import()/require() with a non-literal specifier is not allowed`,
-    );
   }
 
   for (const match of findImportSpecifiers(source)) {
@@ -93,80 +99,6 @@ function findImportSpecifiers(source: string): Array<{ specifier: string; index:
   }
 
   return matches;
-}
-
-function findNonLiteralDynamicSpecifierCalls(source: string): Array<{ index: number }> {
-  const matches: Array<{ index: number }> = [];
-  const callPattern = /\b(?:import|require)\s*\(/g;
-
-  for (const match of source.matchAll(callPattern)) {
-    const start = match.index ?? 0;
-    const openParenIndex = source.indexOf('(', start);
-    const closeParenIndex = findClosingParen(source, openParenIndex);
-    if (closeParenIndex === -1) {
-      matches.push({ index: start });
-      continue;
-    }
-
-    const argument = source.slice(openParenIndex + 1, closeParenIndex);
-    if (!isCleanStringLiteralArgument(argument)) {
-      matches.push({ index: start });
-    }
-  }
-
-  return matches;
-}
-
-function findClosingParen(source: string, openParenIndex: number): number {
-  let depth = 0;
-  let quote: 'single' | 'double' | 'template' | undefined;
-  let escaped = false;
-
-  for (let i = openParenIndex; i < source.length; i++) {
-    const char = source[i];
-
-    if (quote) {
-      if (escaped) {
-        escaped = false;
-      } else if (char === '\\') {
-        escaped = true;
-      } else if (
-        (quote === 'single' && char === "'") ||
-        (quote === 'double' && char === '"') ||
-        (quote === 'template' && char === '`')
-      ) {
-        quote = undefined;
-      }
-      continue;
-    }
-
-    if (char === "'") {
-      quote = 'single';
-      continue;
-    }
-    if (char === '"') {
-      quote = 'double';
-      continue;
-    }
-    if (char === '`') {
-      quote = 'template';
-      continue;
-    }
-    if (char === '(') {
-      depth++;
-      continue;
-    }
-    if (char === ')') {
-      depth--;
-      if (depth === 0) return i;
-    }
-  }
-
-  return -1;
-}
-
-function isCleanStringLiteralArgument(argument: string): boolean {
-  return /^\s*(['"])(?:\\[\s\S]|(?!\1)[^\\\r\n])*\1\s*$/.test(argument);
 }
 
 function lineNumberForOffset(source: string, offset: number): number {
