@@ -10,7 +10,8 @@ import {
   contractIdToPackage,
   hashMember,
   KotlinTypeEmitter,
-  kotlinLiteral,
+  kotlinLiteralForSchema,
+  kotlinStringLiteral,
   type NullableNode,
   type ObjectNode,
   type OneOfNode,
@@ -171,13 +172,16 @@ export function emitKotlinContract(
   for (const [memberName, rawDesc] of Object.entries(descriptor.methods)) {
     const desc = rawDesc as MethodDescRaw;
     const kName = toKotlinMemberName(memberName);
+    const memberCtx = toPascalCase(memberName);
 
-    memberHashPairs.push(`"methods.${memberName}" to "${hashMember(rawDesc)}"`);
+    memberHashPairs.push(
+      `${kotlinStringLiteral(`methods.${memberName}`)} to ${kotlinStringLiteral(hashMember(rawDesc))}`,
+    );
 
     if (desc.kind === 'fire') {
       let paramsType = '';
       if (desc.params) {
-        const dataClassName = `${toPascalCase(kName)}Params`;
+        const dataClassName = `${memberCtx}Params`;
         const paramsResult = typeEmitter.emit(desc.params, dataClassName);
         paramsType = paramsResult.typeName;
         methodParamsTypes.set(memberName, paramsType);
@@ -192,7 +196,7 @@ export function emitKotlinContract(
       if (paramsType) {
         inboundImpls.push(
           [
-            `            "${memberName}" -> {`,
+            `            ${kotlinStringLiteral(memberName)} -> {`,
             `                val decoded = ${className}Codecs.decode${paramsType}(payload ?: emptyMap<String, Any?>())`,
             `                impl.${kName}(decoded)`,
             `                null`,
@@ -200,7 +204,11 @@ export function emitKotlinContract(
           ].join('\n'),
         );
       } else {
-        inboundImpls.push([`            "${memberName}" -> { impl.${kName}(); null }`].join('\n'));
+        inboundImpls.push(
+          [`            ${kotlinStringLiteral(memberName)} -> { impl.${kName}(); null }`].join(
+            '\n',
+          ),
+        );
       }
 
       // outbound (native consumes a JS-provided Void → fire-and-forget, never sync)
@@ -208,13 +216,15 @@ export function emitKotlinContract(
         outboundImpls.push(
           [
             `            override fun ${kName}(params: ${paramsType}) {`,
-            `                caller.fire("${memberName}", ${className}Codecs.encode${paramsType}(params))`,
+            `                caller.fire(${kotlinStringLiteral(memberName)}, ${className}Codecs.encode${paramsType}(params))`,
             `            }`,
           ].join('\n'),
         );
       } else {
         outboundImpls.push(
-          [`            override fun ${kName}() { caller.fire("${memberName}", null) }`].join('\n'),
+          [
+            `            override fun ${kName}() { caller.fire(${kotlinStringLiteral(memberName)}, null) }`,
+          ].join('\n'),
         );
       }
     } else if (desc.kind === 'query' || desc.kind === 'querySync') {
@@ -222,13 +232,13 @@ export function emitKotlinContract(
       let resultType = 'Unit';
 
       if (desc.params) {
-        const dataClassName = `${toPascalCase(kName)}Params`;
+        const dataClassName = `${memberCtx}Params`;
         const paramsResult = typeEmitter.emit(desc.params, dataClassName);
         paramsType = paramsResult.typeName;
         methodParamsTypes.set(memberName, paramsType);
       }
 
-      const resultCtx = `${toPascalCase(kName)}Result`;
+      const resultCtx = `${memberCtx}Result`;
       if (desc.result) {
         const res = typeEmitter.emit(desc.result, resultCtx);
         resultType = res.typeName;
@@ -263,7 +273,7 @@ export function emitKotlinContract(
       if (desc.kind === 'querySync') {
         inboundImpls.push(
           [
-            `            "${memberName}" -> {`,
+            `            ${kotlinStringLiteral(memberName)} -> {`,
             paramsType
               ? `                val decoded = ${className}Codecs.decode${paramsType}(payload ?: emptyMap<String, Any?>())`
               : '',
@@ -276,7 +286,7 @@ export function emitKotlinContract(
         outboundImpls.push(
           [
             `            override fun ${kName}${paramSig}: ${resultType} {`,
-            `                val result = caller.${invokeCall}("${memberName}", ${encodeParams})`,
+            `                val result = caller.${invokeCall}(${kotlinStringLiteral(memberName)}, ${encodeParams})`,
             ...returnLines,
             `            }`,
           ].join('\n'),
@@ -284,7 +294,7 @@ export function emitKotlinContract(
       } else {
         inboundImpls.push(
           [
-            `            "${memberName}" -> {`,
+            `            ${kotlinStringLiteral(memberName)} -> {`,
             paramsType
               ? `                val decoded = ${className}Codecs.decode${paramsType}(payload ?: emptyMap<String, Any?>())`
               : '',
@@ -297,7 +307,7 @@ export function emitKotlinContract(
         outboundImpls.push(
           [
             `            override suspend fun ${kName}${paramSig}: ${resultType} {`,
-            `                val result = caller.${invokeCall}("${memberName}", ${encodeParams})`,
+            `                val result = caller.${invokeCall}(${kotlinStringLiteral(memberName)}, ${encodeParams})`,
             ...returnLines,
             `            }`,
           ].join('\n'),
@@ -314,15 +324,18 @@ export function emitKotlinContract(
   for (const [memberName, rawDesc] of Object.entries(descriptor.streams)) {
     const desc = rawDesc as StreamDescRaw;
     const kName = toKotlinMemberName(memberName);
-    const valueResult = typeEmitter.emit(desc.value, `${toPascalCase(kName)}Value`);
+    const memberCtx = toPascalCase(memberName);
+    const valueResult = typeEmitter.emit(desc.value, `${memberCtx}Value`);
     const flowType = `kotlinx.coroutines.flow.Flow<${valueResult.typeName}>`;
 
-    memberHashPairs.push(`"streams.${memberName}" to "${hashMember(rawDesc)}"`);
+    memberHashPairs.push(
+      `${kotlinStringLiteral(`streams.${memberName}`)} to ${kotlinStringLiteral(hashMember(rawDesc))}`,
+    );
 
     // emit typed params when desc.params is present
     let streamParamsType = '';
     if (desc.params) {
-      const dataClassName = `${toPascalCase(kName)}Params`;
+      const dataClassName = `${memberCtx}Params`;
       const paramsResult = typeEmitter.emit(desc.params, dataClassName);
       streamParamsType = paramsResult.typeName;
       streamParamsTypes.set(memberName, streamParamsType);
@@ -338,15 +351,15 @@ export function emitKotlinContract(
       ? `${className}Codecs.encode${streamParamsType}(params)`
       : 'null';
 
-    const valueCtx = `${toPascalCase(kName)}Value`;
+    const valueCtx = `${memberCtx}Value`;
     if (schemaNeedsCodec(desc.value)) {
       const decodeItem = walker.decodeExpr('it', desc.value, valueCtx, `${kName}.value`);
       outboundImpls.push(
-        `            override fun ${kName}${paramSig}: ${flowType} =\n                caller.stream("${memberName}", ${encodeStreamParams}).map { @Suppress("UNCHECKED_CAST") ${decodeItem} }`,
+        `            override fun ${kName}${paramSig}: ${flowType} =\n                caller.stream(${kotlinStringLiteral(memberName)}, ${encodeStreamParams}).map { @Suppress("UNCHECKED_CAST") ${decodeItem} }`,
       );
     } else {
       outboundImpls.push(
-        `            override fun ${kName}${paramSig}: ${flowType} =\n                @Suppress("UNCHECKED_CAST") caller.stream("${memberName}", ${encodeStreamParams}) as ${flowType}`,
+        `            override fun ${kName}${paramSig}: ${flowType} =\n                @Suppress("UNCHECKED_CAST") caller.stream(${kotlinStringLiteral(memberName)}, ${encodeStreamParams}) as ${flowType}`,
       );
     }
   }
@@ -355,9 +368,12 @@ export function emitKotlinContract(
   for (const [memberName, rawDesc] of Object.entries(descriptor.state)) {
     const desc = rawDesc as StateDescRaw;
     const kName = toKotlinMemberName(memberName);
-    const valueResult = typeEmitter.emit(desc.value, toPascalCase(kName));
+    const memberCtx = toPascalCase(memberName);
+    const valueResult = typeEmitter.emit(desc.value, memberCtx);
 
-    memberHashPairs.push(`"state.${memberName}" to "${hashMember(rawDesc)}"`);
+    memberHashPairs.push(
+      `${kotlinStringLiteral(`state.${memberName}`)} to ${kotlinStringLiteral(hashMember(rawDesc))}`,
+    );
 
     providerMethods.push(
       `    val ${kName}: kotlinx.coroutines.flow.MutableStateFlow<${valueResult.typeName}>`,
@@ -372,14 +388,14 @@ export function emitKotlinContract(
           memberName,
           desc.value,
           valueResult.typeName,
-          toPascalCase(kName),
+          memberCtx,
           `${kName}.value`,
           walker,
         )}`,
       );
     } else {
       outboundImpls.push(
-        `            override val ${kName}: kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<${valueResult.typeName}>>\n                get() = @Suppress("UNCHECKED_CAST") caller.state("${memberName}") as kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<${valueResult.typeName}>>`,
+        `            override val ${kName}: kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<${valueResult.typeName}>>\n                get() = @Suppress("UNCHECKED_CAST") caller.state(${kotlinStringLiteral(memberName)}) as kotlinx.coroutines.flow.StateFlow<com.bridgekit.runtime.BridgeValue<${valueResult.typeName}>>`,
       );
     }
   }
@@ -390,13 +406,14 @@ export function emitKotlinContract(
     const desc = rawDesc as MethodDescRaw;
     if (desc.kind !== 'querySync') continue;
     const kName = toKotlinMemberName(memberName);
+    const memberCtx = toPascalCase(memberName);
     const paramsType = methodParamsTypes.get(memberName) ?? '';
-    const resultCtx = `${toPascalCase(kName)}Result`;
+    const resultCtx = `${memberCtx}Result`;
     const implCall = paramsType ? `impl.${kName}(decoded)` : `impl.${kName}()`;
     const resultExpr = desc.result
       ? buildInboundEncodeExpr(desc.result, implCall, resultCtx, walker)
       : implCall;
-    const body = [`            "${memberName}" -> {`];
+    const body = [`            ${kotlinStringLiteral(memberName)} -> {`];
     if (paramsType) {
       body.push(
         `                val decoded = ${className}Codecs.decode${paramsType}(payload ?: emptyMap<String, Any?>())`,
@@ -412,19 +429,20 @@ export function emitKotlinContract(
   for (const [memberName, rawDesc] of Object.entries(descriptor.streams)) {
     const desc = rawDesc as StreamDescRaw;
     const kName = toKotlinMemberName(memberName);
+    const memberCtx = toPascalCase(memberName);
     const streamParamsType = streamParamsTypes.get(memberName) ?? '';
     const callExpr = streamParamsType
       ? `impl.${kName}(${className}Codecs.decode${streamParamsType}(payload ?: emptyMap<String, Any?>()))`
       : `impl.${kName}()`;
-    const valueCtx = `${toPascalCase(kName)}Value`;
+    const valueCtx = `${memberCtx}Value`;
     if (schemaNeedsCodec(desc.value)) {
       const encodeItem = walker.encodeExpr('item', desc.value, valueCtx);
       streamImpls.push(
-        `            "${memberName}" -> @Suppress("UNCHECKED_CAST") ${callExpr}.map { item -> ${encodeItem} as Any? }`,
+        `            ${kotlinStringLiteral(memberName)} -> @Suppress("UNCHECKED_CAST") ${callExpr}.map { item -> ${encodeItem} as Any? }`,
       );
     } else {
       streamImpls.push(
-        `            "${memberName}" -> @Suppress("UNCHECKED_CAST") ${callExpr} as kotlinx.coroutines.flow.Flow<Any?>`,
+        `            ${kotlinStringLiteral(memberName)} -> @Suppress("UNCHECKED_CAST") ${callExpr} as kotlinx.coroutines.flow.Flow<Any?>`,
       );
     }
   }
@@ -432,22 +450,23 @@ export function emitKotlinContract(
   // ---- state initials + stateFlows entries ----
   const stateInitials: string[] = Object.entries(descriptor.state).map(([memberName, rawDesc]) => {
     const desc = rawDesc as StateDescRaw;
-    return `                "${memberName}" to ${kotlinLiteral(desc.initial)},`;
+    return `                ${kotlinStringLiteral(memberName)} to ${kotlinLiteralForSchema(desc.initial, desc.value)},`;
   });
   const stateFlowEntries = Object.entries(descriptor.state).map(([memberName, rawDesc]) => {
     const desc = rawDesc as StateDescRaw;
     const kName = toKotlinMemberName(memberName);
-    const valueResult = typeEmitter.emit(desc.value, toPascalCase(kName));
+    const memberCtx = toPascalCase(memberName);
+    const valueResult = typeEmitter.emit(desc.value, memberCtx);
     if (schemaNeedsCodec(desc.value)) {
-      return `                    "${memberName}" to ${buildStateFlowEncodeExpr(
+      return `                    ${kotlinStringLiteral(memberName)} to ${buildStateFlowEncodeExpr(
         `impl.${kName}`,
         desc.value,
         valueResult.typeName,
-        toPascalCase(kName),
+        memberCtx,
         walker,
       )}`;
     }
-    return `                    "${memberName}" to @Suppress("UNCHECKED_CAST") impl.${kName} as kotlinx.coroutines.flow.StateFlow<Any?>`;
+    return `                    ${kotlinStringLiteral(memberName)} to @Suppress("UNCHECKED_CAST") impl.${kName} as kotlinx.coroutines.flow.StateFlow<Any?>`;
   });
 
   // Flow.map is needed when any stream value is encoded/decoded per item (B6).

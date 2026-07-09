@@ -2,7 +2,12 @@
 // Kept < 500 LOC per D9 split rule.
 
 import { schemaNeedsCodec } from './codec.js';
-import { escapeSwiftIdentifier, type SwiftTypeEmitter } from './swift-types.js';
+import {
+  escapeSwiftIdentifier,
+  type SwiftTypeEmitter,
+  swiftMemberAccess,
+  swiftStringLiteral,
+} from './swift-types.js';
 import {
   type ArrayNode,
   type NullableNode,
@@ -156,7 +161,7 @@ export class SwiftCodecWalker {
   // ---- DECODE ----------------------------------------------------------------
 
   decodeExpr(raw: string, node: SchemaNode, ctxName: string, fieldName = 'value'): string {
-    const fieldLit = JSON.stringify(fieldName);
+    const fieldLit = swiftStringLiteral(fieldName);
     switch (node.kind) {
       case 'string':
         return `try ((${raw} as? String) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "String"))`;
@@ -288,11 +293,11 @@ export class SwiftCodecWalker {
       const escapedAccess = `value.${escapeSwiftIdentifier(fieldName)}`;
       if (isNullable) {
         encodeLines.push(
-          `    if let v = ${escapedAccess} { map[${JSON.stringify(fieldName)}] = ${this.encodeExpr('v', inner, fieldCtx)} }`,
+          `    if let v = ${escapedAccess} { map[${swiftStringLiteral(fieldName)}] = ${this.encodeExpr('v', inner, fieldCtx)} }`,
         );
       } else {
         encodeLines.push(
-          `    map[${JSON.stringify(fieldName)}] = ${this.encodeExpr(escapedAccess, inner, fieldCtx)}`,
+          `    map[${swiftStringLiteral(fieldName)}] = ${this.encodeExpr(escapedAccess, inner, fieldCtx)}`,
         );
       }
     }
@@ -308,10 +313,10 @@ export class SwiftCodecWalker {
       const isNullable = fieldSchema.kind === 'optional' || fieldSchema.kind === 'nullable';
       const inner = isNullable ? (fieldSchema as OptionalNode | NullableNode).inner : fieldSchema;
       const fieldCtx = dataClassName + toPascalCase(fieldName);
-      const rawExpr = `raw[${JSON.stringify(fieldName)}] as Any?`;
+      const rawExpr = `raw[${swiftStringLiteral(fieldName)}] as Any?`;
       const escapedParamName = escapeSwiftIdentifier(fieldName);
       const decodeCall = isNullable
-        ? `raw[${JSON.stringify(fieldName)}] == nil ? nil : (${this.decodeExpr(rawExpr, inner, fieldCtx, fieldName)})`
+        ? `raw[${swiftStringLiteral(fieldName)}] == nil ? nil : (${this.decodeExpr(rawExpr, inner, fieldCtx, fieldName)})`
         : this.decodeExpr(rawExpr, inner, fieldCtx, fieldName);
       fieldDecodes.push(`        ${escapedParamName}: ${decodeCall}`);
     }
@@ -334,18 +339,20 @@ export class SwiftCodecWalker {
       const hasFields = Object.keys(variantSchema.fields).length > 0;
       if (hasFields) {
         const fieldEntries = [
-          `${JSON.stringify(node.discriminant)}: ${JSON.stringify(variantName)}`,
+          `${swiftStringLiteral(node.discriminant)}: ${swiftStringLiteral(variantName)}`,
           ...Object.entries(variantSchema.fields).map(([f, fs]) => {
             const isNullable = fs.kind === 'optional' || fs.kind === 'nullable';
             const inner = isNullable ? (fs as OptionalNode | NullableNode).inner : fs;
             const fieldCtx = enumName + toPascalCase(variantName) + toPascalCase(f);
-            return `${JSON.stringify(f)}: ${this.encodeExpr(`v.${escapeSwiftIdentifier(f)}`, inner, fieldCtx)}`;
+            return `${swiftStringLiteral(f)}: ${this.encodeExpr(`v.${escapeSwiftIdentifier(f)}`, inner, fieldCtx)}`;
           }),
         ];
-        encodeLines.push(`    case .${variantName}(let v): return [${fieldEntries.join(', ')}]`);
+        encodeLines.push(
+          `    case ${swiftMemberAccess(variantName)}(let v): return [${fieldEntries.join(', ')}]`,
+        );
       } else {
         encodeLines.push(
-          `    case .${variantName}: return [${JSON.stringify(node.discriminant)}: ${JSON.stringify(variantName)}]`,
+          `    case ${swiftMemberAccess(variantName)}: return [${swiftStringLiteral(node.discriminant)}: ${swiftStringLiteral(variantName)}]`,
         );
       }
     }
@@ -355,7 +362,9 @@ export class SwiftCodecWalker {
     decodeLines.push(
       `static func decode${enumName}(_ raw: [String: Any?]) throws -> ${enumName} {`,
     );
-    decodeLines.push(`    let disc = raw[${JSON.stringify(node.discriminant)}] as? String ?? ""`);
+    decodeLines.push(
+      `    let disc = raw[${swiftStringLiteral(node.discriminant)}] as? String ?? ""`,
+    );
     decodeLines.push(`    switch disc {`);
     for (const [variantName, variantSchema] of Object.entries(node.variants)) {
       const variantTypeName = `${enumName}${toPascalCase(variantName)}`;
@@ -365,21 +374,23 @@ export class SwiftCodecWalker {
           const isNullable = fs.kind === 'optional' || fs.kind === 'nullable';
           const inner = isNullable ? (fs as OptionalNode | NullableNode).inner : fs;
           const fieldCtx = enumName + toPascalCase(variantName) + toPascalCase(f);
-          const rawExpr = `raw[${JSON.stringify(f)}] as Any?`;
+          const rawExpr = `raw[${swiftStringLiteral(f)}] as Any?`;
           const decodeCall = isNullable
-            ? `raw[${JSON.stringify(f)}] == nil ? nil : (${this.decodeExpr(rawExpr, inner, fieldCtx, f)})`
+            ? `raw[${swiftStringLiteral(f)}] == nil ? nil : (${this.decodeExpr(rawExpr, inner, fieldCtx, f)})`
             : this.decodeExpr(rawExpr, inner, fieldCtx, f);
           return `${escapeSwiftIdentifier(f)}: ${decodeCall}`;
         });
         decodeLines.push(
-          `    case ${JSON.stringify(variantName)}: return .${variantName}(try ${variantTypeName}(${fieldArgs.join(', ')}))`,
+          `    case ${swiftStringLiteral(variantName)}: return ${swiftMemberAccess(variantName)}(try ${variantTypeName}(${fieldArgs.join(', ')}))`,
         );
       } else {
-        decodeLines.push(`    case ${JSON.stringify(variantName)}: return .${variantName}`);
+        decodeLines.push(
+          `    case ${swiftStringLiteral(variantName)}: return ${swiftMemberAccess(variantName)}`,
+        );
       }
     }
     decodeLines.push(
-      `    default: throw BridgeKitDecodeError(field: ${JSON.stringify(node.discriminant)}, expectedType: "${enumName}")`,
+      `    default: throw BridgeKitDecodeError(field: ${swiftStringLiteral(node.discriminant)}, expectedType: "${enumName}")`,
     );
     decodeLines.push(`    }`);
     decodeLines.push(`}`);
@@ -434,7 +445,7 @@ export class SwiftCodecWalker {
       const optCtx = `${typeName}Opt${i}`;
       const encodeV = this.encodeExpr('v', opt, optCtx);
       encodeLines.push(
-        `    case .opt${i}(let v): return ["@t": ${JSON.stringify(tags[i])}, "@v": ${encodeV}]`,
+        `    case .opt${i}(let v): return ["@t": ${swiftStringLiteral(tags[i])}, "@v": ${encodeV}]`,
       );
     }
     encodeLines.push(`    }`);
@@ -452,7 +463,7 @@ export class SwiftCodecWalker {
       const opt = node.options[i];
       const optCtx = `${typeName}Opt${i}`;
       const decodeV = this.decodeExpr('v', opt, optCtx, `opt${i}`);
-      decodeLines.push(`    case ${JSON.stringify(tags[i])}: return .opt${i}(${decodeV})`);
+      decodeLines.push(`    case ${swiftStringLiteral(tags[i])}: return .opt${i}(${decodeV})`);
     }
     decodeLines.push(
       `    default: throw BridgeKitDecodeError(field: "@t=\\(tag)", expectedType: "${typeName}")`,
