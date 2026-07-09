@@ -3,10 +3,10 @@
 // src/index.ts — `bridgekit` entry point
 // ---------------------------------------------------------------------------
 
-import { cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { glob } from 'node:fs/promises';
 import path from 'node:path';
-import { checkDrift } from './check.js';
+import { checkDrift, listBridgeKitGeneratedFiles } from './check.js';
 import { CliError } from './cliError.js';
 import { resolveContractNames } from './emit/assemble.js';
 import { contractIdToPackage, emitKotlinContract } from './emit/kotlin.js';
@@ -133,6 +133,10 @@ async function runGenerate(opts: BridgekitOptions, cwd: string): Promise<number>
   // Find contract files
   const contractFiles = await findContractFiles(opts.contracts, cwd);
   if (contractFiles.length === 0) {
+    if (opts.check) {
+      process.stderr.write(warn(`Contracts glob matched zero contract files: ${opts.contracts}\n`));
+      return 1;
+    }
     process.stderr.write(warn(`No contract files found matching: ${opts.contracts}\n`));
     return 0;
   }
@@ -196,6 +200,13 @@ async function runGenerate(opts: BridgekitOptions, cwd: string): Promise<number>
     const outPath = path.join(outDir, result.fileName);
     writeFileSync(outPath, result.content, 'utf8');
     process.stdout.write(ok(`  ✔ ${result.fileName}\n`));
+  }
+
+  const expectedFiles = new Set(emitResults.map((result) => result.fileName));
+  for (const fileName of listBridgeKitGeneratedFiles(outDir)) {
+    if (expectedFiles.has(fileName)) continue;
+    rmSync(path.join(outDir, fileName));
+    process.stdout.write(ok(`  ✔ removed orphan ${fileName}\n`));
   }
 
   writeLock(outDir, lock);
