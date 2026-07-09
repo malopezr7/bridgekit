@@ -13,6 +13,7 @@
 // ---------------------------------------------------------------------------
 
 import { spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -163,6 +164,12 @@ if (!filePath) {
   process.exit(1);
 }
 
+const tokenNonce = process.env.BRIDGEKIT_TOKEN_NONCE;
+if (!tokenNonce) {
+  process.stderr.write('loader-worker: missing token nonce\\n');
+  process.exit(1);
+}
+
 const fileUrl = pathToFileURL(filePath).href;
 let mod;
 try {
@@ -189,7 +196,7 @@ for (const [, value] of Object.entries(mod)) {
   }
 }
 
-process.stdout.write('${WORKER_TOKEN_MARKER}' + JSON.stringify(tokens) + '\\n');
+process.stdout.write('${WORKER_TOKEN_MARKER}' + tokenNonce + JSON.stringify(tokens) + '\\n');
 `;
 
 // ---- load contracts from a file --------------------------------------------
@@ -220,6 +227,8 @@ export async function loadContractsFromFile(filePath: string): Promise<RawContra
   const workerPath = join(tmpDir, 'worker.mjs');
   try {
     writeFileSync(workerPath, WORKER_SCRIPT, 'utf8');
+    const tokenNonce = randomBytes(16).toString('hex');
+    const tokenMarker = `${WORKER_TOKEN_MARKER}${tokenNonce}`;
 
     // Spawn worker with TS stripping enabled
     const result = spawnSync(
@@ -228,7 +237,7 @@ export async function loadContractsFromFile(filePath: string): Promise<RawContra
       {
         encoding: 'utf8',
         timeout: 30_000,
-        env: { ...process.env },
+        env: { ...process.env, BRIDGEKIT_TOKEN_NONCE: tokenNonce },
       },
     );
 
@@ -241,9 +250,7 @@ export async function loadContractsFromFile(filePath: string): Promise<RawContra
       throw new CliError(`Failed to load contract file ${filePath}:\n${stderr}`);
     }
 
-    const tokenLine = result.stdout
-      .split('\n')
-      .find((line) => line.startsWith(WORKER_TOKEN_MARKER));
+    const tokenLine = result.stdout.split('\n').find((line) => line.startsWith(tokenMarker));
     if (!tokenLine) {
       throw new CliError(
         `Contract loader returned no protocol payload for ${filePath}: ${result.stdout.substring(0, 200)}`,
@@ -252,7 +259,7 @@ export async function loadContractsFromFile(filePath: string): Promise<RawContra
 
     let tokens: unknown[];
     try {
-      tokens = JSON.parse(tokenLine.slice(WORKER_TOKEN_MARKER.length)) as unknown[];
+      tokens = JSON.parse(tokenLine.slice(tokenMarker.length)) as unknown[];
     } catch {
       throw new CliError(
         `Contract loader returned invalid JSON for ${filePath}: ${result.stdout.substring(0, 200)}`,
