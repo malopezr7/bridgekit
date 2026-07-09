@@ -132,6 +132,27 @@ android {
             // React Codegen files
             java.srcDir("${project.buildDir}/generated/source/codegen/java")
         }
+        getByName("test") {
+            val bridgekitGeneratedRuntimeTestDir =
+                rootProject.properties["bridgekitGeneratedRuntimeTestDir"] as? String
+            if (bridgekitGeneratedRuntimeTestDir != null) {
+                val generatedRuntimeTestSourceDir = rootProject.file(bridgekitGeneratedRuntimeTestDir)
+                if (!generatedRuntimeTestSourceDir.exists()) {
+                    throw GradleException(
+                        "bridgekitGeneratedRuntimeTestDir does not exist: $generatedRuntimeTestSourceDir"
+                    )
+                }
+                val generatedRuntimeTestSources = fileTree(generatedRuntimeTestSourceDir) {
+                    include("**/*.kt")
+                }
+                if (generatedRuntimeTestSources.isEmpty) {
+                    throw GradleException(
+                        "bridgekitGeneratedRuntimeTestDir contains no Kotlin fixture sources (*.kt): $generatedRuntimeTestSourceDir"
+                    )
+                }
+                java.srcDir(generatedRuntimeTestSourceDir)
+            }
+        }
     }
 }
 

@@ -9,6 +9,7 @@ const generatedRoot = path.join(cliRoot, 'build/generated-fixtures');
 const goodFixturesDir = path.join(generatedRoot, 'kotlin-good');
 const futureRedFixturesDir = path.join(generatedRoot, 'kotlin-red');
 const knownBadFixturesDir = path.join(generatedRoot, 'kotlin-known-bad');
+const stateRuntimeFixturesDir = path.join(generatedRoot, 'kotlin-state-runtime');
 const androidRoot = path.join(repoRoot, 'apps/example/android');
 const fixturesDir = path.join(cliRoot, 'src/__tests__/fixtures');
 
@@ -59,6 +60,72 @@ function runGradleCompile(fixturesDir: string) {
   return spawnSync(
     './gradlew',
     [':app:compileDebugKotlin', `-PbridgekitGeneratedFixturesDir=${fixturesDir}`],
+    { cwd: androidRoot, encoding: 'utf8', timeout: 15 * 60_000 },
+  );
+}
+
+function writeKotlinStateRoundTripTest(fixturesDir: string): void {
+  writeFileSync(
+    path.join(fixturesDir, 'CompileStateCompoundRuntimeTest.kt'),
+    `package com.bridgekit.generated.fixtures
+
+import com.bridgekit.runtime.BridgeValue
+import com.bridgekit.runtime.OutboundCaller
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import java.time.Instant
+
+class CompileStateCompoundRuntimeTest {
+    @Test
+    fun stateProviderEncodeAndCallerDecodeRoundTripCompoundValue() = runBlocking {
+        val expected = Profile(
+            id = "round-trip",
+            tags = listOf("alpha", "beta"),
+            updatedAt = Instant.parse("2024-03-04T05:06:07Z"),
+            status = ProfileStatus.Active(
+                since = Instant.parse("2024-03-05T06:07:08Z")
+            )
+        )
+        val adapter = CompileStateCompoundContract.inbound(
+            object : CompileStateCompound {
+                override val profile = MutableStateFlow(expected)
+            }
+        )
+
+        val wire = adapter.stateFlows().getValue("profile").first()
+        assertTrue("state provider must encode compound values to a wire map", wire is Map<*, *>)
+
+        val client = CompileStateCompoundContract.outbound(StateCaller(wire))
+        val decoded = client.profile.first()
+
+        assertTrue(decoded is BridgeValue.Available)
+        assertEquals(expected, (decoded as BridgeValue.Available).value)
+    }
+}
+
+private class StateCaller(private val wire: Any?) : OutboundCaller {
+    override suspend fun invoke(member: String, payload: Map<String, Any?>?): Any? = null
+    override fun invokeSync(member: String, payload: Map<String, Any?>?): Any? = null
+    override fun fire(member: String, payload: Map<String, Any?>?) = Unit
+    override fun stream(member: String, payload: Map<String, Any?>?): Flow<Any?> = kotlinx.coroutines.flow.emptyFlow()
+    override fun state(member: String): StateFlow<BridgeValue<Any?>> =
+        MutableStateFlow(BridgeValue.Available(wire))
+}
+`,
+    'utf8',
+  );
+}
+
+function runGradleRuntimeTest(fixturesDir: string) {
+  return spawnSync(
+    './gradlew',
+    [':malopezr7_bridgekit:testDebugUnitTest', `-PbridgekitGeneratedRuntimeTestDir=${fixturesDir}`],
     { cwd: androidRoot, encoding: 'utf8', timeout: 15 * 60_000 },
   );
 }
@@ -119,5 +186,27 @@ describe('Kotlin real compiler harness', () => {
 
     expect(result.status).not.toBe(0);
     expect(output).toMatch(/Compilation error|type mismatch|compileDebugKotlin/);
+  });
+
+  it('runs CLI-02 Kotlin state provider encode and caller decode round-trip', () => {
+    generateKotlin(
+      {
+        'state-compound.contract.ts': readFileSync(
+          path.join(fixturesDir, 'state-compound.fixture.ts'),
+          'utf8',
+        ),
+      },
+      stateRuntimeFixturesDir,
+    );
+    writeKotlinStateRoundTripTest(stateRuntimeFixturesDir);
+
+    const result = runGradleRuntimeTest(stateRuntimeFixturesDir);
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    if (result.status !== 0) {
+      throw new Error(`Kotlin state round-trip runtime gate failed (${result.status}):\n${output}`);
+    }
+    expect(result.status).toBe(0);
+    expect(output).toContain('BUILD SUCCESSFUL');
   });
 });

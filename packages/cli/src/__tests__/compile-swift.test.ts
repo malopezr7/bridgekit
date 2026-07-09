@@ -110,6 +110,181 @@ function swiftcTypecheck(filePath: string) {
   );
 }
 
+function swiftcExecutable(sourcePath: string, outputPath: string) {
+  return spawnSync('/usr/bin/swiftc', ['-parse-as-library', sourcePath, '-o', outputPath], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+}
+
+function swiftBridgeKitStubs(): string {
+  return `
+import Foundation
+
+public struct BridgeKitDecodeError: Error {
+    public let field: String
+    public let expectedType: String
+    public init(field: String, expectedType: String) {
+        self.field = field
+        self.expectedType = expectedType
+    }
+}
+
+public func bridgeKitThrow<T>(field: String, expectedType: String) throws -> T {
+    throw BridgeKitDecodeError(field: field, expectedType: expectedType)
+}
+
+public enum BridgeValue<T> {
+    case available(T)
+    case initial(T)
+    case replacing(T?)
+    case unprovided(T?)
+
+    public func remap<U>(_ transform: (T) -> U?) -> BridgeValue<U> {
+        switch self {
+        case .available(let value): return transform(value).map(BridgeValue<U>.available) ?? .unprovided(nil)
+        case .initial(let value): return transform(value).map(BridgeValue<U>.initial) ?? .unprovided(nil)
+        case .replacing(let last): return .replacing(last.flatMap(transform))
+        case .unprovided(let last): return .unprovided(last.flatMap(transform))
+        }
+    }
+}
+
+public protocol OutboundCaller: AnyObject {
+    func invoke(member: String, payload: [String: Any?]?) async throws -> Any?
+    func invokeSync(member: String, payload: [String: Any?]?) throws -> Any?
+    func fire(member: String, payload: [String: Any?]?)
+    func stream(member: String, payload: [String: Any?]?) -> AsyncThrowingStream<Any?, Error>
+    func state(member: String) -> AsyncStream<BridgeValue<Any?>>
+}
+
+public protocol InboundContractAdapter: AnyObject {
+    var stateInitials: [String: Any?] { get }
+    func invoke(member: String, payload: [String: Any?]?) async throws -> Any?
+    func invokeSync(member: String, payload: [String: Any?]?) throws -> Any?
+    func openStream(member: String, payload: [String: Any?]?) -> AsyncThrowingStream<Any?, Error>
+    func stateStreams() -> [String: AsyncStream<Any?>]
+}
+
+open class BridgeContractDefinition<P, C> {
+    public let id: String
+    public let contractHash: String
+    public let memberHashes: [String: String]
+    public init(id: String, contractHash: String, memberHashes: [String: String]) {
+        self.id = id
+        self.contractHash = contractHash
+        self.memberHashes = memberHashes
+    }
+    open func inbound(_ impl: P) -> InboundContractAdapter { fatalError("override required") }
+    open func outbound(_ caller: OutboundCaller) -> C { fatalError("override required") }
+}
+`;
+}
+
+function swiftStateRoundTripMain(): string {
+  return `
+final class StateProvider: CompileStateCompound {
+    let value: Profile
+    init(_ value: Profile) { self.value = value }
+    var profile: AsyncStream<Profile> {
+        AsyncStream { cont in
+            cont.yield(value)
+            cont.finish()
+        }
+    }
+}
+
+final class StateCaller: OutboundCaller {
+    let wire: Any?
+    init(_ wire: Any?) { self.wire = wire }
+    func invoke(member: String, payload: [String: Any?]?) async throws -> Any? { nil }
+    func invokeSync(member: String, payload: [String: Any?]?) throws -> Any? { nil }
+    func fire(member: String, payload: [String: Any?]?) {}
+    func stream(member: String, payload: [String: Any?]?) -> AsyncThrowingStream<Any?, Error> {
+        AsyncThrowingStream { cont in cont.finish() }
+    }
+    func state(member: String) -> AsyncStream<BridgeValue<Any?>> {
+        AsyncStream { cont in
+            cont.yield(.available(wire))
+            cont.finish()
+        }
+    }
+}
+
+func fail(_ message: String) -> Never {
+    FileHandle.standardError.write((message + "\\n").data(using: .utf8)!)
+    Foundation.exit(1)
+}
+
+func require(_ condition: @autoclosure () -> Bool, _ message: String) {
+    if !condition() { fail(message) }
+}
+
+func requireDate(_ value: Any?, millis: Int64, _ label: String) {
+    if let number = value as? NSNumber {
+        require(number.int64Value == millis, "\\(label) expected epoch millis \\(millis), got \\(number)")
+    } else if let int = value as? Int64 {
+        require(int == millis, "\\(label) expected epoch millis \\(millis), got \\(int)")
+    } else if let int = value as? Int {
+        require(Int64(int) == millis, "\\(label) expected epoch millis \\(millis), got \\(int)")
+    } else {
+        fail("\\(label) expected numeric epoch millis, got \\(String(describing: value))")
+    }
+}
+
+func requireProfileEqual(_ actual: Profile, _ expected: Profile) {
+    require(actual.id == expected.id, "decoded id mismatch")
+    require(actual.tags == expected.tags, "decoded tags mismatch")
+    require(actual.updatedAt == expected.updatedAt, "decoded updatedAt mismatch")
+    switch (actual.status, expected.status) {
+    case (.active(let actualValue), .active(let expectedValue)):
+        require(actualValue.since == expectedValue.since, "decoded union date mismatch")
+    default:
+        fail("decoded union variant mismatch")
+    }
+}
+
+@main
+struct StateRoundTripMain {
+    static func main() async {
+        let expected = Profile(
+            id: "round-trip",
+            tags: ["alpha", "beta"],
+            updatedAt: Date(timeIntervalSince1970: 1709528767),
+            status: .active(ProfileStatusActive(since: Date(timeIntervalSince1970: 1709618828)))
+        )
+        let adapter = CompileStateCompoundContract().inbound(StateProvider(expected))
+        guard let stream = adapter.stateStreams()["profile"] else { fail("missing profile state stream") }
+
+        var wire: Any? = nil
+        for await item in stream {
+            wire = item
+            break
+        }
+
+        guard let wireMap = wire as? [String: Any?] else {
+            fail("state provider must encode compound values to a wire dictionary, got \\(String(describing: wire))")
+        }
+        require(wireMap["id"] as? String == expected.id, "encoded id mismatch")
+        require(wireMap["tags"] as? [String] == expected.tags, "encoded tags mismatch")
+        requireDate(wireMap["updatedAt"] ?? nil, millis: 1709528767000, "encoded updatedAt")
+        guard let statusMap = wireMap["status"] as? [String: Any?] else { fail("encoded union is not a dictionary") }
+        require(statusMap["kind"] as? String == "active", "encoded union discriminant mismatch")
+        requireDate(statusMap["since"] ?? nil, millis: 1709618828000, "encoded union date")
+
+        let client = CompileStateCompoundContract().outbound(StateCaller(wireMap))
+        var decoded: BridgeValue<Profile>? = nil
+        for await value in client.profile {
+            decoded = value
+            break
+        }
+        guard case .available(let actual)? = decoded else { fail("decoded state was not available") }
+        requireProfileEqual(actual, expected)
+    }
+}
+`;
+}
+
 describeOnMac('Swift real compiler harness', () => {
   it('proves a deliberately malformed baseline fails swiftc for a compiler reason', () => {
     const workspace = mkdtempSync(path.join(tmpdir(), 'bridgekit-known-bad-swift-'));
@@ -157,5 +332,37 @@ describeOnMac('Swift real compiler harness', () => {
 
     expect(result.status).toBe(0);
     expect(output.trim()).toBe('');
+  });
+
+  it('executes CLI-02 Swift state provider encode and caller decode round-trip', () => {
+    const stateFixture = readFileSync(path.join(fixturesDir, 'state-compound.fixture.ts'), 'utf8');
+    const outDir = generateSwift({ 'state-compound.contract.ts': stateFixture }, 'state-compound');
+    const [swiftFile] = generatedSwiftFiles(outDir);
+    expect(swiftFile).toBeDefined();
+
+    const workspace = makeWorkspace('state-round-trip-runtime');
+    const programPath = path.join(workspace, 'StateRoundTrip.swift');
+    const binPath = path.join(workspace, 'StateRoundTrip');
+    const generatedSource = readFileSync(swiftFile as string, 'utf8').replace(
+      /^import BridgeKit\n/m,
+      '',
+    );
+    writeFileSync(
+      programPath,
+      [swiftBridgeKitStubs(), generatedSource, swiftStateRoundTripMain()].join('\n'),
+      'utf8',
+    );
+
+    const compile = swiftcExecutable(programPath, binPath);
+    expect(compile.status).toBe(0);
+
+    const run = spawnSync(binPath, [], { cwd: workspace, encoding: 'utf8' });
+    if (run.status !== 0) {
+      throw new Error(
+        `Swift state round-trip runtime gate failed (${run.status}):\n${run.stdout}\n${run.stderr}`,
+      );
+    }
+    expect(run.status).toBe(0);
+    expect(`${run.stdout}\n${run.stderr}`.trim()).toBe('');
   });
 });
