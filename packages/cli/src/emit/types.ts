@@ -1,8 +1,9 @@
 // emit/types.ts — schema node shapes, identifier helpers, Kotlin type emitter.
 
-import { type AnySchema, encode, stableHash } from '@malopezr7/bridgekit/contract';
+import { stableHash } from '@malopezr7/bridgekit/contract';
 
 import { CliError } from '../cliError.js';
+import { prepareStateInitial } from './state-initial.js';
 
 export interface SchemaNode {
   kind: string;
@@ -327,12 +328,12 @@ export class KotlinTypeEmitter {
             const escapedName = escapeKotlinIdentifier(fieldName);
             fields.push(`    val ${escapedName}: ${fieldType.typeName}${defaultPart}`);
           }
-          const dataDecl = [
-            `data class ${dataClassName}(`,
-            fields.join(',\n'),
-            `)`,
-            ...nestedDecls,
-          ].join('\n');
+          const dataDecl =
+            fields.length === 0
+              ? `class ${dataClassName}`
+              : [`data class ${dataClassName}(`, fields.join(',\n'), `)`, ...nestedDecls].join(
+                  '\n',
+                );
           this.declarations.set(dataClassName, dataDecl);
         }
         return {
@@ -500,14 +501,17 @@ export function hashMember(value: unknown): string {
 export function kotlinLiteral(value: unknown): string {
   if (value === null || value === undefined) return 'null';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
-  if (typeof value === 'number') return String(value);
+  if (typeof value === 'number') return Object.is(value, -0) ? '-0.0' : String(value);
   if (typeof value === 'bigint') return `${value}L`;
   if (typeof value === 'string') return kotlinStringLiteral(value);
   if (typeof value === 'object') {
     if (Array.isArray(value)) {
+      if (value.length === 0) return 'emptyList<Any?>()';
       return `listOf(${(value as unknown[]).map(kotlinLiteral).join(', ')})`;
     }
-    const entries = Object.entries(value as Record<string, unknown>)
+    const objectEntries = Object.entries(value as Record<string, unknown>);
+    if (objectEntries.length === 0) return 'emptyMap<String, Any?>()';
+    const entries = objectEntries
       .map(([k, v]) => `${kotlinStringLiteral(k)} to ${kotlinLiteral(v)}`)
       .join(', ');
     return `mapOf(${entries})`;
@@ -515,6 +519,72 @@ export function kotlinLiteral(value: unknown): string {
   return 'null';
 }
 
-export function kotlinLiteralForSchema(value: unknown, schema: SchemaNode): string {
-  return kotlinLiteral(encode(schema as AnySchema, value));
+function kotlinLiteralForEncoded(value: unknown, schema: SchemaNode): string {
+  if (value === null || value === undefined) return 'null';
+  if (schema.kind === 'optional' || schema.kind === 'nullable') {
+    return kotlinLiteralForEncoded(value, (schema as OptionalNode | NullableNode).inner);
+  }
+  if (schema.kind === 'array') {
+    if (!Array.isArray(value) || value.length === 0) return 'emptyList<Any?>()';
+    return `listOf(${value
+      .map((item) => kotlinLiteralForEncoded(item, (schema as ArrayNode).item))
+      .join(', ')})`;
+  }
+  if (schema.kind === 'tuple') {
+    if (!Array.isArray(value) || value.length === 0) return 'emptyList<Any?>()';
+    const tuple = schema as TupleNode;
+    return `listOf(${value
+      .map((item, index) =>
+        tuple.items[index]
+          ? kotlinLiteralForEncoded(item, tuple.items[index])
+          : kotlinLiteral(item),
+      )
+      .join(', ')})`;
+  }
+  if (schema.kind === 'record') {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return 'emptyMap<String, Any?>()';
+    return `mapOf(${entries
+      .map(
+        ([key, item]) =>
+          `${kotlinStringLiteral(key)} to ${kotlinLiteralForEncoded(item, (schema as RecordNode).value)}`,
+      )
+      .join(', ')})`;
+  }
+  if (schema.kind === 'object' || schema.kind === 'union') {
+    const objectValue = value as Record<string, unknown>;
+    const entries = Object.entries(objectValue);
+    if (entries.length === 0) return 'emptyMap<String, Any?>()';
+    let fields: Record<string, SchemaNode>;
+    if (schema.kind === 'object') {
+      fields = (schema as ObjectNode).fields;
+    } else {
+      const union = schema as UnionNode;
+      const variant = union.variants[String(objectValue[union.discriminant])];
+      fields = variant?.fields ?? {};
+    }
+    return `mapOf(${entries
+      .map(([key, item]) => {
+        const field = fields[key];
+        const literal = field ? kotlinLiteralForEncoded(item, field) : kotlinLiteral(item);
+        return `${kotlinStringLiteral(key)} to ${literal}`;
+      })
+      .join(', ')})`;
+  }
+  if (schema.kind === 'oneOf') {
+    const envelope = value as Record<string, unknown>;
+    const oneOf = schema as OneOfNode;
+    const optionIndex = oneOf.tags?.indexOf(String(envelope['@t'])) ?? -1;
+    const option = oneOf.options[optionIndex];
+    return `mapOf(${kotlinStringLiteral('@t')} to ${kotlinLiteral(envelope['@t'])}, ${kotlinStringLiteral('@v')} to ${option ? kotlinLiteralForEncoded(envelope['@v'], option) : kotlinLiteral(envelope['@v'])})`;
+  }
+  return kotlinLiteral(value);
+}
+
+export function kotlinLiteralForSchema(
+  value: unknown,
+  schema: SchemaNode,
+  path = 'state initial',
+): string {
+  return kotlinLiteralForEncoded(prepareStateInitial(value, schema, path).encoded, schema);
 }

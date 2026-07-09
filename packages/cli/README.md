@@ -70,6 +70,11 @@ can apply that codec. Loader payloads are limited to 1 MiB of UTF-8 JSON and 64
 nested value levels. Generation fails with a CLI diagnostic when either limit is
 exceeded.
 
+State initials declared with `t.json()` must contain JSON-compatible values.
+`Date`, `Uint8Array`, `ArrayBuffer`, and `BigInt` are rejected with their value path
+instead of being silently coerced or dropped. Use `t.date()`, `t.binary()`, or
+`t.int64()` when those carriers are intended.
+
 ## License
 
 MIT © [malopezr7](https://github.com/malopezr7)

@@ -606,7 +606,7 @@ export function emitSwiftContract(
     );
 
     stateInitials.push(
-      `${swiftStringLiteral(memberName)}: ${swiftLiteralForSchema(desc.initial, desc.value)},`,
+      `${swiftStringLiteral(memberName)}: ${swiftLiteralForSchema(desc.initial, desc.value, `state.${memberName}.initial`)},`,
     );
 
     providerMethods.push(`    var ${swiftName}: AsyncStream<${valueResult.typeName}> { get }`);

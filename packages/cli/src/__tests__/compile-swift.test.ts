@@ -183,15 +183,26 @@ open class BridgeContractDefinition<P, C> {
 
 function swiftStateRoundTripMain(): string {
   return `
-final class StateProvider: CompileStateCompound {
-    let value: Profile
-    init(_ value: Profile) { self.value = value }
-    var profile: AsyncStream<Profile> {
-        AsyncStream { cont in
-            cont.yield(value)
-            cont.finish()
-        }
+func oneValue<T>(_ value: T) -> AsyncStream<T> {
+    AsyncStream { cont in
+        cont.yield(value)
+        cont.finish()
     }
+}
+
+final class StateProvider: CompileStateCompound {
+    let profileValue: Profile
+    init(_ value: Profile) { self.profileValue = value }
+    var large: AsyncStream<Int64> { oneValue(9_007_199_254_740_993) }
+    var initialDate: AsyncStream<Date> { oneValue(Date(timeIntervalSince1970: 1_709_528_767.890)) }
+    var payload: AsyncStream<Data> { oneValue(Data([0, 1, 2, 254, 255])) }
+    var emptyObject: AsyncStream<EmptyObject> { oneValue(EmptyObject()) }
+    var emptyRecord: AsyncStream<[String: String]> { oneValue([:]) }
+    var emptyArray: AsyncStream<[String]> { oneValue([]) }
+    var collections: AsyncStream<Collections> {
+        oneValue(Collections(object: CollectionsObject(), record: [:], array: []))
+    }
+    var profile: AsyncStream<Profile> { oneValue(profileValue) }
 }
 
 final class StateCaller: OutboundCaller {
@@ -244,6 +255,11 @@ func requireProfileEqual(_ actual: Profile, _ expected: Profile) {
     }
 }
 
+func firstValue<T>(_ stream: AsyncStream<BridgeValue<T>>) async -> BridgeValue<T>? {
+    for await value in stream { return value }
+    return nil
+}
+
 @main
 struct StateRoundTripMain {
     static func main() async {
@@ -254,6 +270,45 @@ struct StateRoundTripMain {
             status: .active(ProfileStatusActive(since: Date(timeIntervalSince1970: 1709618828)))
         )
         let adapter = CompileStateCompoundContract().inbound(StateProvider(expected))
+        let initials = adapter.stateInitials
+
+        let largeClient = CompileStateCompoundContract().outbound(StateCaller(initials["large"] ?? nil))
+        guard case .available(let large)? = await firstValue(largeClient.large) else {
+            fail("int64 stateInitials value did not decode")
+        }
+        require(large == 9_007_199_254_740_993, "int64 stateInitials mismatch")
+
+        let dateClient = CompileStateCompoundContract().outbound(StateCaller(initials["initialDate"] ?? nil))
+        guard case .available(let date)? = await firstValue(dateClient.initialDate) else {
+            fail("date stateInitials value became unavailable")
+        }
+        require(date.timeIntervalSince1970 == 1_709_528_767.890, "date stateInitials epoch mismatch")
+
+        let binaryClient = CompileStateCompoundContract().outbound(StateCaller(initials["payload"] ?? nil))
+        guard case .available(let payload)? = await firstValue(binaryClient.payload) else {
+            fail("binary stateInitials value did not decode")
+        }
+        require(payload == Data([0, 1, 2, 254, 255]), "binary stateInitials bytes mismatch")
+
+        let emptyObjectClient = CompileStateCompoundContract().outbound(StateCaller(initials["emptyObject"] ?? nil))
+        guard case .available(_)? = await firstValue(emptyObjectClient.emptyObject) else {
+            fail("empty object stateInitials value did not decode")
+        }
+        let emptyRecordClient = CompileStateCompoundContract().outbound(StateCaller(initials["emptyRecord"] ?? nil))
+        guard case .available(let emptyRecord)? = await firstValue(emptyRecordClient.emptyRecord) else {
+            fail("empty record stateInitials value did not decode")
+        }
+        require(emptyRecord.isEmpty, "empty record stateInitials mismatch")
+        let emptyArrayClient = CompileStateCompoundContract().outbound(StateCaller(initials["emptyArray"] ?? nil))
+        guard case .available(let emptyArray)? = await firstValue(emptyArrayClient.emptyArray) else {
+            fail("empty array stateInitials value did not decode")
+        }
+        require(emptyArray.isEmpty, "empty array stateInitials mismatch")
+        let collectionsClient = CompileStateCompoundContract().outbound(StateCaller(initials["collections"] ?? nil))
+        guard case .available(let collections)? = await firstValue(collectionsClient.collections) else {
+            fail("nested collection stateInitials value did not decode")
+        }
+        require(collections.record.isEmpty && collections.array.isEmpty, "nested collection stateInitials mismatch")
         guard let stream = adapter.stateStreams()["profile"] else { fail("missing profile state stream") }
 
         var wire: Any? = nil

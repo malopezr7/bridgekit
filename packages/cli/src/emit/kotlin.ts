@@ -450,7 +450,7 @@ export function emitKotlinContract(
   // ---- state initials + stateFlows entries ----
   const stateInitials: string[] = Object.entries(descriptor.state).map(([memberName, rawDesc]) => {
     const desc = rawDesc as StateDescRaw;
-    return `                ${kotlinStringLiteral(memberName)} to ${kotlinLiteralForSchema(desc.initial, desc.value)},`;
+    return `                ${kotlinStringLiteral(memberName)} to ${kotlinLiteralForSchema(desc.initial, desc.value, `state.${memberName}.initial`)},`;
   });
   const stateFlowEntries = Object.entries(descriptor.state).map(([memberName, rawDesc]) => {
     const desc = rawDesc as StateDescRaw;

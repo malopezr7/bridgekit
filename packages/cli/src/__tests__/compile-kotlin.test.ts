@@ -77,6 +77,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
@@ -94,9 +95,51 @@ class CompileStateCompoundRuntimeTest {
         )
         val adapter = CompileStateCompoundContract.inbound(
             object : CompileStateCompound {
+                override val large = MutableStateFlow(9_007_199_254_740_993L)
+                override val initialDate = MutableStateFlow(Instant.parse("2024-03-04T05:06:07.890Z"))
+                override val payload = MutableStateFlow(byteArrayOf(0, 1, 2, 254.toByte(), 255.toByte()))
+                override val emptyObject = MutableStateFlow(EmptyObject())
+                override val emptyRecord = MutableStateFlow<Map<String, String>>(emptyMap())
+                override val emptyArray = MutableStateFlow<List<String>>(emptyList())
+                override val collections = MutableStateFlow(
+                    Collections(CollectionsObject(), emptyMap(), emptyList())
+                )
                 override val profile = MutableStateFlow(expected)
             }
         )
+
+        val initials = adapter.stateInitials
+        val largeInitial = CompileStateCompoundContract.outbound(StateCaller(initials.getValue("large"))).large.first()
+        assertTrue(largeInitial is BridgeValue.Available)
+        assertEquals(9_007_199_254_740_993L, (largeInitial as BridgeValue.Available).value)
+
+        val dateInitial = CompileStateCompoundContract.outbound(StateCaller(initials.getValue("initialDate"))).initialDate.first()
+        assertTrue("date stateInitials value became unavailable", dateInitial is BridgeValue.Available)
+        assertEquals(
+            Instant.parse("2024-03-04T05:06:07.890Z"),
+            (dateInitial as BridgeValue.Available).value
+        )
+
+        val binaryInitial = CompileStateCompoundContract.outbound(StateCaller(initials.getValue("payload"))).payload.first()
+        assertTrue(binaryInitial is BridgeValue.Available)
+        assertArrayEquals(
+            byteArrayOf(0, 1, 2, 254.toByte(), 255.toByte()),
+            (binaryInitial as BridgeValue.Available).value
+        )
+
+        val emptyObjectInitial = CompileStateCompoundContract.outbound(StateCaller(initials.getValue("emptyObject"))).emptyObject.first()
+        assertTrue(emptyObjectInitial is BridgeValue.Available)
+        val emptyRecordInitial = CompileStateCompoundContract.outbound(StateCaller(initials.getValue("emptyRecord"))).emptyRecord.first()
+        assertTrue(emptyRecordInitial is BridgeValue.Available)
+        assertTrue((emptyRecordInitial as BridgeValue.Available).value.isEmpty())
+        val emptyArrayInitial = CompileStateCompoundContract.outbound(StateCaller(initials.getValue("emptyArray"))).emptyArray.first()
+        assertTrue(emptyArrayInitial is BridgeValue.Available)
+        assertTrue((emptyArrayInitial as BridgeValue.Available).value.isEmpty())
+        val collectionsInitial = CompileStateCompoundContract.outbound(StateCaller(initials.getValue("collections"))).collections.first()
+        assertTrue(collectionsInitial is BridgeValue.Available)
+        val collections = (collectionsInitial as BridgeValue.Available).value
+        assertTrue(collections.record.isEmpty())
+        assertTrue(collections.array.isEmpty())
 
         val wire = adapter.stateFlows().getValue("profile").first()
         assertTrue("state provider must encode compound values to a wire map", wire is Map<*, *>)

@@ -1,8 +1,7 @@
 // emit/swift-types.ts — Swift type emitter.
 // Kept < 500 LOC per D9 split rule.
 
-import { type AnySchema, encode } from '@malopezr7/bridgekit/contract';
-
+import { prepareStateInitial } from './state-initial.js';
 import {
   type ArrayNode,
   type EnumNode,
@@ -366,10 +365,11 @@ export class SwiftTypeEmitter {
 function swiftLiteral(value: unknown): string {
   if (value === null || value === undefined) return 'nil';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
-  if (typeof value === 'number') return String(value);
+  if (typeof value === 'number') return Object.is(value, -0) ? '-0.0' : String(value);
   if (typeof value === 'string') return swiftStringLiteral(value);
   if (Array.isArray(value)) return `[${value.map(swiftLiteral).join(', ')}]`;
   if (typeof value === 'object') {
+    if (Object.keys(value).length === 0) return '[:]';
     return `[${Object.entries(value)
       .map(([key, item]) => `${swiftStringLiteral(key)}: ${swiftLiteral(item)}`)
       .join(', ')}]`;
@@ -377,6 +377,74 @@ function swiftLiteral(value: unknown): string {
   return 'nil';
 }
 
-export function swiftLiteralForSchema(value: unknown, schema: SchemaNode): string {
-  return swiftLiteral(encode(schema as AnySchema, value));
+function swiftLiteralForEncoded(value: unknown, schema: SchemaNode): string {
+  if (value === null || value === undefined) return 'nil';
+  if (schema.kind === 'optional' || schema.kind === 'nullable') {
+    return swiftLiteralForEncoded(value, (schema as OptionalNode | NullableNode).inner);
+  }
+  if (schema.kind === 'date') return `Int64(${String(value)})`;
+  if (schema.kind === 'array') {
+    if (!Array.isArray(value) || value.length === 0) return '[]';
+    return `[${value
+      .map((item) => swiftLiteralForEncoded(item, (schema as ArrayNode).item))
+      .join(', ')}]`;
+  }
+  if (schema.kind === 'tuple') {
+    if (!Array.isArray(value) || value.length === 0) return '[]';
+    const tuple = schema as TupleNode;
+    return `[${value
+      .map((item, index) =>
+        tuple.items[index] ? swiftLiteralForEncoded(item, tuple.items[index]) : swiftLiteral(item),
+      )
+      .join(', ')}]`;
+  }
+  if (schema.kind === 'record') {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length === 0) return '[:]';
+    return `[${entries
+      .map(
+        ([key, item]) =>
+          `${swiftStringLiteral(key)}: ${swiftLiteralForEncoded(item, (schema as RecordNode).value)}`,
+      )
+      .join(', ')}]`;
+  }
+  if (schema.kind === 'object' || schema.kind === 'union') {
+    const objectValue = value as Record<string, unknown>;
+    const entries = Object.entries(objectValue);
+    if (entries.length === 0) return '[:]';
+    let fields: Record<string, SchemaNode>;
+    if (schema.kind === 'object') {
+      fields = (schema as ObjectNode).fields;
+    } else {
+      const union = schema as UnionNode;
+      const variant = union.variants[String(objectValue[union.discriminant])];
+      fields = variant?.fields ?? {};
+    }
+    return `[${entries
+      .map(([key, item]) => {
+        const field = fields[key];
+        const literal = field ? swiftLiteralForEncoded(item, field) : swiftLiteral(item);
+        return `${swiftStringLiteral(key)}: ${literal}`;
+      })
+      .join(', ')}]`;
+  }
+  if (schema.kind === 'oneOf') {
+    const envelope = value as Record<string, unknown>;
+    const oneOf = schema as OneOfNode;
+    const optionIndex = oneOf.tags?.indexOf(String(envelope['@t'])) ?? -1;
+    const option = oneOf.options[optionIndex];
+    const inner = option
+      ? swiftLiteralForEncoded(envelope['@v'], option)
+      : swiftLiteral(envelope['@v']);
+    return `[${swiftStringLiteral('@t')}: ${swiftLiteral(envelope['@t'])}, ${swiftStringLiteral('@v')}: ${inner}]`;
+  }
+  return swiftLiteral(value);
+}
+
+export function swiftLiteralForSchema(
+  value: unknown,
+  schema: SchemaNode,
+  path = 'state initial',
+): string {
+  return swiftLiteralForEncoded(prepareStateInitial(value, schema, path).encoded, schema);
 }
