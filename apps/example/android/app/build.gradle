@@ -2,6 +2,9 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+def bridgekitGeneratedFixturesDir = providers.gradleProperty("bridgekitGeneratedFixturesDir").orNull
+def bridgekitGeneratedWarningsAsErrors = providers.gradleProperty("bridgekitGeneratedWarningsAsErrors").orNull
+
 react {
     // node_modules is hoisted at the monorepo root (pnpm nodeLinker: hoisted).
     reactNativeDir = file("../../../../node_modules/react-native")
@@ -46,6 +49,20 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
+    }
+
+    sourceSets {
+        debug {
+            if (bridgekitGeneratedFixturesDir != null) {
+                java.srcDir(file(bridgekitGeneratedFixturesDir))
+            }
+        }
+    }
+}
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach { task ->
+    if (bridgekitGeneratedWarningsAsErrors != null) {
+        task.inputs.property("bridgekitGeneratedWarningsAsErrors", bridgekitGeneratedWarningsAsErrors)
     }
 }
 

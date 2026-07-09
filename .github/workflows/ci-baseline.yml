@@ -59,9 +59,17 @@ jobs:
         run: pnpm -r typecheck
 
   cli-tests:
-    name: CLI Jest
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    name: CLI tests (${{ matrix.harness }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - harness: swift
+            os: macos-latest
+          - harness: kotlin
+            os: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -72,14 +80,35 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      - uses: actions/setup-java@v4
+        if: matrix.harness == 'kotlin'
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: matrix.harness == 'kotlin'
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Build core contract exports
         run: pnpm --filter @malopezr7/bridgekit build
 
+      - name: Build CLI
+        run: pnpm --filter @malopezr7/bridgekit-cli build
+
       - name: Run CLI Jest tests
         run: pnpm --filter @malopezr7/bridgekit-cli test
+
+      - name: Run Kotlin known-bad compiler fixture gate
+        if: matrix.harness == 'kotlin'
+        run: BRIDGEKIT_RUN_KOTLIN_NEGATIVE=1 pnpm --filter @malopezr7/bridgekit-cli exec jest --config ./jest.config.cjs --runInBand compile-kotlin.test.ts
+
+      - name: Run Kotlin compiler fixture gate
+        if: matrix.harness == 'kotlin'
+        working-directory: apps/example/android
+        run: ./gradlew :app:compileDebugKotlin -PbridgekitGeneratedFixturesDir=../../../packages/cli/build/generated-fixtures/kotlin-good -PbridgekitGeneratedWarningsAsErrors=true
 
   test-web:
     name: Jest web
