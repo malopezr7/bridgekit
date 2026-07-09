@@ -1,4 +1,5 @@
 import { emitKotlinContract } from '../emit/kotlin.js';
+import { prepareStateInitial } from '../emit/state-initial.js';
 import { emitSwiftContract } from '../emit/swift.js';
 import type { RawContractToken } from '../load.js';
 
@@ -68,6 +69,10 @@ const token: RawContractToken = {
 };
 
 describe('generated state initial wire literals', () => {
+  it('returns only the encoded initial from preparation', () => {
+    expect(prepareStateInitial(42, { kind: 'number' })).toEqual({ encoded: 42 });
+  });
+
   it('emits Kotlin state initials as int64 strings, epoch milliseconds, and base64', () => {
     const source = emitKotlinContract(token, 'com.bridgekit.generated').content;
 

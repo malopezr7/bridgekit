@@ -4,6 +4,8 @@ import { CliError } from './cliError.js';
 export const MAX_LOADER_PAYLOAD_BYTES = 1024 * 1024;
 /** Maximum recursive value depth, measured from each token root. */
 export const MAX_LOADER_NESTING_DEPTH = 64;
+/** Maximum tagged value nodes per payload; 10k leaves ample headroom for KiB-scale CLI contracts. */
+export const MAX_LOADER_NODE_COUNT = 10_000;
 /** spawnSync pipe budget; deliberately larger than the supported fd-3 payload. */
 export const MAX_LOADER_SPAWN_BUFFER_BYTES = 2 * MAX_LOADER_PAYLOAD_BYTES;
 
@@ -40,9 +42,14 @@ function encodeNode(
   ancestors: Set<object>,
   path: string,
   depth: number,
+  nodeCount: { value: number },
 ): LoaderNode {
   if (depth > MAX_LOADER_NESTING_DEPTH) {
     throw new Error(`Loader value nesting depth exceeds ${MAX_LOADER_NESTING_DEPTH} at ${path}`);
+  }
+  nodeCount.value += 1;
+  if (nodeCount.value > MAX_LOADER_NODE_COUNT) {
+    throw new Error(`Loader value node count exceeds ${MAX_LOADER_NODE_COUNT} at ${path}`);
   }
   if (value === undefined) return { t: 'u' };
   if (value === null) return { t: 'n' };
@@ -76,7 +83,7 @@ function encodeNode(
     if (Array.isArray(value)) {
       const items: LoaderNode[] = [];
       for (let index = 0; index < value.length; index++) {
-        items.push(encodeNode(value[index], ancestors, `${path}[${index}]`, depth + 1));
+        items.push(encodeNode(value[index], ancestors, `${path}[${index}]`, depth + 1, nodeCount));
       }
       return { t: 'a', v: items };
     }
@@ -88,7 +95,10 @@ function encodeNode(
     if (symbolKey !== undefined) throw new Error(`Unsupported symbol key at ${path}`);
     const entries: Array<[string, LoaderNode]> = [];
     for (const key of Object.keys(value)) {
-      entries.push([key, encodeNode(value[key], ancestors, `${path}.${key}`, depth + 1)]);
+      entries.push([
+        key,
+        encodeNode(value[key], ancestors, `${path}.${key}`, depth + 1, nodeCount),
+      ]);
     }
     return { t: 'o', v: entries };
   } finally {
@@ -98,8 +108,9 @@ function encodeNode(
 
 function encodeLoaderPayloadForWorker(tokens: unknown[]): string {
   const encodedTokens: LoaderNode[] = [];
+  const nodeCount = { value: 0 };
   for (let index = 0; index < tokens.length; index++) {
-    encodedTokens.push(encodeNode(tokens[index], new Set(), `tokens[${index}]`, 0));
+    encodedTokens.push(encodeNode(tokens[index], new Set(), `tokens[${index}]`, 0, nodeCount));
   }
   const payload = JSON.stringify({
     $bridgekitLoader: 'v1',
@@ -130,6 +141,7 @@ export function loaderEncoderWorkerSource(): string {
   return [
     `const MAX_LOADER_PAYLOAD_BYTES = ${MAX_LOADER_PAYLOAD_BYTES};`,
     `const MAX_LOADER_NESTING_DEPTH = ${MAX_LOADER_NESTING_DEPTH};`,
+    `const MAX_LOADER_NODE_COUNT = ${MAX_LOADER_NODE_COUNT};`,
     isPlainObject,
     valueKind,
     encodeNode,
@@ -170,9 +182,18 @@ function isCanonicalBase64(value: string): boolean {
   return Buffer.from(value, 'base64').toString('base64') === value;
 }
 
-function decodeNode(value: unknown, path: string, depth: number): unknown {
+function decodeNode(
+  value: unknown,
+  path: string,
+  depth: number,
+  nodeCount: { value: number },
+): unknown {
   if (depth > MAX_LOADER_NESTING_DEPTH) {
     throw new CliError(`Loader value nesting depth exceeds ${MAX_LOADER_NESTING_DEPTH} at ${path}`);
+  }
+  nodeCount.value += 1;
+  if (nodeCount.value > MAX_LOADER_NODE_COUNT) {
+    throw new CliError(`Loader value node count exceeds ${MAX_LOADER_NODE_COUNT} at ${path}`);
   }
   if (!isPlainObject(value) || typeof value.t !== 'string') {
     throw new CliError(`Malformed loader node at ${path}: missing string tag`);
@@ -234,7 +255,9 @@ function decodeNode(value: unknown, path: string, depth: number): unknown {
     case 'a':
       assertNodeShape(value, ['t', 'v'], path);
       if (!Array.isArray(value.v)) throw new CliError(`Malformed array at ${path}`);
-      return value.v.map((item, index) => decodeNode(item, `${path}[${index}]`, depth + 1));
+      return value.v.map((item, index) =>
+        decodeNode(item, `${path}[${index}]`, depth + 1, nodeCount),
+      );
     case 'o': {
       assertNodeShape(value, ['t', 'v'], path);
       if (!Array.isArray(value.v)) throw new CliError(`Malformed object at ${path}`);
@@ -249,7 +272,7 @@ function decodeNode(value: unknown, path: string, depth: number): unknown {
         if (seen.has(key)) throw new CliError(`Duplicate object key '${key}' at ${path}`);
         seen.add(key);
         Object.defineProperty(result, key, {
-          value: decodeNode(pair[1], `${path}.${key}`, depth + 1),
+          value: decodeNode(pair[1], `${path}.${key}`, depth + 1, nodeCount),
           enumerable: true,
           configurable: true,
           writable: true,
@@ -284,5 +307,6 @@ export function decodeLoaderPayload(payload: string): unknown[] {
     throw new CliError('Malformed contract loader payload envelope');
   }
   if (!Array.isArray(parsed.tokens)) throw new CliError('Malformed contract loader token list');
-  return parsed.tokens.map((token, index) => decodeNode(token, `tokens[${index}]`, 0));
+  const nodeCount = { value: 0 };
+  return parsed.tokens.map((token, index) => decodeNode(token, `tokens[${index}]`, 0, nodeCount));
 }

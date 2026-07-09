@@ -196,6 +196,8 @@ final class StateProvider: CompileStateCompound {
     var large: AsyncStream<Int64> { oneValue(9_007_199_254_740_993) }
     var initialDate: AsyncStream<Date> { oneValue(Date(timeIntervalSince1970: 1_709_528_767.890)) }
     var payload: AsyncStream<Data> { oneValue(Data([0, 1, 2, 254, 255])) }
+    var negativeZero: AsyncStream<Double> { oneValue(-0.0) }
+    var positiveZero: AsyncStream<Double> { oneValue(0.0) }
     var emptyObject: AsyncStream<EmptyObject> { oneValue(EmptyObject()) }
     var emptyRecord: AsyncStream<[String: String]> { oneValue([:]) }
     var emptyArray: AsyncStream<[String]> { oneValue([]) }
@@ -289,6 +291,17 @@ struct StateRoundTripMain {
             fail("binary stateInitials value did not decode")
         }
         require(payload == Data([0, 1, 2, 254, 255]), "binary stateInitials bytes mismatch")
+
+        let negativeZeroClient = CompileStateCompoundContract().outbound(StateCaller(initials["negativeZero"] ?? nil))
+        guard case .available(let negativeZero)? = await firstValue(negativeZeroClient.negativeZero) else {
+            fail("negative-zero stateInitials value did not decode")
+        }
+        require(1.0 / negativeZero == -Double.infinity, "negative-zero stateInitials sign mismatch")
+        let positiveZeroClient = CompileStateCompoundContract().outbound(StateCaller(initials["positiveZero"] ?? nil))
+        guard case .available(let positiveZero)? = await firstValue(positiveZeroClient.positiveZero) else {
+            fail("positive-zero stateInitials value did not decode")
+        }
+        require(1.0 / positiveZero == Double.infinity, "positive-zero stateInitials sign mismatch")
 
         let emptyObjectClient = CompileStateCompoundContract().outbound(StateCaller(initials["emptyObject"] ?? nil))
         guard case .available(_)? = await firstValue(emptyObjectClient.emptyObject) else {

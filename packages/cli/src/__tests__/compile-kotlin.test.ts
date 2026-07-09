@@ -98,6 +98,8 @@ class CompileStateCompoundRuntimeTest {
                 override val large = MutableStateFlow(9_007_199_254_740_993L)
                 override val initialDate = MutableStateFlow(Instant.parse("2024-03-04T05:06:07.890Z"))
                 override val payload = MutableStateFlow(byteArrayOf(0, 1, 2, 254.toByte(), 255.toByte()))
+                override val negativeZero = MutableStateFlow(-0.0)
+                override val positiveZero = MutableStateFlow(0.0)
                 override val emptyObject = MutableStateFlow(EmptyObject())
                 override val emptyRecord = MutableStateFlow<Map<String, String>>(emptyMap())
                 override val emptyArray = MutableStateFlow<List<String>>(emptyList())
@@ -126,6 +128,13 @@ class CompileStateCompoundRuntimeTest {
             byteArrayOf(0, 1, 2, 254.toByte(), 255.toByte()),
             (binaryInitial as BridgeValue.Available).value
         )
+
+        val negativeZeroInitial = CompileStateCompoundContract.outbound(StateCaller(initials.getValue("negativeZero"))).negativeZero.first()
+        assertTrue(negativeZeroInitial is BridgeValue.Available)
+        assertEquals(Double.NEGATIVE_INFINITY, 1.0 / (negativeZeroInitial as BridgeValue.Available).value, 0.0)
+        val positiveZeroInitial = CompileStateCompoundContract.outbound(StateCaller(initials.getValue("positiveZero"))).positiveZero.first()
+        assertTrue(positiveZeroInitial is BridgeValue.Available)
+        assertEquals(Double.POSITIVE_INFINITY, 1.0 / (positiveZeroInitial as BridgeValue.Available).value, 0.0)
 
         val emptyObjectInitial = CompileStateCompoundContract.outbound(StateCaller(initials.getValue("emptyObject"))).emptyObject.first()
         assertTrue(emptyObjectInitial is BridgeValue.Available)

@@ -6,7 +6,9 @@ import { loadContractsFromFile } from '../load.js';
 import {
   decodeLoaderPayload,
   encodeLoaderPayload,
+  loaderEncoderWorkerSource,
   MAX_LOADER_NESTING_DEPTH,
+  MAX_LOADER_NODE_COUNT,
   MAX_LOADER_PAYLOAD_BYTES,
 } from '../loaderCodec.js';
 
@@ -65,6 +67,31 @@ describe('contract loader value codec', () => {
     expect(decodeLoaderPayload(accepted)).toEqual([below]);
     expect(() => encodeLoaderPayload([`${below}x`])).toThrow(
       new RegExp(`payload.*${MAX_LOADER_PAYLOAD_BYTES} bytes`, 'i'),
+    );
+  });
+
+  it('accepts the node-count boundary and rejects the next node at its exact path', () => {
+    const accepted = Array.from({ length: MAX_LOADER_NODE_COUNT }, () => null);
+    const rejected = [...accepted, null];
+    const rejectedPayload = JSON.stringify({
+      $bridgekitLoader: 'v1',
+      tokens: rejected.map(() => ({ t: 'n' })),
+    });
+
+    expect(decodeLoaderPayload(encodeLoaderPayload(accepted))).toEqual(accepted);
+    expect(() => encodeLoaderPayload(rejected)).toThrow(CliError);
+    expect(() => encodeLoaderPayload(rejected)).toThrow(
+      `Loader value node count exceeds ${MAX_LOADER_NODE_COUNT} at tokens[${MAX_LOADER_NODE_COUNT}]`,
+    );
+    expect(() => decodeLoaderPayload(rejectedPayload)).toThrow(
+      `Loader value node count exceeds ${MAX_LOADER_NODE_COUNT} at tokens[${MAX_LOADER_NODE_COUNT}]`,
+    );
+    expect(() => decodeLoaderPayload(rejectedPayload)).toThrow(CliError);
+  });
+
+  it('embeds the node-count budget in the loader worker source', () => {
+    expect(loaderEncoderWorkerSource()).toContain(
+      `const MAX_LOADER_NODE_COUNT = ${MAX_LOADER_NODE_COUNT};`,
     );
   });
 

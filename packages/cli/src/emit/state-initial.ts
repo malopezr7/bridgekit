@@ -172,9 +172,9 @@ export function prepareStateInitial(
   value: unknown,
   schema: SchemaNode,
   path = 'state initial',
-): { encoded: unknown; schema: AnySchema } {
+): { encoded: unknown } {
   const coreSchema = supportedSchema(schema, `${path}.schema`);
   const encoded = encode(coreSchema, value);
   assertJsonNodes(schema, value, encoded, path);
-  return { encoded, schema: coreSchema };
+  return { encoded };
 }

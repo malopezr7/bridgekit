@@ -18,6 +18,8 @@ export const StateCompoundFixture: BridgeContract<unknown> = defineContract(
       large: t.state(t.int64(), 9_007_199_254_740_993n),
       initialDate: t.state(t.date(), new Date('2024-03-04T05:06:07.890Z')),
       payload: t.state(t.binary(), new Uint8Array([0, 1, 2, 254, 255])),
+      negativeZero: t.state(t.number(), -0),
+      positiveZero: t.state(t.number(), 0),
       emptyObject: t.state(t.object({}), {}),
       emptyRecord: t.state(t.record(t.string()), {}),
       emptyArray: t.state(t.array(t.string()), []),
