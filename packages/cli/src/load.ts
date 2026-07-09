@@ -20,11 +20,9 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { CliError } from './cliError.js';
 import {
   decodeLoaderPayload,
-  encodeLoaderPayload,
   loaderEncoderWorkerSource,
+  MAX_LOADER_SPAWN_BUFFER_BYTES,
 } from './loaderCodec.js';
-
-export { decodeLoaderPayload, encodeLoaderPayload };
 
 // ---- duck-typed contract shape (never import bridgekit classes) -------------
 
@@ -117,6 +115,10 @@ function lineNumberForOffset(source: string, offset: number): number {
 }
 
 // ---- ESM worker script (written to temp file, never compiled by babel) ------
+// The tagged fd-3 protocol is CLI-owned process transport. It intentionally stays
+// separate from the core schema wire codec, which cannot encode a descriptor before
+// the contract has crossed this worker boundary. loaderEncoderWorkerSource() embeds
+// function source; keep its dependencies limited to embedded declarations and Node globals.
 
 const WORKER_SCRIPT = `
 import { createRequire } from 'node:module';
@@ -255,11 +257,17 @@ export async function loadContractsFromFile(filePath: string): Promise<RawContra
       {
         encoding: 'utf8',
         timeout: 30_000,
+        maxBuffer: MAX_LOADER_SPAWN_BUFFER_BYTES,
         stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
       },
     );
 
     if (result.error) {
+      if ((result.error as NodeJS.ErrnoException).code === 'ENOBUFS') {
+        throw new CliError(
+          `Contract loader exceeded its ${MAX_LOADER_SPAWN_BUFFER_BYTES}-byte process output buffer`,
+        );
+      }
       throw new CliError(`Failed to spawn contract loader: ${result.error.message}`);
     }
 
