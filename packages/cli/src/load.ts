@@ -15,7 +15,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 
 import { CliError } from './cliError.js';
 
@@ -35,18 +35,15 @@ export interface RawContractToken {
 // ---- purity check -----------------------------------------------------------
 
 const ALLOWED_SPECIFIER_REGEX = /^@malopezr7\/bridgekit\/contract/;
+const WORKER_TOKEN_MARKER = '__BRIDGEKIT_LOADER_TOKENS__';
 
 /**
  * Scan import statements in a .ts file and fail if any import is not:
  * - '@malopezr7/bridgekit/contract'
- * - A relative path (starts with '.' — recursively scanned)
  *
  * Returns violation messages in file:line format.
  */
-function checkFilePurity(filePath: string, visited = new Set<string>()): string[] {
-  if (visited.has(filePath)) return [];
-  visited.add(filePath);
-
+function checkFilePurity(filePath: string): string[] {
   const violations: string[] = [];
   let source: string;
   try {
@@ -55,33 +52,49 @@ function checkFilePurity(filePath: string, visited = new Set<string>()): string[
     return [`${filePath}: cannot read file`];
   }
 
-  const lines = source.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? '';
-    // Match: import ... from '...' or import('...')
-    const staticMatch = line.match(/^\s*(?:import|export)\s+.*?from\s+['"]([^'"]+)['"]/);
-    const dynamicMatch = line.match(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/);
-    const specifiers = [staticMatch?.[1], dynamicMatch?.[1]].filter(Boolean) as string[];
-
-    for (const spec of specifiers) {
-      if (spec.startsWith('.')) {
-        // Relative import — recursively check the referenced file
-        const dir = dirname(filePath);
-        let candidate = resolve(dir, spec);
-        if (!extname(candidate)) {
-          const withTs = `${candidate}.ts`;
-          if (existsSync(withTs)) candidate = withTs;
-        }
-        if (existsSync(candidate)) {
-          violations.push(...checkFilePurity(candidate, visited));
-        }
-      } else if (!ALLOWED_SPECIFIER_REGEX.test(spec)) {
-        violations.push(`${filePath}:${i + 1}: purity violation — disallowed import '${spec}'`);
-      }
+  for (const match of findImportSpecifiers(source)) {
+    const line = lineNumberForOffset(source, match.index);
+    if (match.specifier.startsWith('.')) {
+      violations.push(
+        `${filePath}:${line}: purity violation — relative import '${match.specifier}' is not allowed`,
+      );
+    } else if (!ALLOWED_SPECIFIER_REGEX.test(match.specifier)) {
+      violations.push(
+        `${filePath}:${line}: purity violation — disallowed import '${match.specifier}'`,
+      );
     }
   }
 
   return violations;
+}
+
+function findImportSpecifiers(source: string): Array<{ specifier: string; index: number }> {
+  const matches: Array<{ specifier: string; index: number }> = [];
+  const patterns = [
+    /\b(?:import|export)\s+(?:type\s+)?[\s\S]*?\bfrom\s*['"]([^'"]+)['"]/g,
+    /\bimport\s+(?:type\s+)?['"]([^'"]+)['"]/g,
+    /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+    /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      const specifier = match[1];
+      if (specifier) {
+        matches.push({ specifier, index: match.index ?? 0 });
+      }
+    }
+  }
+
+  return matches;
+}
+
+function lineNumberForOffset(source: string, offset: number): number {
+  let line = 1;
+  for (let i = 0; i < offset; i++) {
+    if (source.charCodeAt(i) === 10) line++;
+  }
+  return line;
 }
 
 // ---- ESM worker script (written to temp file, never compiled by babel) ------
@@ -176,7 +189,7 @@ for (const [, value] of Object.entries(mod)) {
   }
 }
 
-process.stdout.write(JSON.stringify(tokens) + '\\n');
+process.stdout.write('${WORKER_TOKEN_MARKER}' + JSON.stringify(tokens) + '\\n');
 `;
 
 // ---- load contracts from a file --------------------------------------------
@@ -228,9 +241,18 @@ export async function loadContractsFromFile(filePath: string): Promise<RawContra
       throw new CliError(`Failed to load contract file ${filePath}:\n${stderr}`);
     }
 
+    const tokenLine = result.stdout
+      .split('\n')
+      .find((line) => line.startsWith(WORKER_TOKEN_MARKER));
+    if (!tokenLine) {
+      throw new CliError(
+        `Contract loader returned no protocol payload for ${filePath}: ${result.stdout.substring(0, 200)}`,
+      );
+    }
+
     let tokens: unknown[];
     try {
-      tokens = JSON.parse(result.stdout) as unknown[];
+      tokens = JSON.parse(tokenLine.slice(WORKER_TOKEN_MARKER.length)) as unknown[];
     } catch {
       throw new CliError(
         `Contract loader returned invalid JSON for ${filePath}: ${result.stdout.substring(0, 200)}`,
