@@ -464,6 +464,9 @@ export class CodecWalker {
     if (tags === undefined || tags.length !== node.options.length) {
       throw new Error(`[bridgekit] oneOf ${typeName} is missing stable option tags.`);
     }
+    // oneOf tags are `<kind>:<hash8hex>` ASCII-safe values, so string-literal
+    // escaping is byte-inert here; helpers stay for uniform defensive emission
+    // and direct unit coverage in emit-escaping.test.ts.
 
     encodeLines.push(
       `fun encode${typeName}(value: ${typeName}): Map<String, Any?> = when (value) {`,
