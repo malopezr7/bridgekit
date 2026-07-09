@@ -52,7 +52,6 @@ export function checkDrift(
   emitResults: EmitResult[],
   newLock: LockFile,
   outDir: string,
-  previousGeneratedFiles: ReadonlySet<string>,
 ): CheckDiff[] {
   const diffs: CheckDiff[] = [];
 
@@ -70,10 +69,8 @@ export function checkDrift(
   }
 
   const expectedFiles = new Set(emitResults.map((result) => result.fileName));
-  for (const fileName of listPrunableGeneratedOrphans(
-    outDir,
-    previousGeneratedFiles,
-    expectedFiles,
+  for (const fileName of listBridgeKitGeneratedFiles(outDir).filter(
+    (fileName) => !expectedFiles.has(fileName),
   )) {
     diffs.push({ file: fileName, reason: 'extra generated file in out-dir' });
   }
