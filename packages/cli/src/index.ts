@@ -70,22 +70,27 @@ function parseArgs(args: string[]): BridgekitOptions {
     const arg = args[i] ?? '';
     switch (arg) {
       case '--contracts':
-        opts.contracts = args[++i] ?? '';
+        opts.contracts = readOptionValue(args, i, '--contracts');
+        i++;
         break;
       case '--out-dir':
-        opts.outDir = args[++i] ?? '';
+        opts.outDir = readOptionValue(args, i, '--out-dir');
+        i++;
         break;
       case '--package':
-        opts.kotlinPackage = args[++i];
+        opts.kotlinPackage = readOptionValue(args, i, '--package');
+        i++;
         break;
       case '--check':
         opts.check = true;
         break;
       case '--into':
-        opts.into = args[++i];
+        opts.into = readOptionValue(args, i, '--into');
+        i++;
         break;
       case '--platform': {
-        const p = args[++i] ?? '';
+        const p = readOptionValue(args, i, '--platform');
+        i++;
         if (p !== 'kotlin' && p !== 'swift') {
           throw new CliError(`--platform must be 'kotlin' or 'swift', got: ${p}`);
         }
@@ -98,6 +103,14 @@ function parseArgs(args: string[]): BridgekitOptions {
   }
 
   return opts;
+}
+
+function readOptionValue(args: string[], index: number, option: string): string {
+  const value = args[index + 1];
+  if (value === undefined || value === '' || value.startsWith('-')) {
+    throw new CliError(`${option} requires a value`);
+  }
+  return value;
 }
 
 // ---- glob with exclusions --------------------------------------------------

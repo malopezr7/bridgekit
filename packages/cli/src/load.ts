@@ -7,7 +7,7 @@
 // Solution: write a tiny ESM loader script to a temp file and spawn it
 // with --experimental-strip-types. The script registers hooks for
 // extensionless .ts imports, imports the contract file, collects tokens
-// by duck-typing, and serializes to stdout as JSON.
+// by duck-typing, and writes token JSON to fd 3.
 //
 // Purity check (DESIGN §2.3) runs in the parent before spawning.
 // ---------------------------------------------------------------------------
@@ -15,7 +15,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 
 import { CliError } from './cliError.js';
 
@@ -37,16 +37,25 @@ export interface RawContractToken {
 const ALLOWED_SPECIFIER_REGEX = /^@malopezr7\/bridgekit\/contract/;
 
 /**
+ * Loader threat model:
+ * - CLI-08: accidental contract stdout/stderr noise cannot corrupt codegen because
+ *   token JSON travels on out-of-band fd 3, not stdout.
+ * - CLI-09: side-effecting local imports are blocked by rejecting relative import,
+ *   export, dynamic import(), and require() specifiers before worker execution.
+ * - Non-goal: maliciously-authored contract files. This loader executes the
+ *   contract with import(), so contract code is arbitrary code. A malicious
+ *   contract can reach raw file descriptors through Node internals (for example
+ *   process.binding('fs')) and forge fd-3 output without any import/require token.
+ *   Defending that boundary requires a real worker sandbox and is future work.
+ */
+
+/**
  * Scan import statements in a .ts file and fail if any import is not:
  * - '@malopezr7/bridgekit/contract'
- * - A relative path (starts with '.' — recursively scanned)
  *
  * Returns violation messages in file:line format.
  */
-function checkFilePurity(filePath: string, visited = new Set<string>()): string[] {
-  if (visited.has(filePath)) return [];
-  visited.add(filePath);
-
+function checkFilePurity(filePath: string): string[] {
   const violations: string[] = [];
   let source: string;
   try {
@@ -55,40 +64,56 @@ function checkFilePurity(filePath: string, visited = new Set<string>()): string[
     return [`${filePath}: cannot read file`];
   }
 
-  const lines = source.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i] ?? '';
-    // Match: import ... from '...' or import('...')
-    const staticMatch = line.match(/^\s*(?:import|export)\s+.*?from\s+['"]([^'"]+)['"]/);
-    const dynamicMatch = line.match(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/);
-    const specifiers = [staticMatch?.[1], dynamicMatch?.[1]].filter(Boolean) as string[];
-
-    for (const spec of specifiers) {
-      if (spec.startsWith('.')) {
-        // Relative import — recursively check the referenced file
-        const dir = dirname(filePath);
-        let candidate = resolve(dir, spec);
-        if (!extname(candidate)) {
-          const withTs = `${candidate}.ts`;
-          if (existsSync(withTs)) candidate = withTs;
-        }
-        if (existsSync(candidate)) {
-          violations.push(...checkFilePurity(candidate, visited));
-        }
-      } else if (!ALLOWED_SPECIFIER_REGEX.test(spec)) {
-        violations.push(`${filePath}:${i + 1}: purity violation — disallowed import '${spec}'`);
-      }
+  for (const match of findImportSpecifiers(source)) {
+    const line = lineNumberForOffset(source, match.index);
+    if (match.specifier.startsWith('.')) {
+      violations.push(
+        `${filePath}:${line}: purity violation — relative import '${match.specifier}' is not allowed`,
+      );
+    } else if (!ALLOWED_SPECIFIER_REGEX.test(match.specifier)) {
+      violations.push(
+        `${filePath}:${line}: purity violation — disallowed import '${match.specifier}'`,
+      );
     }
   }
 
   return violations;
 }
 
+function findImportSpecifiers(source: string): Array<{ specifier: string; index: number }> {
+  const matches: Array<{ specifier: string; index: number }> = [];
+  const patterns = [
+    /\b(?:import|export)\s+(?:type\s+)?[\s\S]*?\bfrom\s*['"]([^'"]+)['"]/g,
+    /\bimport\s+(?:type\s+)?['"]([^'"]+)['"]/g,
+    /\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+    /\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      const specifier = match[1];
+      if (specifier) {
+        matches.push({ specifier, index: match.index ?? 0 });
+      }
+    }
+  }
+
+  return matches;
+}
+
+function lineNumberForOffset(source: string, offset: number): number {
+  let line = 1;
+  for (let i = 0; i < offset; i++) {
+    if (source.charCodeAt(i) === 10) line++;
+  }
+  return line;
+}
+
 // ---- ESM worker script (written to temp file, never compiled by babel) ------
 
 const WORKER_SCRIPT = `
 import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
+import { existsSync, writeSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { registerHooks } from 'node:module';
@@ -176,7 +201,7 @@ for (const [, value] of Object.entries(mod)) {
   }
 }
 
-process.stdout.write(JSON.stringify(tokens) + '\\n');
+writeSync(3, JSON.stringify(tokens));
 `;
 
 // ---- load contracts from a file --------------------------------------------
@@ -208,14 +233,15 @@ export async function loadContractsFromFile(filePath: string): Promise<RawContra
   try {
     writeFileSync(workerPath, WORKER_SCRIPT, 'utf8');
 
-    // Spawn worker with TS stripping enabled
+    // Spawn worker with TS stripping enabled. fd 3 is the out-of-band token channel;
+    // user contract stdout stays on fd 1 and cannot corrupt the protocol payload.
     const result = spawnSync(
       process.execPath,
       ['--experimental-strip-types', workerPath, filePath],
       {
         encoding: 'utf8',
         timeout: 30_000,
-        env: { ...process.env },
+        stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
       },
     );
 
@@ -228,12 +254,19 @@ export async function loadContractsFromFile(filePath: string): Promise<RawContra
       throw new CliError(`Failed to load contract file ${filePath}:\n${stderr}`);
     }
 
+    const tokenPayload = result.output[3];
+    if (typeof tokenPayload !== 'string' || tokenPayload.length === 0) {
+      throw new CliError(
+        `Contract loader returned no protocol payload for ${filePath}: ${result.stdout.substring(0, 200)}`,
+      );
+    }
+
     let tokens: unknown[];
     try {
-      tokens = JSON.parse(result.stdout) as unknown[];
+      tokens = JSON.parse(tokenPayload) as unknown[];
     } catch {
       throw new CliError(
-        `Contract loader returned invalid JSON for ${filePath}: ${result.stdout.substring(0, 200)}`,
+        `Contract loader returned invalid JSON for ${filePath}: ${tokenPayload.substring(0, 200)}`,
       );
     }
 
