@@ -328,11 +328,15 @@ export function assembleSwiftContractFile(parts: {
 
 // ---- emitSwiftContract -----------------------------------------------------
 
-export function emitSwiftContract(token: RawContractToken, _contractPackage: string): EmitResult {
+export function emitSwiftContract(
+  token: RawContractToken,
+  _contractPackage: string,
+  resolvedClassName?: string,
+): EmitResult {
   const descriptor = token.descriptor;
   const id = descriptor.id;
   const hash = token.hash;
-  const className = contractIdToClassName(id);
+  const className = resolvedClassName ?? contractIdToClassName(id);
   const fileName = `${className}Contract.swift`;
 
   const typeEmitter = new SwiftTypeEmitter(className);
@@ -378,8 +382,9 @@ export function emitSwiftContract(token: RawContractToken, _contractPackage: str
       let paramsType = '';
       if (desc.params) {
         const dataClassName = `${toPascalCase(swiftName)}Params`;
-        typeEmitter.emit(desc.params, dataClassName);
-        paramsType = dataClassName;
+        const paramsResult = typeEmitter.emit(desc.params, dataClassName);
+        paramsType = paramsResult.typeName;
+        registerObjectCodec(paramsType, desc.params);
       }
 
       const paramSig = paramsType ? `_ params: ${paramsType}` : '';
@@ -420,8 +425,8 @@ export function emitSwiftContract(token: RawContractToken, _contractPackage: str
 
       if (desc.params) {
         const dataClassName = `${toPascalCase(swiftName)}Params`;
-        typeEmitter.emit(desc.params, dataClassName);
-        paramsType = dataClassName;
+        const paramsResult = typeEmitter.emit(desc.params, dataClassName);
+        paramsType = paramsResult.typeName;
       }
 
       const resultCtx = `${toPascalCase(swiftName)}Result`;
@@ -527,9 +532,9 @@ export function emitSwiftContract(token: RawContractToken, _contractPackage: str
     let streamParamsType = '';
     if (desc.params) {
       const dataClassName = `${toPascalCase(swiftName)}Params`;
-      typeEmitter.emit(desc.params, dataClassName);
-      streamParamsType = dataClassName;
-      registerObjectCodec(dataClassName, desc.params);
+      const paramsResult = typeEmitter.emit(desc.params, dataClassName);
+      streamParamsType = paramsResult.typeName;
+      registerObjectCodec(streamParamsType, desc.params);
     }
 
     const paramSig = streamParamsType ? `_ params: ${streamParamsType}` : '';
@@ -636,15 +641,6 @@ export function emitSwiftContract(token: RawContractToken, _contractPackage: str
         `}`,
       ].join('\n'),
     );
-  }
-
-  // ---- encode/decode for params (fire/query) ----
-  for (const [memberName, rawDesc] of Object.entries(descriptor.methods)) {
-    const desc = rawDesc as MethodDescRaw;
-    if (desc.params) {
-      const dataClassName = `${toPascalCase(memberName)}Params`;
-      registerObjectCodec(dataClassName, desc.params);
-    }
   }
 
   const needsFoundationImport =

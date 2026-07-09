@@ -126,11 +126,15 @@ function buildInboundEncodeExpr(
 
 const CODEGEN_VERSION = '1';
 
-export function emitKotlinContract(token: RawContractToken, kotlinPackage: string): EmitResult {
+export function emitKotlinContract(
+  token: RawContractToken,
+  kotlinPackage: string,
+  resolvedClassName?: string,
+): EmitResult {
   const descriptor = token.descriptor;
   const id = descriptor.id;
   const hash = token.hash;
-  const className = contractIdToClassName(id);
+  const className = resolvedClassName ?? contractIdToClassName(id);
   const fileName = `${className}Contract.kt`;
 
   const typeEmitter = new KotlinTypeEmitter(className);
@@ -142,6 +146,8 @@ export function emitKotlinContract(token: RawContractToken, kotlinPackage: strin
   const outboundImpls: string[] = [];
   const memberHashPairs: string[] = [];
   const encodeDecodeFns: string[] = [];
+  const methodParamsTypes = new Map<string, string>();
+  const streamParamsTypes = new Map<string, string>();
 
   const registeredCodecs = new Set<string>();
   const registerCodecFn = (fn: string): void => {
@@ -172,8 +178,10 @@ export function emitKotlinContract(token: RawContractToken, kotlinPackage: strin
       let paramsType = '';
       if (desc.params) {
         const dataClassName = `${toPascalCase(kName)}Params`;
-        typeEmitter.emit(desc.params, dataClassName);
-        paramsType = dataClassName;
+        const paramsResult = typeEmitter.emit(desc.params, dataClassName);
+        paramsType = paramsResult.typeName;
+        methodParamsTypes.set(memberName, paramsType);
+        registerObjectCodec(paramsType, desc.params);
       }
 
       const paramSig = paramsType ? `(params: ${paramsType})` : '()';
@@ -215,8 +223,9 @@ export function emitKotlinContract(token: RawContractToken, kotlinPackage: strin
 
       if (desc.params) {
         const dataClassName = `${toPascalCase(kName)}Params`;
-        typeEmitter.emit(desc.params, dataClassName);
-        paramsType = dataClassName;
+        const paramsResult = typeEmitter.emit(desc.params, dataClassName);
+        paramsType = paramsResult.typeName;
+        methodParamsTypes.set(memberName, paramsType);
       }
 
       const resultCtx = `${toPascalCase(kName)}Result`;
@@ -314,9 +323,10 @@ export function emitKotlinContract(token: RawContractToken, kotlinPackage: strin
     let streamParamsType = '';
     if (desc.params) {
       const dataClassName = `${toPascalCase(kName)}Params`;
-      typeEmitter.emit(desc.params, dataClassName);
-      streamParamsType = dataClassName;
-      registerObjectCodec(dataClassName, desc.params);
+      const paramsResult = typeEmitter.emit(desc.params, dataClassName);
+      streamParamsType = paramsResult.typeName;
+      streamParamsTypes.set(memberName, streamParamsType);
+      registerObjectCodec(streamParamsType, desc.params);
     }
 
     const paramSig = streamParamsType ? `(params: ${streamParamsType})` : '()';
@@ -374,22 +384,13 @@ export function emitKotlinContract(token: RawContractToken, kotlinPackage: strin
     }
   }
 
-  // ---- encode/decode for params objects (covers fire/Void params too) ----
-  for (const [memberName, rawDesc] of Object.entries(descriptor.methods)) {
-    const desc = rawDesc as MethodDescRaw;
-    if (desc.params) {
-      const dataClassName = `${toPascalCase(toKotlinMemberName(memberName))}Params`;
-      registerObjectCodec(dataClassName, desc.params);
-    }
-  }
-
   // ---- inbound invoke_sync (querySync only) ----
   const syncImpls: string[] = [];
   for (const [memberName, rawDesc] of Object.entries(descriptor.methods)) {
     const desc = rawDesc as MethodDescRaw;
     if (desc.kind !== 'querySync') continue;
     const kName = toKotlinMemberName(memberName);
-    const paramsType = desc.params ? `${toPascalCase(kName)}Params` : '';
+    const paramsType = methodParamsTypes.get(memberName) ?? '';
     const resultCtx = `${toPascalCase(kName)}Result`;
     const implCall = paramsType ? `impl.${kName}(decoded)` : `impl.${kName}()`;
     const resultExpr = desc.result
@@ -411,7 +412,7 @@ export function emitKotlinContract(token: RawContractToken, kotlinPackage: strin
   for (const [memberName, rawDesc] of Object.entries(descriptor.streams)) {
     const desc = rawDesc as StreamDescRaw;
     const kName = toKotlinMemberName(memberName);
-    const streamParamsType = desc.params ? `${toPascalCase(kName)}Params` : '';
+    const streamParamsType = streamParamsTypes.get(memberName) ?? '';
     const callExpr = streamParamsType
       ? `impl.${kName}(${className}Codecs.decode${streamParamsType}(payload ?: emptyMap<String, Any?>()))`
       : `impl.${kName}()`;
