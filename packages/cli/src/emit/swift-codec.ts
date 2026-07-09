@@ -74,7 +74,12 @@ export class SwiftCodecWalker {
       }
       case 'enum': {
         const typeName = this.typeName(node, ctxName);
-        return `try (${typeName}(rawValue: Int(exactly: try ((${expr} as? NSNumber) ?? bridgeKitThrow(field: "result", expectedType: "${typeName}"))) ?? bridgeKitThrow(field: "result", expectedType: "${typeName}"))`;
+        return `try { () throws -> ${typeName} in
+            guard let number = ${expr} as? NSNumber else { throw BridgeKitDecodeError(field: "result", expectedType: "${typeName}") }
+            guard let rawValue = Int(exactly: number) else { throw BridgeKitDecodeError(field: "result", expectedType: "${typeName}") }
+            guard let value = ${typeName}(rawValue: rawValue) else { throw BridgeKitDecodeError(field: "result", expectedType: "${typeName}") }
+            return value
+        }()`;
       }
       case 'date':
         return `try Date(timeIntervalSince1970: Double((${expr} as? Int64) ?? Int64(try ((${expr} as? Double) ?? bridgeKitThrow(field: "result", expectedType: "Date")))) / 1000.0)`;
