@@ -245,7 +245,7 @@ export class CodecWalker {
       case 'record': {
         const value = (node as RecordNode).value;
         const valueCtx = `${ctxName}Value`;
-        return `(${raw} as? Map<*, *>)?.entries?.associate { (k, v) -> k.toString() to ${this.decodeExpr('v', value, valueCtx, fieldName)} } ?: throw BridgeKitDecodeException(${fieldLit}, "Map")`;
+        return `(${raw} as? Map<*, *>)?.entries?.associate { (k, v) -> k.toString() to (${this.decodeExpr('v', value, valueCtx, fieldName)}) } ?: throw BridgeKitDecodeException(${fieldLit}, "Map")`;
       }
 
       case 'int64':
