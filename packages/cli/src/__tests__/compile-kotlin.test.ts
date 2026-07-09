@@ -237,4 +237,22 @@ describe('Kotlin real compiler harness', () => {
     expect(source).toContain(`decode${suffixedParams}(payload ?: emptyMap<String, Any?>())`);
     expect(source).toContain(`encode${suffixedParams}(params)`);
   });
+
+  it('compiles CLI-04 Kotlin keyword and literal escaping fixture', () => {
+    generateKotlin(
+      {
+        'keywords.contract.ts': readFileSync(path.join(fixturesDir, 'keywords.fixture.ts'), 'utf8'),
+      },
+      futureRedFixturesDir,
+    );
+
+    const result = runGradleCompile(futureRedFixturesDir);
+    const output = `${result.stdout}\n${result.stderr}`;
+
+    if (result.status !== 0) {
+      throw new Error(`Kotlin keyword/literal compiler gate failed (${result.status}):\n${output}`);
+    }
+    expect(result.status).toBe(0);
+    expect(output).toContain('BUILD SUCCESSFUL');
+  });
 });

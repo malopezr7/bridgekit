@@ -135,7 +135,10 @@ const KOTLIN_HARD_KEYWORDS = new Set([
 ]);
 
 export function escapeKotlinIdentifier(name: string): string {
-  return KOTLIN_HARD_KEYWORDS.has(name) ? `\`${name}\`` : name;
+  if (KOTLIN_HARD_KEYWORDS.has(name) || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
+    return `\`${name}\``;
+  }
+  return name;
 }
 
 export function toKotlinMemberName(name: string): string {
@@ -145,7 +148,11 @@ export function toKotlinMemberName(name: string): string {
         `Rename it in the contract to use only letters, digits, and underscores.`,
     );
   }
-  return name;
+  return escapeKotlinIdentifier(name);
+}
+
+export function kotlinStringLiteral(value: string): string {
+  return JSON.stringify(value).replace(/\$/g, '\\$');
 }
 
 function toEnumConstant(value: string): string {
@@ -283,7 +290,10 @@ export class KotlinTypeEmitter {
         validateLiteralsCollisions(lits.values, `${this.className}.${contextName}`);
         if (!this.declarations.has(enumName)) {
           const constants = lits.values
-            .map((v) => `    /** Wire value: "${v}" */\n    ${toEnumConstant(v)}("${v}")`)
+            .map((v) => {
+              const wireValue = kotlinStringLiteral(v);
+              return `    /** Wire value: ${wireValue} */\n    ${toEnumConstant(v)}(${wireValue})`;
+            })
             .join(',\n');
           const enumDecl = [
             `enum class ${enumName}(val wireValue: String) {`,
@@ -342,7 +352,7 @@ export class KotlinTypeEmitter {
           for (const [variantName, variantSchema] of Object.entries(union.variants)) {
             const variantClassName = toPascalCase(variantName);
             const fields: string[] = [
-              `        override val ${escapeKotlinIdentifier(union.discriminant)}: String = "${variantName}"`,
+              `        override val ${escapeKotlinIdentifier(union.discriminant)}: String = ${kotlinStringLiteral(variantName)}`,
             ];
             for (const [fieldName, fieldSchema] of Object.entries(variantSchema.fields)) {
               const fieldType = this.emit(
@@ -361,7 +371,7 @@ export class KotlinTypeEmitter {
 
           const sealedDecl = [
             `sealed class ${sealedName} {`,
-            `    abstract val ${union.discriminant}: String`,
+            `    abstract val ${escapeKotlinIdentifier(union.discriminant)}: String`,
             ...variantBodies,
             ...variantDecls.map((d) =>
               d
@@ -406,9 +416,11 @@ export class KotlinTypeEmitter {
   private emitEnumNode(enumNode: EnumNode, contextName: string, nullable: boolean): TypeResult {
     const enumName = this.allocateName(toPascalCase(contextName), enumNode);
     if (!this.declarations.has(enumName)) {
-      const constants = enumNode.members.map((m) => `    ${m.name}(${m.value})`).join(',\n');
+      const constants = enumNode.members
+        .map((m) => `    ${escapeKotlinIdentifier(m.name)}(${m.value})`)
+        .join(',\n');
       const fromWireLogic = enumNode.members
-        .map((m) => `            ${m.value} -> ${m.name}`)
+        .map((m) => `            ${m.value} -> ${escapeKotlinIdentifier(m.name)}`)
         .join('\n');
       this.declarations.set(
         enumName,
@@ -489,15 +501,27 @@ export function kotlinLiteral(value: unknown): string {
   if (value === null || value === undefined) return 'null';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'number') return String(value);
-  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'bigint') return `${value}L`;
+  if (typeof value === 'string') return kotlinStringLiteral(value);
   if (typeof value === 'object') {
     if (Array.isArray(value)) {
       return `listOf(${(value as unknown[]).map(kotlinLiteral).join(', ')})`;
     }
     const entries = Object.entries(value as Record<string, unknown>)
-      .map(([k, v]) => `${JSON.stringify(k)} to ${kotlinLiteral(v)}`)
+      .map(([k, v]) => `${kotlinStringLiteral(k)} to ${kotlinLiteral(v)}`)
       .join(', ');
     return `mapOf(${entries})`;
   }
   return 'null';
+}
+
+export function kotlinLiteralForSchema(value: unknown, schema: SchemaNode): string {
+  if (schema.kind === 'int64' && (typeof value === 'number' || typeof value === 'bigint')) {
+    return `${value}L`;
+  }
+  if (schema.kind === 'optional' || schema.kind === 'nullable') {
+    if (value === null || value === undefined) return 'null';
+    return kotlinLiteralForSchema(value, (schema as OptionalNode | NullableNode).inner);
+  }
+  return kotlinLiteral(value);
 }

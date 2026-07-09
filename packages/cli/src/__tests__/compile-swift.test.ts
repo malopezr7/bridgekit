@@ -388,4 +388,15 @@ describeOnMac('Swift real compiler harness', () => {
       expect(`${result.stdout}\n${result.stderr}`.trim()).toBe('');
     }
   });
+
+  it('typechecks CLI-04 Swift keyword and literal escaping fixture', () => {
+    const keywordsFixture = readFileSync(path.join(fixturesDir, 'keywords.fixture.ts'), 'utf8');
+    const outDir = generateSwift({ 'keywords.contract.ts': keywordsFixture }, 'keywords');
+    const [swiftFile] = generatedSwiftFiles(outDir);
+    expect(swiftFile).toBeDefined();
+
+    const result = swiftcTypecheck(swiftFile as string);
+
+    expect(result.status).toBe(0);
+  });
 });

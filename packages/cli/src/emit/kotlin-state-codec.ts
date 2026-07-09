@@ -1,5 +1,5 @@
 import type { CodecWalker } from './codec.js';
-import type { SchemaNode } from './types.js';
+import { kotlinStringLiteral, type SchemaNode } from './types.js';
 
 function buildBridgeValueDecodeExpr(
   bridgeValueExpr: string,
@@ -34,7 +34,7 @@ export function buildStateFlowDecodeExpr(
     walker,
   );
   return `run {
-                    val source = caller.state("${memberName}")
+                    val source = caller.state(${kotlinStringLiteral(memberName)})
                     fun decodeStateValue(stateValue: BridgeValue<Any?>): BridgeValue<${valueType}> = ${decodeStateValue}
                     @OptIn(kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi::class)
                     object : kotlinx.coroutines.flow.StateFlow<BridgeValue<${valueType}>> {

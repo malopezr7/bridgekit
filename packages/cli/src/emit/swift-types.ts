@@ -81,6 +81,44 @@ export function escapeSwiftIdentifier(name: string): string {
   return SWIFT_HARD_KEYWORDS.has(name) ? `\`${name}\`` : name;
 }
 
+export function swiftMemberAccess(name: string): string {
+  return `.${escapeSwiftIdentifier(name)}`;
+}
+
+export function swiftStringLiteral(value: string): string {
+  let out = '"';
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    switch (char) {
+      case '"':
+        out += '\\"';
+        break;
+      case '\\':
+        out += '\\\\';
+        break;
+      case '\n':
+        out += '\\n';
+        break;
+      case '\r':
+        out += '\\r';
+        break;
+      case '\t':
+        out += '\\t';
+        break;
+      case '\0':
+        out += '\\u{0}';
+        break;
+      default:
+        if (code < 0x20 || code === 0x7f) {
+          out += `\\u{${code.toString(16).toUpperCase()}}`;
+        } else {
+          out += char;
+        }
+    }
+  }
+  return `${out}"`;
+}
+
 // ---- Enum constant: convert string literal to a valid Swift enum case name --
 
 function toSwiftEnumCase(value: string): string {
@@ -225,7 +263,11 @@ export class SwiftTypeEmitter {
     const enumName = this.allocateName(toPascalCase(contextName), lits);
     validateLiteralsCollisions(lits.values, `${this.className}.${contextName}`);
     if (!this.declarations.has(enumName)) {
-      const cases = lits.values.map((v) => `    case ${toSwiftEnumCase(v)} = "${v}"`).join('\n');
+      const cases = lits.values
+        .map(
+          (v) => `    case ${escapeSwiftIdentifier(toSwiftEnumCase(v))} = ${swiftStringLiteral(v)}`,
+        )
+        .join('\n');
       this.declarations.set(enumName, [`enum ${enumName}: String {`, cases, `}`].join('\n'));
     }
     return { typeName: nullable ? `${enumName}?` : enumName, declarations: [], nullable };
@@ -234,7 +276,9 @@ export class SwiftTypeEmitter {
   private emitEnumNode(enumNode: EnumNode, contextName: string, nullable: boolean): TypeResult {
     const enumName = this.allocateName(toPascalCase(contextName), enumNode);
     if (!this.declarations.has(enumName)) {
-      const cases = enumNode.members.map((m) => `    case ${m.name} = ${m.value}`).join('\n');
+      const cases = enumNode.members
+        .map((m) => `    case ${escapeSwiftIdentifier(m.name)} = ${m.value}`)
+        .join('\n');
       this.declarations.set(enumName, [`enum ${enumName}: Int {`, cases, `}`].join('\n'));
     }
     return { typeName: nullable ? `${enumName}?` : enumName, declarations: [], nullable };
@@ -273,9 +317,9 @@ export class SwiftTypeEmitter {
         }
         if (fields.length > 0) {
           structs.push([`struct ${variantTypeName} {`, ...fields, `}`].join('\n'));
-          cases.push(`    case ${variantName}(${variantTypeName})`);
+          cases.push(`    case ${escapeSwiftIdentifier(variantName)}(${variantTypeName})`);
         } else {
-          cases.push(`    case ${variantName}`);
+          cases.push(`    case ${escapeSwiftIdentifier(variantName)}`);
         }
       }
 
@@ -321,13 +365,13 @@ export function swiftLiteral(value: unknown): string {
   if (value === null || value === undefined) return 'nil';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'number') return String(value);
-  if (typeof value === 'string') return JSON.stringify(value);
+  if (typeof value === 'string') return swiftStringLiteral(value);
   if (typeof value === 'object') {
     if (Array.isArray(value)) {
       return `[${(value as unknown[]).map(swiftLiteral).join(', ')}]`;
     }
     const entries = Object.entries(value as Record<string, unknown>)
-      .map(([k, v]) => `${JSON.stringify(k)}: ${swiftLiteral(v)}`)
+      .map(([k, v]) => `${swiftStringLiteral(k)}: ${swiftLiteral(v)}`)
       .join(', ');
     return `[${entries}]`;
   }

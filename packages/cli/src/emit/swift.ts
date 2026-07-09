@@ -3,7 +3,12 @@
 import type { RawContractToken } from '../load.js';
 import type { EmitResult } from './assemble.js';
 import { SwiftCodecWalker, schemaNeedsCodec } from './swift-codec.js';
-import { SwiftTypeEmitter, swiftLiteral } from './swift-types.js';
+import {
+  escapeSwiftIdentifier,
+  SwiftTypeEmitter,
+  swiftLiteral,
+  swiftStringLiteral,
+} from './swift-types.js';
 import {
   type ArrayNode,
   contractIdToClassName,
@@ -223,8 +228,8 @@ export function assembleSwiftContractFile(parts: {
   // Instead pass them via super.init(id:contractHash:memberHashes:).
   lines.push(`    init() {`);
   lines.push(`        super.init(`);
-  lines.push(`            id: ${JSON.stringify(id)},`);
-  lines.push(`            contractHash: ${JSON.stringify(hash)},`);
+  lines.push(`            id: ${swiftStringLiteral(id)},`);
+  lines.push(`            contractHash: ${swiftStringLiteral(hash)},`);
   lines.push(`            memberHashes: [`);
   for (let i = 0; i < memberHashPairs.length; i++) {
     const comma = i < memberHashPairs.length - 1 ? ',' : '';
@@ -372,16 +377,17 @@ export function emitSwiftContract(
   // ---- methods ----
   for (const [memberName, rawDesc] of Object.entries(descriptor.methods)) {
     const desc = rawDesc as MethodDescRaw;
-    const swiftName = memberName; // Swift uses same member name as schema
+    const swiftName = escapeSwiftIdentifier(memberName);
+    const memberCtx = toPascalCase(memberName);
 
     memberHashPairs.push(
-      `${JSON.stringify(`methods.${memberName}`)}: ${JSON.stringify(hashMember(rawDesc))}`,
+      `${swiftStringLiteral(`methods.${memberName}`)}: ${swiftStringLiteral(hashMember(rawDesc))}`,
     );
 
     if (desc.kind === 'fire') {
       let paramsType = '';
       if (desc.params) {
-        const dataClassName = `${toPascalCase(swiftName)}Params`;
+        const dataClassName = `${memberCtx}Params`;
         const paramsResult = typeEmitter.emit(desc.params, dataClassName);
         paramsType = paramsResult.typeName;
         registerObjectCodec(paramsType, desc.params);
@@ -395,14 +401,16 @@ export function emitSwiftContract(
       if (paramsType) {
         inboundImpls.push(
           [
-            `case ${JSON.stringify(memberName)}:`,
+            `case ${swiftStringLiteral(memberName)}:`,
             `    let decoded = try ${className}Codecs.decode${paramsType}(payload ?? [:])`,
             `    impl.${swiftName}(decoded)`,
             `    return nil`,
           ].join('\n'),
         );
       } else {
-        inboundImpls.push(`case ${JSON.stringify(memberName)}: impl.${swiftName}(); return nil`);
+        inboundImpls.push(
+          `case ${swiftStringLiteral(memberName)}: impl.${swiftName}(); return nil`,
+        );
       }
 
       // outbound
@@ -410,13 +418,13 @@ export function emitSwiftContract(
         outboundImpls.push(
           [
             `func ${swiftName}(_ params: ${paramsType}) {`,
-            `    caller.fire(member: ${JSON.stringify(memberName)}, payload: ${className}Codecs.encode${paramsType}(params))`,
+            `    caller.fire(member: ${swiftStringLiteral(memberName)}, payload: ${className}Codecs.encode${paramsType}(params))`,
             `}`,
           ].join('\n'),
         );
       } else {
         outboundImpls.push(
-          `func ${swiftName}() { caller.fire(member: ${JSON.stringify(memberName)}, payload: nil) }`,
+          `func ${swiftName}() { caller.fire(member: ${swiftStringLiteral(memberName)}, payload: nil) }`,
         );
       }
     } else if (desc.kind === 'query' || desc.kind === 'querySync') {
@@ -424,12 +432,12 @@ export function emitSwiftContract(
       let resultType = 'Void';
 
       if (desc.params) {
-        const dataClassName = `${toPascalCase(swiftName)}Params`;
+        const dataClassName = `${memberCtx}Params`;
         const paramsResult = typeEmitter.emit(desc.params, dataClassName);
         paramsType = paramsResult.typeName;
       }
 
-      const resultCtx = `${toPascalCase(swiftName)}Result`;
+      const resultCtx = `${memberCtx}Result`;
       if (desc.result) {
         const res = typeEmitter.emit(desc.result, resultCtx);
         resultType = res.typeName;
@@ -454,7 +462,7 @@ export function emitSwiftContract(
         const inboundResultExpr = desc.result
           ? buildSwiftInboundEncodeExpr(desc.result, inboundCallExprBase, resultCtx, walker)
           : inboundCallExprBase;
-        const body: string[] = [`case ${JSON.stringify(memberName)}:`];
+        const body: string[] = [`case ${swiftStringLiteral(memberName)}:`];
         if (paramsType) {
           body.push(`    let decoded = try ${className}Codecs.decode${paramsType}(payload ?? [:])`);
         }
@@ -474,7 +482,7 @@ export function emitSwiftContract(
               walker,
             )
           : `try await ${inboundCallExprBase}`;
-        const body: string[] = [`case ${JSON.stringify(memberName)}:`];
+        const body: string[] = [`case ${swiftStringLiteral(memberName)}:`];
         if (paramsType) {
           body.push(`    let decoded = try ${className}Codecs.decode${paramsType}(payload ?? [:])`);
         }
@@ -496,7 +504,7 @@ export function emitSwiftContract(
         outboundImpls.push(
           [
             `func ${swiftName}(${paramSig}) throws -> ${resultType} {`,
-            `    let result = try caller.${invokeCall}(member: ${JSON.stringify(memberName)}, payload: ${encodeParams})`,
+            `    let result = try caller.${invokeCall}(member: ${swiftStringLiteral(memberName)}, payload: ${encodeParams})`,
             ...returnLines,
             `}`,
           ].join('\n'),
@@ -505,7 +513,7 @@ export function emitSwiftContract(
         outboundImpls.push(
           [
             `func ${swiftName}(${paramSig}) async throws -> ${resultType} {`,
-            `    let result = try await caller.${invokeCall}(member: ${JSON.stringify(memberName)}, payload: ${encodeParams})`,
+            `    let result = try await caller.${invokeCall}(member: ${swiftStringLiteral(memberName)}, payload: ${encodeParams})`,
             ...returnLines,
             `}`,
           ].join('\n'),
@@ -521,17 +529,18 @@ export function emitSwiftContract(
   // ---- streams ----
   for (const [memberName, rawDesc] of Object.entries(descriptor.streams)) {
     const desc = rawDesc as StreamDescRaw;
-    const swiftName = memberName;
-    const valueResult = typeEmitter.emit(desc.value, `${toPascalCase(swiftName)}Value`);
+    const swiftName = escapeSwiftIdentifier(memberName);
+    const memberCtx = toPascalCase(memberName);
+    const valueResult = typeEmitter.emit(desc.value, `${memberCtx}Value`);
     const streamType = `AsyncStream<${valueResult.typeName}>`;
 
     memberHashPairs.push(
-      `${JSON.stringify(`streams.${memberName}`)}: ${JSON.stringify(hashMember(rawDesc))}`,
+      `${swiftStringLiteral(`streams.${memberName}`)}: ${swiftStringLiteral(hashMember(rawDesc))}`,
     );
 
     let streamParamsType = '';
     if (desc.params) {
-      const dataClassName = `${toPascalCase(swiftName)}Params`;
+      const dataClassName = `${memberCtx}Params`;
       const paramsResult = typeEmitter.emit(desc.params, dataClassName);
       streamParamsType = paramsResult.typeName;
       registerObjectCodec(streamParamsType, desc.params);
@@ -545,7 +554,7 @@ export function emitSwiftContract(
       ? `${className}Codecs.encode${streamParamsType}(params)`
       : 'nil';
 
-    const valueCtx = `${toPascalCase(swiftName)}Value`;
+    const valueCtx = `${memberCtx}Value`;
     // caller.stream() returns AsyncThrowingStream<Any?, Error>. Bridge it to AsyncStream<T>
     // by decoding each element (walker.decodeExpr handles numeric Int/Double coercion —
     // a raw `as! Double` traps when JS sends an integer) and swallowing the error
@@ -554,7 +563,7 @@ export function emitSwiftContract(
     outboundImpls.push(
       [
         `func ${swiftName}(${paramSig}) -> ${streamType} {`,
-        `    let throwing = caller.stream(member: ${JSON.stringify(memberName)}, payload: ${encodeStreamParams})`,
+        `    let throwing = caller.stream(member: ${swiftStringLiteral(memberName)}, payload: ${encodeStreamParams})`,
         `    return AsyncStream { cont in Task { do { for try await item in throwing { cont.yield(${decodeStreamItem}) } } catch {} ; cont.finish() } }`,
         `}`,
       ].join('\n'),
@@ -569,7 +578,7 @@ export function emitSwiftContract(
       const encodeItem = walker.encodeExpr('item', desc.value, valueCtx);
       streamImpls.push(
         [
-          `case ${JSON.stringify(memberName)}:`,
+          `case ${swiftStringLiteral(memberName)}:`,
           `    let src = ${callExpr}`,
           `    return AsyncThrowingStream { cont in Task { for await item in src { cont.yield(${encodeItem}) }; cont.finish() } }`,
         ].join('\n'),
@@ -577,7 +586,7 @@ export function emitSwiftContract(
     } else {
       streamImpls.push(
         [
-          `case ${JSON.stringify(memberName)}:`,
+          `case ${swiftStringLiteral(memberName)}:`,
           `    let src = ${callExpr}`,
           `    return AsyncThrowingStream { cont in Task { for await item in src { cont.yield(item) }; cont.finish() } }`,
         ].join('\n'),
@@ -588,14 +597,15 @@ export function emitSwiftContract(
   // ---- state ----
   for (const [memberName, rawDesc] of Object.entries(descriptor.state)) {
     const desc = rawDesc as StateDescRaw;
-    const swiftName = memberName;
-    const valueResult = typeEmitter.emit(desc.value, toPascalCase(swiftName));
+    const swiftName = escapeSwiftIdentifier(memberName);
+    const memberCtx = toPascalCase(memberName);
+    const valueResult = typeEmitter.emit(desc.value, memberCtx);
 
     memberHashPairs.push(
-      `${JSON.stringify(`state.${memberName}`)}: ${JSON.stringify(hashMember(rawDesc))}`,
+      `${swiftStringLiteral(`state.${memberName}`)}: ${swiftStringLiteral(hashMember(rawDesc))}`,
     );
 
-    stateInitials.push(`${JSON.stringify(memberName)}: ${swiftLiteral(desc.initial)},`);
+    stateInitials.push(`${swiftStringLiteral(memberName)}: ${swiftLiteral(desc.initial)},`);
 
     providerMethods.push(`    var ${swiftName}: AsyncStream<${valueResult.typeName}> { get }`);
     clientMethods.push(
@@ -605,13 +615,13 @@ export function emitSwiftContract(
     // stateFlowEntries are emitted inside the INBOUND adapter (no `caller`).
     // Bridge the provider's AsyncStream<T> to AsyncStream<Any?> via a wrapping stream.
     if (schemaNeedsCodec(desc.value)) {
-      const encodeStateValue = walker.encodeExpr('v', desc.value, toPascalCase(swiftName));
+      const encodeStateValue = walker.encodeExpr('v', desc.value, memberCtx);
       stateFlowEntries.push(
-        `${JSON.stringify(memberName)}: AsyncStream<Any?> { cont in Task { for await v in self.impl.${swiftName} { cont.yield(${encodeStateValue}) }; cont.finish() } }`,
+        `${swiftStringLiteral(memberName)}: AsyncStream<Any?> { cont in Task { for await v in self.impl.${swiftName} { cont.yield(${encodeStateValue}) }; cont.finish() } }`,
       );
     } else {
       stateFlowEntries.push(
-        `${JSON.stringify(memberName)}: AsyncStream<Any?> { cont in Task { for await v in self.impl.${swiftName} { cont.yield(v) }; cont.finish() } }`,
+        `${swiftStringLiteral(memberName)}: AsyncStream<Any?> { cont in Task { for await v in self.impl.${swiftName} { cont.yield(v) }; cont.finish() } }`,
       );
     }
 
@@ -622,13 +632,13 @@ export function emitSwiftContract(
     const decodeStateValue = walker.decodeExpr(
       'value',
       desc.value,
-      toPascalCase(swiftName),
+      memberCtx,
       `${swiftName}.value`,
     );
     outboundImpls.push(
       [
         `var ${swiftName}: AsyncStream<BridgeValue<${valueResult.typeName}>> {`,
-        `    let source = caller.state(member: ${JSON.stringify(memberName)})`,
+        `    let source = caller.state(member: ${swiftStringLiteral(memberName)})`,
         `    return AsyncStream { cont in`,
         `        let pump = Task {`,
         `            for await bv in source {`,

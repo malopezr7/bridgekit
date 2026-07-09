@@ -6,6 +6,7 @@ import {
   type ArrayNode,
   escapeKotlinIdentifier,
   type KotlinTypeEmitter,
+  kotlinStringLiteral,
   type NullableNode,
   type ObjectNode,
   type OneOfNode,
@@ -211,7 +212,7 @@ export class CodecWalker {
    * `fieldName` names the field in any thrown exception.
    */
   decodeExpr(raw: string, node: SchemaNode, ctxName: string, fieldName = 'value'): string {
-    const fieldLit = JSON.stringify(fieldName);
+    const fieldLit = kotlinStringLiteral(fieldName);
     switch (node.kind) {
       case 'string':
         return `(${raw} as? String) ?: throw BridgeKitDecodeException(${fieldLit}, "String")`;
@@ -325,11 +326,11 @@ export class CodecWalker {
       const escapedAccess = `value.${escapeKotlinIdentifier(fieldName)}`;
       if (isNullable) {
         encodeLines.push(
-          `    ${escapedAccess}?.let { map["${fieldName}"] = ${this.encodeExpr('it', inner, fieldCtx)} }`,
+          `    ${escapedAccess}?.let { map[${kotlinStringLiteral(fieldName)}] = ${this.encodeExpr('it', inner, fieldCtx)} }`,
         );
       } else {
         encodeLines.push(
-          `    map["${fieldName}"] = ${this.encodeExpr(escapedAccess, inner, fieldCtx)}`,
+          `    map[${kotlinStringLiteral(fieldName)}] = ${this.encodeExpr(escapedAccess, inner, fieldCtx)}`,
         );
       }
     }
@@ -343,7 +344,7 @@ export class CodecWalker {
       const isNullable = fieldSchema.kind === 'optional' || fieldSchema.kind === 'nullable';
       const inner = isNullable ? (fieldSchema as OptionalNode | NullableNode).inner : fieldSchema;
       const fieldCtx = dataClassName + toPascalCase(fieldName);
-      const rawExpr = `raw["${fieldName}"]`;
+      const rawExpr = `raw[${kotlinStringLiteral(fieldName)}]`;
       const escapedParamName = escapeKotlinIdentifier(fieldName);
       const decodeCall = isNullable
         ? `if (${rawExpr} == null) null else ${this.decodeExpr(rawExpr, inner, fieldCtx, fieldName)}`
@@ -372,12 +373,12 @@ export class CodecWalker {
     for (const [variantName, variantSchema] of Object.entries(node.variants)) {
       const variantClass = `${sealedName}.${toPascalCase(variantName)}`;
       const fieldEntries = [
-        `"${node.discriminant}" to "${variantName}"`,
+        `${kotlinStringLiteral(node.discriminant)} to ${kotlinStringLiteral(variantName)}`,
         ...Object.entries(variantSchema.fields).map(([f, fs]) => {
           const isNullable = fs.kind === 'optional' || fs.kind === 'nullable';
           const inner = isNullable ? (fs as OptionalNode | NullableNode).inner : fs;
           const fieldCtx = sealedName + toPascalCase(variantName) + toPascalCase(f);
-          return `"${f}" to ${this.encodeExpr(`value.${escapeKotlinIdentifier(f)}`, inner, fieldCtx)}`;
+          return `${kotlinStringLiteral(f)} to ${this.encodeExpr(`value.${escapeKotlinIdentifier(f)}`, inner, fieldCtx)}`;
         }),
       ];
       encodeLines.push(`    is ${variantClass} -> mapOf(${fieldEntries.join(', ')})`);
@@ -385,7 +386,9 @@ export class CodecWalker {
     encodeLines.push(`}`);
 
     decodeLines.push(`fun decode${sealedName}(raw: Map<*, *>): ${sealedName} {`);
-    decodeLines.push(`    val disc = raw["${node.discriminant}"] as? String ?: ""`);
+    decodeLines.push(
+      `    val disc = raw[${kotlinStringLiteral(node.discriminant)}] as? String ?: ""`,
+    );
     decodeLines.push(`    return when (disc) {`);
     for (const [variantName, variantSchema] of Object.entries(node.variants)) {
       const variantClass = `${sealedName}.${toPascalCase(variantName)}`;
@@ -393,13 +396,15 @@ export class CodecWalker {
         const isNullable = fs.kind === 'optional' || fs.kind === 'nullable';
         const inner = isNullable ? (fs as OptionalNode | NullableNode).inner : fs;
         const fieldCtx = sealedName + toPascalCase(variantName) + toPascalCase(f);
-        const rawExpr = `raw["${f}"]`;
+        const rawExpr = `raw[${kotlinStringLiteral(f)}]`;
         const decodeCall = isNullable
           ? `if (${rawExpr} == null) null else ${this.decodeExpr(rawExpr, inner, fieldCtx, f)}`
           : this.decodeExpr(rawExpr, inner, fieldCtx, f);
         return `${escapeKotlinIdentifier(f)} = ${decodeCall}`;
       });
-      decodeLines.push(`        "${variantName}" -> ${variantClass}(${fieldArgs.join(', ')})`);
+      decodeLines.push(
+        `        ${kotlinStringLiteral(variantName)} -> ${variantClass}(${fieldArgs.join(', ')})`,
+      );
     }
     decodeLines.push(
       `        else -> throw IllegalArgumentException("Unknown ${sealedName} discriminant: $disc")`,
@@ -468,7 +473,7 @@ export class CodecWalker {
       const optCtx = `${typeName}Opt${i}`;
       const encodeV = this.encodeExpr('value.value', opt, optCtx);
       encodeLines.push(
-        `    is ${typeName}.Opt${i} -> mapOf("@t" to ${JSON.stringify(tags[i])}, "@v" to ${encodeV})`,
+        `    is ${typeName}.Opt${i} -> mapOf("@t" to ${kotlinStringLiteral(tags[i])}, "@v" to ${encodeV})`,
       );
     }
     encodeLines.push(`}`);
@@ -483,7 +488,9 @@ export class CodecWalker {
       const opt = node.options[i];
       const optCtx = `${typeName}Opt${i}`;
       const decodeV = this.decodeExpr('v', opt, optCtx, `opt${i}`);
-      decodeLines.push(`        ${JSON.stringify(tags[i])} -> ${typeName}.Opt${i}(${decodeV})`);
+      decodeLines.push(
+        `        ${kotlinStringLiteral(tags[i])} -> ${typeName}.Opt${i}(${decodeV})`,
+      );
     }
     decodeLines.push(`        else -> throw BridgeKitDecodeException("@t=$tag", "${typeName}")`);
     decodeLines.push(`    }`);
