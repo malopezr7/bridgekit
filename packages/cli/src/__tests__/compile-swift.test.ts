@@ -146,7 +146,7 @@ describeOnMac('Swift real compiler harness', () => {
     expect(result.status).toBe(0);
   });
 
-  it('captures CLI-01 enum result RED before the Swift enum codec fix', () => {
+  it('typechecks CLI-01 Swift enum result boundary decode', () => {
     const enumFixture = readFileSync(path.join(fixturesDir, 'schema-kinds.fixture.ts'), 'utf8');
     const outDir = generateSwift({ 'schema-kinds.contract.ts': enumFixture }, 'schema-kinds');
     const [swiftFile] = generatedSwiftFiles(outDir);
@@ -155,7 +155,7 @@ describeOnMac('Swift real compiler harness', () => {
     const result = swiftcTypecheck(swiftFile as string);
     const output = `${result.stdout}\n${result.stderr}`;
 
-    expect(result.status).not.toBe(0);
-    expect(output).toMatch(/expected|optional type|Int\(exactly:/);
+    expect(result.status).toBe(0);
+    expect(output.trim()).toBe('');
   });
 });
