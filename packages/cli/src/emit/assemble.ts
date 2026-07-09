@@ -7,9 +7,53 @@
 // This is the D9 "assembly tail" lifted out so each emit module stays < 500 LOC.
 // ---------------------------------------------------------------------------
 
+import { createHash } from 'node:crypto';
+import { CliError } from '../cliError.js';
+import { contractIdToClassName } from './types.js';
+
 export interface EmitResult {
   fileName: string;
   content: string;
+}
+
+export type Hash8Fn = (contractId: string) => string;
+
+function defaultHash8(contractId: string): string {
+  return createHash('sha256').update(contractId).digest('hex').slice(0, 8);
+}
+
+export function resolveContractNames(
+  contractIds: readonly string[],
+  hash8: Hash8Fn = defaultHash8,
+): Map<string, string> {
+  const baseNames = new Map<string, string>();
+  const groups = new Map<string, string[]>();
+
+  for (const id of contractIds) {
+    const baseName = contractIdToClassName(id);
+    baseNames.set(id, baseName);
+    groups.set(baseName, [...(groups.get(baseName) ?? []), id]);
+  }
+
+  const resolved = new Map<string, string>();
+  for (const id of contractIds) {
+    const baseName = baseNames.get(id) as string;
+    const group = groups.get(baseName) ?? [];
+    resolved.set(id, group.length > 1 ? `${baseName}_${hash8(id)}` : baseName);
+  }
+
+  const finalNames = new Map<string, string>();
+  for (const [id, className] of resolved) {
+    const priorId = finalNames.get(className);
+    if (priorId !== undefined) {
+      throw new CliError(
+        `Contract id filename collision after hash suffix: '${priorId}' and '${id}' both resolve to '${className}'. Rename one contract id.`,
+      );
+    }
+    finalNames.set(className, id);
+  }
+
+  return resolved;
 }
 
 export interface ContractFileParts {

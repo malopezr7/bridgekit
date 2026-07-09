@@ -365,4 +365,27 @@ describeOnMac('Swift real compiler harness', () => {
     expect(run.status).toBe(0);
     expect(`${run.stdout}\n${run.stderr}`.trim()).toBe('');
   });
+
+  it('typechecks CLI-03 Swift params collision with suffixed caller types', () => {
+    const collisionFixture = readFileSync(path.join(fixturesDir, 'collision.fixture.ts'), 'utf8');
+    const outDir = generateSwift({ 'collision.contract.ts': collisionFixture }, 'collision');
+    const swiftFiles = generatedSwiftFiles(outDir);
+
+    const dashFile = swiftFiles.find((fileName) => fileName.includes('CompileCollisionName'));
+    expect(dashFile).toBeDefined();
+
+    const source = readFileSync(dashFile as string, 'utf8');
+    const suffixedParamsMatch = source.match(/struct (FooBarParams_[A-Za-z0-9_]+)/);
+    expect(suffixedParamsMatch).not.toBeNull();
+    const suffixedParams = suffixedParamsMatch?.[1] as string;
+    expect(source).toContain(`func fooBar(_ params: ${suffixedParams}) async throws -> String`);
+    expect(source).toContain(`decode${suffixedParams}(payload ?? [:])`);
+    expect(source).toContain(`encode${suffixedParams}(params)`);
+
+    const results = swiftFiles.map((swiftFile) => swiftcTypecheck(swiftFile));
+    for (const result of results) {
+      expect(result.status).toBe(0);
+      expect(`${result.stdout}\n${result.stderr}`.trim()).toBe('');
+    }
+  });
 });

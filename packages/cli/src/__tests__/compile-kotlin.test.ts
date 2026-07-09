@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const cliRoot = process.cwd();
@@ -208,5 +208,33 @@ describe('Kotlin real compiler harness', () => {
     }
     expect(result.status).toBe(0);
     expect(output).toContain('BUILD SUCCESSFUL');
+  });
+
+  it('generates CLI-03 Kotlin params collision with suffixed caller types', () => {
+    generateKotlin(
+      {
+        'collision.contract.ts': readFileSync(
+          path.join(fixturesDir, 'collision.fixture.ts'),
+          'utf8',
+        ),
+      },
+      futureRedFixturesDir,
+    );
+
+    const sourceFile = readdirSync(futureRedFixturesDir).find((fileName) => {
+      return (
+        fileName.endsWith('Contract.kt') &&
+        readFileSync(path.join(futureRedFixturesDir, fileName), 'utf8').includes('fooBar')
+      );
+    });
+    expect(sourceFile).toBeDefined();
+
+    const source = readFileSync(path.join(futureRedFixturesDir, sourceFile as string), 'utf8');
+    const suffixedParamsMatch = source.match(/data class (FooBarParams_[A-Za-z0-9_]+)\(/);
+    expect(suffixedParamsMatch).not.toBeNull();
+    const suffixedParams = suffixedParamsMatch?.[1] as string;
+    expect(source).toContain(`suspend fun fooBar(params: ${suffixedParams}): String`);
+    expect(source).toContain(`decode${suffixedParams}(payload ?: emptyMap<String, Any?>())`);
+    expect(source).toContain(`encode${suffixedParams}(params)`);
   });
 });
