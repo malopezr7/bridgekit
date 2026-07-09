@@ -120,7 +120,7 @@ import { registerHooks } from 'node:module';
 
 // Pre-resolve @malopezr7/bridgekit/contract to its CJS dist using the file being
 // loaded as the resolution base, so that --experimental-strip-types is not
-// applied to node_modules (which Node 26 refuses to do).
+// applied to node_modules (which supported Node versions refuse to do).
 // This is looked up lazily on first resolution so the worker doesn't fail if
 // the package is not installed in the caller's project (codegen inside the
 // monorepo itself falls back normally).

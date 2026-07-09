@@ -468,7 +468,9 @@ export function decode(schema: AnySchema, value: unknown): unknown {
 
     case 'int64': {
       if (typeof value !== 'string') {
-        throw new TypeError(`[bridgekit] int64 decode: expected decimal string, got ${typeof value}`);
+        throw new TypeError(
+          `[bridgekit] int64 decode: expected decimal string, got ${typeof value}`,
+        );
       }
       return BigInt(value);
     }

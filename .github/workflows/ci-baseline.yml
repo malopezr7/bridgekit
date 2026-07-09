@@ -12,6 +12,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  NODE_VERSION: 22.15.0
+
 jobs:
   install:
     name: Install
@@ -24,7 +27,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
       - name: Install dependencies
@@ -46,7 +49,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
       - name: Install dependencies
@@ -77,7 +80,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
       - uses: actions/setup-java@v4
@@ -121,7 +124,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
       - name: Install dependencies
@@ -141,7 +144,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
       - name: Install dependencies
@@ -161,7 +164,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
       - uses: actions/setup-java@v4
@@ -189,7 +192,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
       - name: Install dependencies
@@ -209,7 +212,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
       - name: Install dependencies
@@ -253,7 +256,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
       - name: Install dependencies
@@ -265,38 +268,17 @@ jobs:
       - name: Build CLI
         run: pnpm --filter @malopezr7/bridgekit-cli build
 
-      - name: Report known generate drift
-        continue-on-error: true
+      - name: Verify generated bindings
         run: |
-          commands=(
-            "pnpm --filter bridgekit-example generate --check"
-            "pnpm --filter bridgekit-example generate:ios --check"
-            "pnpm --filter bridgekit-example-callstack-brownfield generate --check"
-            "pnpm --filter bridgekit-example-callstack-brownfield generate:ios --check"
-            "pnpm --filter bridgekit-example-expo-brownfield generate --check"
-            "pnpm --filter bridgekit-example-expo-brownfield generate:ios --check"
-          )
-
-          failed=0
-          echo "## Generate drift check" >> "$GITHUB_STEP_SUMMARY"
-          echo "Known WS-4/WS-7 generate drift is reported as non-blocking debt." >> "$GITHUB_STEP_SUMMARY"
-
-          for command in "${commands[@]}"; do
-            echo "### \`$command\`" >> "$GITHUB_STEP_SUMMARY"
-            if bash -c "$command"; then
-              echo "- Result: passed" >> "$GITHUB_STEP_SUMMARY"
-            else
-              status=$?
-              failed=1
-              echo "::warning::Non-blocking generate drift detected for: $command"
-              echo "- Result: failed with exit $status" >> "$GITHUB_STEP_SUMMARY"
-            fi
-          done
-
-          exit "$failed"
+          pnpm --filter bridgekit-example generate --check
+          pnpm --filter bridgekit-example generate:ios --check
+          pnpm --filter bridgekit-example-callstack-brownfield generate --check
+          pnpm --filter bridgekit-example-callstack-brownfield generate:ios --check
+          pnpm --filter bridgekit-example-expo-brownfield generate --check
+          pnpm --filter bridgekit-example-expo-brownfield generate:ios --check
 
   check:
-    name: Biome check (packages/core)
+    name: Biome check
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -306,22 +288,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Report deferred Biome findings
-        continue-on-error: true
-        run: |
-          echo "## Biome check (packages/core)" >> "$GITHUB_STEP_SUMMARY"
-          echo "Existing packages/core findings are non-blocking deferred debt for WS-1 or later cleanup." >> "$GITHUB_STEP_SUMMARY"
-
-          if pnpm --filter @malopezr7/bridgekit check; then
-            echo "- Result: passed" >> "$GITHUB_STEP_SUMMARY"
-          else
-            status=$?
-            echo "::warning::Non-blocking Biome findings detected. Deferred to WS-1 or later cleanup."
-            echo "- Result: failed with exit $status" >> "$GITHUB_STEP_SUMMARY"
-            exit "$status"
-          fi
+      - name: Run Biome check
+        run: pnpm check

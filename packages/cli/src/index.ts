@@ -118,7 +118,7 @@ function readOptionValue(args: string[], index: number, option: string): string 
 async function findContractFiles(pattern: string, cwd: string): Promise<string[]> {
   const files: string[] = [];
 
-  // Use Node 26 native fs.glob
+  // Use native fs.glob available throughout the supported Node range.
   for await (const entry of glob(pattern, {
     cwd,
     exclude: (f) => {
@@ -198,7 +198,13 @@ async function runGenerate(opts: BridgekitOptions, cwd: string): Promise<number>
   }
 
   if (tokens.length === 0) {
-    process.stderr.write(warn(`No BridgeContract tokens found in matched files.\n`));
+    process.stderr.write(
+      warn(
+        `No contracts generated: matched contract files exported zero BridgeContract tokens. ` +
+          `Ensure at least one matched file exports a contract created by defineContract().\n`,
+      ),
+    );
+    if (opts.check) return 1;
     return 0;
   }
 
@@ -228,7 +234,7 @@ async function runGenerate(opts: BridgekitOptions, cwd: string): Promise<number>
 
   // --check mode: diff and exit
   if (opts.check) {
-    const diffs = checkDrift(emitResults, lock, outDir, previousGeneratedFiles);
+    const diffs = checkDrift(emitResults, lock, outDir);
     if (diffs.length === 0) {
       process.stdout.write(ok('No drift detected. Contract bindings are up to date.\n'));
       return 0;

@@ -197,6 +197,9 @@ importers:
       '@babel/core':
         specifier: 7.28.3
         version: 7.28.3
+      '@biomejs/biome':
+        specifier: 2.5.2
+        version: 2.5.2
       '@react-native/babel-preset':
         specifier: 0.83.6
         version: 0.83.6(@babel/core@7.28.3)

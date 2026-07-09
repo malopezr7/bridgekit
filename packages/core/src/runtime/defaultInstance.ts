@@ -8,7 +8,8 @@ import { isBridgeKitDev } from './env';
 import { LoopbackTransport } from './loopbackTransport';
 
 const REGISTRY_SYMBOL = Symbol.for('com.bridgekit.registry');
-const PACKAGE_VERSION = '83.0.0';
+// Must match the version in packages/core/package.json.
+const PACKAGE_VERSION = '0.0.1-beta.2';
 
 interface GlobalRegistry {
   instance: BridgeKitJs;

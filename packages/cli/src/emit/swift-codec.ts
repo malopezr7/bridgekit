@@ -189,21 +189,14 @@ export class SwiftCodecWalker {
         const item = (node as ArrayNode).item;
         const itemCtx = `${ctxName}Item`;
         const itemExpr = this.decodeExpr('$0', item, itemCtx, fieldName);
-        const itemThrows = this.exprThrows(item);
-        const mapExpr = itemThrows
-          ? `try ((${raw} as? [Any?]) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Array")).map { ${itemExpr} }`
-          : `try ((${raw} as? [Any?]) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Array")).map { ${itemExpr} }`;
-        return mapExpr;
+        return `try ((${raw} as? [Any?]) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Array")).map { ${itemExpr} }`;
       }
 
       case 'record': {
         const value = (node as RecordNode).value;
         const valueCtx = `${ctxName}Value`;
         const valExpr = this.decodeExpr('$0.value', value, valueCtx, fieldName);
-        const valThrows = this.exprThrows(value);
-        const mapExpr = valThrows
-          ? `try ((${raw} as? [String: Any?]) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Dictionary")).map { ($0.key, ${valExpr}) }`
-          : `try ((${raw} as? [String: Any?]) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Dictionary")).map { ($0.key, ${valExpr}) }`;
+        const mapExpr = `try ((${raw} as? [String: Any?]) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Dictionary")).map { ($0.key, ${valExpr}) }`;
         return `Dictionary(uniqueKeysWithValues: ${mapExpr})`;
       }
 
@@ -235,24 +228,6 @@ export class SwiftCodecWalker {
 
       default:
         return raw;
-    }
-  }
-
-  /**
-   * Returns true when decodeExpr for this node kind will contain a `try` expression
-   * (i.e., bridgeKitThrow or a composite Codecs.decode call). Used by array/record
-   * to decide whether the surrounding `.map {}` needs a `try` prefix (rethrows).
-   */
-  private exprThrows(node: SchemaNode): boolean {
-    switch (node.kind) {
-      case 'json':
-      case 'void':
-        return false;
-      case 'optional':
-      case 'nullable':
-        return this.exprThrows((node as OptionalNode | NullableNode).inner);
-      default:
-        return true;
     }
   }
 
