@@ -87,8 +87,8 @@
     "!**/*.test.tsx"
   ],
   "scripts": {
-    "build": "bob build",
-    "prepack": "bob build",
+    "build": "bob build && node scripts/fix-esm-relative-imports.mjs && node scripts/verify-esm-exports.mjs",
+    "prepack": "pnpm build",
     "clean": "rimraf android/build && rimraf dist",
     "clean:modules": "rimraf .turbo node_modules",
     "check": "biome check src/",
