@@ -18,6 +18,13 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 
 import { CliError } from './cliError.js';
+import {
+  decodeLoaderPayload,
+  encodeLoaderPayload,
+  loaderEncoderWorkerSource,
+} from './loaderCodec.js';
+
+export { decodeLoaderPayload, encodeLoaderPayload };
 
 // ---- duck-typed contract shape (never import bridgekit classes) -------------
 
@@ -118,6 +125,8 @@ import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { registerHooks } from 'node:module';
 
+${loaderEncoderWorkerSource()}
+
 // Pre-resolve @malopezr7/bridgekit/contract to its CJS dist using the file being
 // loaded as the resolution base, so that --experimental-strip-types is not
 // applied to node_modules (which supported Node versions refuse to do).
@@ -201,7 +210,12 @@ for (const [, value] of Object.entries(mod)) {
   }
 }
 
-writeSync(3, JSON.stringify(tokens));
+try {
+  writeSync(3, encodeLoaderPayloadForWorker(tokens));
+} catch (err) {
+  process.stderr.write('loader-worker: value encode failed: ' + err.message + '\\n');
+  process.exit(1);
+}
 `;
 
 // ---- load contracts from a file --------------------------------------------
@@ -263,14 +277,18 @@ export async function loadContractsFromFile(filePath: string): Promise<RawContra
 
     let tokens: unknown[];
     try {
-      tokens = JSON.parse(tokenPayload) as unknown[];
-    } catch {
+      tokens = decodeLoaderPayload(tokenPayload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError(`Invalid contract loader payload for ${filePath}: ${message}`);
+    }
+    const malformedIndex = tokens.findIndex((token) => !isBridgeContractToken(token));
+    if (malformedIndex !== -1) {
       throw new CliError(
-        `Contract loader returned invalid JSON for ${filePath}: ${tokenPayload.substring(0, 200)}`,
+        `Contract loader returned malformed contract token at index ${malformedIndex}`,
       );
     }
-
-    return tokens.filter(isBridgeContractToken) as RawContractToken[];
+    return tokens as RawContractToken[];
   } finally {
     try {
       rmSync(tmpDir, { recursive: true, force: true });

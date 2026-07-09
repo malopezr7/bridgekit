@@ -516,12 +516,18 @@ export function kotlinLiteral(value: unknown): string {
 }
 
 export function kotlinLiteralForSchema(value: unknown, schema: SchemaNode): string {
-  if (schema.kind === 'int64' && (typeof value === 'number' || typeof value === 'bigint')) {
-    return `${value}L`;
-  }
+  if (value === null || value === undefined) return 'null';
   if (schema.kind === 'optional' || schema.kind === 'nullable') {
-    if (value === null || value === undefined) return 'null';
     return kotlinLiteralForSchema(value, (schema as OptionalNode | NullableNode).inner);
+  }
+  if (schema.kind === 'int64' && (typeof value === 'number' || typeof value === 'bigint')) {
+    return kotlinStringLiteral(String(value));
+  }
+  if (schema.kind === 'date' && value instanceof Date && Number.isFinite(value.getTime())) {
+    return `${value.getTime()}L`;
+  }
+  if (schema.kind === 'binary' && value instanceof Uint8Array) {
+    return kotlinStringLiteral(Buffer.from(value).toString('base64'));
   }
   return kotlinLiteral(value);
 }

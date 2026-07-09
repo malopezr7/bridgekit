@@ -6,7 +6,7 @@ import { SwiftCodecWalker, schemaNeedsCodec } from './swift-codec.js';
 import {
   escapeSwiftIdentifier,
   SwiftTypeEmitter,
-  swiftLiteral,
+  swiftLiteralForSchema,
   swiftStringLiteral,
 } from './swift-types.js';
 import {
@@ -605,7 +605,9 @@ export function emitSwiftContract(
       `${swiftStringLiteral(`state.${memberName}`)}: ${swiftStringLiteral(hashMember(rawDesc))}`,
     );
 
-    stateInitials.push(`${swiftStringLiteral(memberName)}: ${swiftLiteral(desc.initial)},`);
+    stateInitials.push(
+      `${swiftStringLiteral(memberName)}: ${swiftLiteralForSchema(desc.initial, desc.value)},`,
+    );
 
     providerMethods.push(`    var ${swiftName}: AsyncStream<${valueResult.typeName}> { get }`);
     clientMethods.push(

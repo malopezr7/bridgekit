@@ -359,21 +359,35 @@ export class SwiftTypeEmitter {
   }
 }
 
-// ---- swiftLiteral —  initial state values → Swift literal ------------------
+// ---- state initial values → Swift wire literals -----------------------------
 
-export function swiftLiteral(value: unknown): string {
+function swiftLiteral(value: unknown): string {
   if (value === null || value === undefined) return 'nil';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'number') return String(value);
   if (typeof value === 'string') return swiftStringLiteral(value);
+  if (Array.isArray(value)) return `[${value.map(swiftLiteral).join(', ')}]`;
   if (typeof value === 'object') {
-    if (Array.isArray(value)) {
-      return `[${(value as unknown[]).map(swiftLiteral).join(', ')}]`;
-    }
-    const entries = Object.entries(value as Record<string, unknown>)
-      .map(([k, v]) => `${swiftStringLiteral(k)}: ${swiftLiteral(v)}`)
-      .join(', ');
-    return `[${entries}]`;
+    return `[${Object.entries(value)
+      .map(([key, item]) => `${swiftStringLiteral(key)}: ${swiftLiteral(item)}`)
+      .join(', ')}]`;
   }
   return 'nil';
+}
+
+export function swiftLiteralForSchema(value: unknown, schema: SchemaNode): string {
+  if (value === null || value === undefined) return 'nil';
+  if (schema.kind === 'optional' || schema.kind === 'nullable') {
+    return swiftLiteralForSchema(value, (schema as OptionalNode | NullableNode).inner);
+  }
+  if (schema.kind === 'int64' && (typeof value === 'number' || typeof value === 'bigint')) {
+    return swiftStringLiteral(String(value));
+  }
+  if (schema.kind === 'date' && value instanceof Date && Number.isFinite(value.getTime())) {
+    return String(value.getTime());
+  }
+  if (schema.kind === 'binary' && value instanceof Uint8Array) {
+    return swiftStringLiteral(Buffer.from(value).toString('base64'));
+  }
+  return swiftLiteral(value);
 }
