@@ -6,14 +6,15 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { glob } from 'node:fs/promises';
 import path from 'node:path';
-import { CliError } from './cliError.js';
-import { dim, ok, warn } from './theme.js';
 import { checkDrift } from './check.js';
+import { CliError } from './cliError.js';
+import { resolveContractNames } from './emit/assemble.js';
 import { contractIdToPackage, emitKotlinContract } from './emit/kotlin.js';
 import { emitSwiftContract } from './emit/swift.js';
 import type { RawContractToken } from './load.js';
 import { loadContractsFromFile } from './load.js';
 import { buildLock, writeLock } from './lock.js';
+import { dim, ok, warn } from './theme.js';
 
 // ---- help ------------------------------------------------------------------
 
@@ -150,11 +151,21 @@ async function runGenerate(opts: BridgekitOptions, cwd: string): Promise<number>
   }
 
   // Emit contracts (Kotlin or Swift)
+  const contractNames = resolveContractNames(tokens.map((token) => token.descriptor.id));
   const emitResults = tokens.map((token) => {
+    const className = contractNames.get(token.descriptor.id);
     if (opts.platform === 'swift') {
-      return emitSwiftContract(token, contractIdToPackage(token.descriptor.id, opts.kotlinPackage));
+      return emitSwiftContract(
+        token,
+        contractIdToPackage(token.descriptor.id, opts.kotlinPackage),
+        className,
+      );
     }
-    return emitKotlinContract(token, contractIdToPackage(token.descriptor.id, opts.kotlinPackage));
+    return emitKotlinContract(
+      token,
+      contractIdToPackage(token.descriptor.id, opts.kotlinPackage),
+      className,
+    );
   });
 
   // Build lock
@@ -173,9 +184,7 @@ async function runGenerate(opts: BridgekitOptions, cwd: string): Promise<number>
     for (const d of diffs) {
       process.stderr.write(`  ${d.file}: ${d.reason}\n`);
     }
-    process.stderr.write(
-      dim('\nRun `bridgekit generate` to regenerate and commit the result.\n'),
-    );
+    process.stderr.write(dim('\nRun `bridgekit generate` to regenerate and commit the result.\n'));
     return 1;
   }
 
