@@ -13,7 +13,6 @@
 // ---------------------------------------------------------------------------
 
 import { spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -36,7 +35,6 @@ export interface RawContractToken {
 // ---- purity check -----------------------------------------------------------
 
 const ALLOWED_SPECIFIER_REGEX = /^@malopezr7\/bridgekit\/contract/;
-const WORKER_TOKEN_MARKER = '__BRIDGEKIT_LOADER_TOKENS__';
 
 /**
  * Scan import statements in a .ts file and fail if any import is not:
@@ -102,7 +100,7 @@ function lineNumberForOffset(source: string, offset: number): number {
 
 const WORKER_SCRIPT = `
 import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
+import { existsSync, writeSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { registerHooks } from 'node:module';
@@ -164,12 +162,6 @@ if (!filePath) {
   process.exit(1);
 }
 
-const tokenNonce = process.env.BRIDGEKIT_TOKEN_NONCE;
-if (!tokenNonce) {
-  process.stderr.write('loader-worker: missing token nonce\\n');
-  process.exit(1);
-}
-
 const fileUrl = pathToFileURL(filePath).href;
 let mod;
 try {
@@ -196,7 +188,7 @@ for (const [, value] of Object.entries(mod)) {
   }
 }
 
-process.stdout.write('${WORKER_TOKEN_MARKER}' + tokenNonce + JSON.stringify(tokens) + '\\n');
+writeSync(3, JSON.stringify(tokens));
 `;
 
 // ---- load contracts from a file --------------------------------------------
@@ -227,17 +219,16 @@ export async function loadContractsFromFile(filePath: string): Promise<RawContra
   const workerPath = join(tmpDir, 'worker.mjs');
   try {
     writeFileSync(workerPath, WORKER_SCRIPT, 'utf8');
-    const tokenNonce = randomBytes(16).toString('hex');
-    const tokenMarker = `${WORKER_TOKEN_MARKER}${tokenNonce}`;
 
-    // Spawn worker with TS stripping enabled
+    // Spawn worker with TS stripping enabled. fd 3 is the out-of-band token channel;
+    // user contract stdout stays on fd 1 and cannot corrupt the protocol payload.
     const result = spawnSync(
       process.execPath,
       ['--experimental-strip-types', workerPath, filePath],
       {
         encoding: 'utf8',
         timeout: 30_000,
-        env: { ...process.env, BRIDGEKIT_TOKEN_NONCE: tokenNonce },
+        stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
       },
     );
 
@@ -250,8 +241,8 @@ export async function loadContractsFromFile(filePath: string): Promise<RawContra
       throw new CliError(`Failed to load contract file ${filePath}:\n${stderr}`);
     }
 
-    const tokenLine = result.stdout.split('\n').find((line) => line.startsWith(tokenMarker));
-    if (!tokenLine) {
+    const tokenPayload = result.output[3];
+    if (typeof tokenPayload !== 'string' || tokenPayload.length === 0) {
       throw new CliError(
         `Contract loader returned no protocol payload for ${filePath}: ${result.stdout.substring(0, 200)}`,
       );
@@ -259,10 +250,10 @@ export async function loadContractsFromFile(filePath: string): Promise<RawContra
 
     let tokens: unknown[];
     try {
-      tokens = JSON.parse(tokenLine.slice(tokenMarker.length)) as unknown[];
+      tokens = JSON.parse(tokenPayload) as unknown[];
     } catch {
       throw new CliError(
-        `Contract loader returned invalid JSON for ${filePath}: ${result.stdout.substring(0, 200)}`,
+        `Contract loader returned invalid JSON for ${filePath}: ${tokenPayload.substring(0, 200)}`,
       );
     }
 
