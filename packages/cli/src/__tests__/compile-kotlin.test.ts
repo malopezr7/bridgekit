@@ -58,11 +58,7 @@ function generateKotlin(contractFiles: Record<string, string>, outDir: string): 
 function runGradleCompile(fixturesDir: string) {
   return spawnSync(
     './gradlew',
-    [
-      ':app:compileDebugKotlin',
-      `-PbridgekitGeneratedFixturesDir=${fixturesDir}`,
-      '-PbridgekitGeneratedWarningsAsErrors=true',
-    ],
+    [':app:compileDebugKotlin', `-PbridgekitGeneratedFixturesDir=${fixturesDir}`],
     { cwd: androidRoot, encoding: 'utf8', timeout: 15 * 60_000 },
   );
 }
@@ -103,6 +99,9 @@ describe('Kotlin real compiler harness', () => {
 
   it('proves a deliberately malformed baseline fails Gradle for a compiler reason', () => {
     if (process.env.BRIDGEKIT_RUN_KOTLIN_NEGATIVE !== '1') {
+      console.warn(
+        'Skipping Kotlin known-bad compiler fixture gate. Set BRIDGEKIT_RUN_KOTLIN_NEGATIVE=1 to run it.',
+      );
       return;
     }
 

@@ -3,7 +3,23 @@ apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
 def bridgekitGeneratedFixturesDir = providers.gradleProperty("bridgekitGeneratedFixturesDir").orNull
-def bridgekitGeneratedWarningsAsErrors = providers.gradleProperty("bridgekitGeneratedWarningsAsErrors").orNull
+def bridgekitGeneratedFixturesSourceDir = null
+
+if (bridgekitGeneratedFixturesDir != null) {
+    bridgekitGeneratedFixturesSourceDir = rootProject.file(bridgekitGeneratedFixturesDir)
+
+    if (!bridgekitGeneratedFixturesSourceDir.exists()) {
+        throw new GradleException("bridgekitGeneratedFixturesDir does not exist: ${bridgekitGeneratedFixturesSourceDir}")
+    }
+
+    def bridgekitGeneratedFixtureSources = fileTree(bridgekitGeneratedFixturesSourceDir) {
+        include "**/*.kt"
+    }
+
+    if (bridgekitGeneratedFixtureSources.isEmpty()) {
+        throw new GradleException("bridgekitGeneratedFixturesDir contains no Kotlin fixture sources (*.kt): ${bridgekitGeneratedFixturesSourceDir}")
+    }
+}
 
 react {
     // node_modules is hoisted at the monorepo root (pnpm nodeLinker: hoisted).
@@ -54,15 +70,11 @@ android {
     sourceSets {
         debug {
             if (bridgekitGeneratedFixturesDir != null) {
-                java.srcDir(file(bridgekitGeneratedFixturesDir))
+                // Fixture compilation gates on hard compile/type errors only; warning-level gating is
+                // intentionally out of scope (add an isolated fixture module if ever needed).
+                java.srcDir(bridgekitGeneratedFixturesSourceDir)
             }
         }
-    }
-}
-
-tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach { task ->
-    if (bridgekitGeneratedWarningsAsErrors != null) {
-        task.inputs.property("bridgekitGeneratedWarningsAsErrors", bridgekitGeneratedWarningsAsErrors)
     }
 }
 

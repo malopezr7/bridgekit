@@ -108,7 +108,7 @@ jobs:
       - name: Run Kotlin compiler fixture gate
         if: matrix.harness == 'kotlin'
         working-directory: apps/example/android
-        run: ./gradlew :app:compileDebugKotlin -PbridgekitGeneratedFixturesDir=../../../packages/cli/build/generated-fixtures/kotlin-good -PbridgekitGeneratedWarningsAsErrors=true
+        run: ./gradlew :app:compileDebugKotlin -PbridgekitGeneratedFixturesDir=${{ github.workspace }}/packages/cli/build/generated-fixtures/kotlin-good
 
   test-web:
     name: Jest web
