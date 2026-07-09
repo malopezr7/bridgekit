@@ -7,7 +7,7 @@
 // Solution: write a tiny ESM loader script to a temp file and spawn it
 // with --experimental-strip-types. The script registers hooks for
 // extensionless .ts imports, imports the contract file, collects tokens
-// by duck-typing, and serializes to stdout as JSON.
+// by duck-typing, and writes token JSON to fd 3.
 //
 // Purity check (DESIGN §2.3) runs in the parent before spawning.
 // ---------------------------------------------------------------------------
@@ -51,6 +51,13 @@ function checkFilePurity(filePath: string): string[] {
     return [`${filePath}: cannot read file`];
   }
 
+  for (const match of findNonLiteralDynamicSpecifierCalls(source)) {
+    const line = lineNumberForOffset(source, match.index);
+    violations.push(
+      `${filePath}:${line}: purity violation — dynamic import()/require() with a non-literal specifier is not allowed`,
+    );
+  }
+
   for (const match of findImportSpecifiers(source)) {
     const line = lineNumberForOffset(source, match.index);
     if (match.specifier.startsWith('.')) {
@@ -86,6 +93,80 @@ function findImportSpecifiers(source: string): Array<{ specifier: string; index:
   }
 
   return matches;
+}
+
+function findNonLiteralDynamicSpecifierCalls(source: string): Array<{ index: number }> {
+  const matches: Array<{ index: number }> = [];
+  const callPattern = /\b(?:import|require)\s*\(/g;
+
+  for (const match of source.matchAll(callPattern)) {
+    const start = match.index ?? 0;
+    const openParenIndex = source.indexOf('(', start);
+    const closeParenIndex = findClosingParen(source, openParenIndex);
+    if (closeParenIndex === -1) {
+      matches.push({ index: start });
+      continue;
+    }
+
+    const argument = source.slice(openParenIndex + 1, closeParenIndex);
+    if (!isCleanStringLiteralArgument(argument)) {
+      matches.push({ index: start });
+    }
+  }
+
+  return matches;
+}
+
+function findClosingParen(source: string, openParenIndex: number): number {
+  let depth = 0;
+  let quote: 'single' | 'double' | 'template' | undefined;
+  let escaped = false;
+
+  for (let i = openParenIndex; i < source.length; i++) {
+    const char = source[i];
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (
+        (quote === 'single' && char === "'") ||
+        (quote === 'double' && char === '"') ||
+        (quote === 'template' && char === '`')
+      ) {
+        quote = undefined;
+      }
+      continue;
+    }
+
+    if (char === "'") {
+      quote = 'single';
+      continue;
+    }
+    if (char === '"') {
+      quote = 'double';
+      continue;
+    }
+    if (char === '`') {
+      quote = 'template';
+      continue;
+    }
+    if (char === '(') {
+      depth++;
+      continue;
+    }
+    if (char === ')') {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+
+  return -1;
+}
+
+function isCleanStringLiteralArgument(argument: string): boolean {
+  return /^\s*(['"])(?:\\[\s\S]|(?!\1)[^\\\r\n])*\1\s*$/.test(argument);
 }
 
 function lineNumberForOffset(source: string, offset: number): number {
