@@ -1,5 +1,12 @@
 name: CI Baseline
 
+# Consolidated pipeline: 3 jobs instead of 10.
+# - node: every pure-Node check on one runner (single install, single build).
+# - jvm: CLI Jest suite (Kotlin harness included) + the Android Gradle gates,
+#   sharing one Gradle daemon and the local build cache.
+# - swift: only the Darwin-gated Swift compiler harness (everything else is
+#   already covered on Ubuntu by the jvm/node jobs).
+
 on:
   push:
     branches: [main]
@@ -16,10 +23,10 @@ env:
   NODE_VERSION: 22.15.0
 
 jobs:
-  install:
-    name: Install
+  node:
+    name: Node checks
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -38,188 +45,20 @@ jobs:
           test -d node_modules/@react-native/gradle-plugin
           test -d node_modules/react-native
 
-  typecheck:
-    name: Typecheck
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build core contract exports
-        run: pnpm --filter @malopezr7/bridgekit build
-
-      - name: Typecheck workspaces
-        run: pnpm -r typecheck
-
-  cli-tests:
-    name: CLI tests (${{ matrix.harness }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - harness: swift
-            os: macos-latest
-          - harness: kotlin
-            os: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - uses: actions/setup-java@v4
-        if: matrix.harness == 'kotlin'
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - uses: gradle/actions/setup-gradle@v4
-        if: matrix.harness == 'kotlin'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build core contract exports
-        run: pnpm --filter @malopezr7/bridgekit build
-
-      - name: Build CLI
-        run: pnpm --filter @malopezr7/bridgekit-cli build
-
-      - name: Run CLI Jest tests
-        run: pnpm --filter @malopezr7/bridgekit-cli test
-
-      - name: Run Kotlin known-bad compiler fixture gate
-        if: matrix.harness == 'kotlin'
-        run: BRIDGEKIT_RUN_KOTLIN_NEGATIVE=1 pnpm --filter @malopezr7/bridgekit-cli exec jest --config ./jest.config.cjs --runInBand compile-kotlin.test.ts
-
-      - name: Run Kotlin compiler fixture gate
-        if: matrix.harness == 'kotlin'
-        working-directory: apps/example/android
-        run: ./gradlew :app:compileDebugKotlin -PbridgekitGeneratedFixturesDir=${{ github.workspace }}/packages/cli/build/generated-fixtures/kotlin-good
-
-  test-web:
-    name: Jest web
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run web Jest project
-        run: pnpm --filter @malopezr7/bridgekit test:web
-
-  test-native:
-    name: Jest native
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run native Jest project
-        run: pnpm --filter @malopezr7/bridgekit test:native
-
-  android-gradle:
-    name: Android Gradle
-    runs-on: ubuntu-latest
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
-
-      - uses: gradle/actions/setup-gradle@v4
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Run BridgeKit core-library Android unit tests
-        working-directory: apps/example/android
-        run: ./gradlew :malopezr7_bridgekit:testDebugUnitTest
-
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Run Biome check
+        run: pnpm check
 
       - name: Build workspaces
         run: pnpm build
 
-  pack:
-    name: Pack packages
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
+      - name: Typecheck workspaces
+        run: pnpm -r typecheck
 
-      - uses: pnpm/action-setup@v4
+      - name: Run web Jest project
+        run: pnpm --filter @malopezr7/bridgekit test:web
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build core before pack
-        run: pnpm --filter @malopezr7/bridgekit build
+      - name: Run native Jest project
+        run: pnpm --filter @malopezr7/bridgekit test:native
 
       - name: Verify core package contents
         working-directory: packages/core
@@ -245,9 +84,62 @@ jobs:
           grep -Fx "package/dist/index.js" "$tmp/cli-list.txt"
           grep -Fx "package/LICENSE" "$tmp/cli-list.txt"
 
-  generate-check:
-    name: Generate drift check
+      - name: Verify generated bindings
+        run: |
+          pnpm --filter bridgekit-example generate --check
+          pnpm --filter bridgekit-example generate:ios --check
+          pnpm --filter bridgekit-example-callstack-brownfield generate --check
+          pnpm --filter bridgekit-example-callstack-brownfield generate:ios --check
+          pnpm --filter bridgekit-example-expo-brownfield generate --check
+          pnpm --filter bridgekit-example-expo-brownfield generate:ios --check
+
+  jvm:
+    name: CLI tests + Android Gradle
     runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build core contract exports
+        run: pnpm --filter @malopezr7/bridgekit build
+
+      - name: Build CLI
+        run: pnpm --filter @malopezr7/bridgekit-cli build
+
+      # Single Jest pass: the negative Kotlin compiler gate is enabled inline
+      # instead of re-running the whole test file a second time. Gradle-backed
+      # tests live in one file, so they execute sequentially in one worker.
+      - name: Run CLI Jest tests (with Kotlin negative gate)
+        run: BRIDGEKIT_RUN_KOTLIN_NEGATIVE=1 pnpm --filter @malopezr7/bridgekit-cli test
+
+      # One Gradle invocation for both gates: generated-fixture compilation and
+      # the BridgeKit core-library unit tests share the daemon and build cache.
+      # --continue keeps per-gate signal when one task fails; --rerun forces the
+      # unit tests to actually execute instead of replaying a build-cache hit.
+      - name: Run Gradle gates (fixture compile + core unit tests)
+        working-directory: apps/example/android
+        run: ./gradlew --continue :app:compileDebugKotlin :malopezr7_bridgekit:testDebugUnitTest --rerun -PbridgekitGeneratedFixturesDir=${{ github.workspace }}/packages/cli/build/generated-fixtures/kotlin-good
+
+  swift:
+    name: CLI Swift compiler harness
+    runs-on: macos-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -268,30 +160,7 @@ jobs:
       - name: Build CLI
         run: pnpm --filter @malopezr7/bridgekit-cli build
 
-      - name: Verify generated bindings
-        run: |
-          pnpm --filter bridgekit-example generate --check
-          pnpm --filter bridgekit-example generate:ios --check
-          pnpm --filter bridgekit-example-callstack-brownfield generate --check
-          pnpm --filter bridgekit-example-callstack-brownfield generate:ios --check
-          pnpm --filter bridgekit-example-expo-brownfield generate --check
-          pnpm --filter bridgekit-example-expo-brownfield generate:ios --check
-
-  check:
-    name: Biome check
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Run Biome check
-        run: pnpm check
+      # Only the Darwin-gated Swift harness runs here; the rest of the CLI
+      # suite is covered by the jvm job on Ubuntu.
+      - name: Run Swift compiler harness
+        run: pnpm --filter @malopezr7/bridgekit-cli exec jest --config ./jest.config.cjs compile-swift.test.ts
