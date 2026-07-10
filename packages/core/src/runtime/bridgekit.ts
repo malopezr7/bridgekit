@@ -62,6 +62,39 @@ function _decodeAndValidateInbound(
   return decoded;
 }
 
+function _encodeStateValue(
+  schema: AnySchema,
+  value: unknown,
+  contractId: string,
+  member: string,
+): unknown {
+  if (value === undefined) {
+    throw createBridgeError(
+      'VALIDATION_FAILED',
+      `[bridgekit] setState VALIDATION_FAILED: ${contractId}.${member} top-level undefined is reserved for provider removal`,
+      { contractId, member, details: { path: '' } },
+    );
+  }
+  const result = validate(schema, value);
+  if (!result.ok) {
+    throw createBridgeError(
+      'VALIDATION_FAILED',
+      `[bridgekit] setState VALIDATION_FAILED: ${contractId}.${member} ${result.message} at path "${result.path}"`,
+      { contractId, member, details: { path: result.path } },
+    );
+  }
+  try {
+    return encode(schema, value);
+  } catch (error) {
+    const cause = error instanceof Error ? error.message : String(error);
+    throw createBridgeError(
+      'VALIDATION_FAILED',
+      `[bridgekit] setState VALIDATION_FAILED: ${contractId}.${member} encode failed: ${cause}`,
+      { contractId, member, details: { cause } },
+    );
+  }
+}
+
 function _encodeBridgeError(err: unknown, contractId: string, member: string, scope: BridgeScope) {
   const message = err instanceof Error ? err.message : String(err);
   return createBridgeError(
@@ -346,19 +379,13 @@ export class BridgeKitJs {
       binding.setState = (key: string, value: unknown) => {
         if (!binding.isLive && record.binding !== binding) return;
         const stateDesc = contract.descriptor.state[key];
+        let transportValue = value;
         if (stateDesc !== undefined && 'value' in stateDesc && stateDesc.value) {
-          const result = validate(stateDesc.value, value);
-          if (!result.ok) {
-            throw createBridgeError(
-              'VALIDATION_FAILED',
-              `[bridgekit] setState VALIDATION_FAILED: ${contract.descriptor.id}.${key} ${result.message} at path "${result.path}"`,
-              { contractId: contract.descriptor.id, member: key, details: { path: result.path } },
-            );
-          }
+          transportValue = _encodeStateValue(stateDesc.value, value, contract.descriptor.id, key);
         }
         record.stateValues.set(key, value);
         originalSetState(key, value);
-        transport.pushProviderState(contract.descriptor.id, scope, key, value);
+        transport.pushProviderState(contract.descriptor.id, scope, key, transportValue);
       };
 
       binding.close = (reason?: 'replacing' | 'final') => {
@@ -391,7 +418,11 @@ export class BridgeKitJs {
             : undefined;
         record.stateValues.set(key, value);
         originalSetState(key, value);
-        transport.pushProviderState(contract.descriptor.id, scope, key, value);
+        const transportValue =
+          'value' in stateDesc && stateDesc.value
+            ? _encodeStateValue(stateDesc.value, value, contract.descriptor.id, key)
+            : value;
+        transport.pushProviderState(contract.descriptor.id, scope, key, transportValue);
       }
 
       // Explicit provide announcement — covers stateless contracts that send no stateWrite.

@@ -7,9 +7,12 @@
 // Transport methods are no-ops (local state never crosses to native).
 // ---------------------------------------------------------------------------
 
+import { decode, validate } from '../contract/codec';
 import type { BridgeContract } from '../contract/contract';
-import type { BridgeScope } from '../contract/protocol';
+import { type BridgeError, type BridgeScope, createBridgeError } from '../contract/protocol';
+import type { AnySchema } from '../contract/schema';
 import { nextCorrelationId } from './correlationId';
+import { diagnostics } from './diagnostics';
 import type { Registry } from './registry';
 import { serializeScope } from './registry';
 import type { BridgeTransport } from './transport';
@@ -28,6 +31,7 @@ export type MirrorStatus = 'initial' | 'provided' | 'stale' | 'unprovided';
 export interface MirrorValue<T> {
   value: T;
   status: MirrorStatus;
+  error?: BridgeError;
 }
 
 type ChangeCallback<T> = (v: MirrorValue<T>) => void;
@@ -40,6 +44,7 @@ export class StateMirror<T> {
   private _subscribers = new Set<ChangeCallback<T>>();
   private _obsId: string | null = null;
   private _transport: BridgeTransport | null = null;
+  private _error: BridgeError | undefined;
   // Cached snapshot — same object reference until value or status changes.
   // Required by React's useSyncExternalStore which compares by Object.is.
   private _snapshot: MirrorValue<T>;
@@ -49,6 +54,7 @@ export class StateMirror<T> {
     private readonly _key: string,
     private readonly _scope: BridgeScope,
     initial: T,
+    private _schema?: AnySchema,
   ) {
     this._value = initial;
     this._snapshot = { value: this._value, status: this._status };
@@ -60,7 +66,11 @@ export class StateMirror<T> {
 
   /** Invalidate cached snapshot after any internal state change. */
   private _updateSnapshot(): void {
-    this._snapshot = { value: this._value, status: this._status };
+    this._snapshot = {
+      value: this._value,
+      status: this._status,
+      ...(this._error ? { error: this._error } : {}),
+    };
   }
 
   subscribe(cb: ChangeCallback<T>): () => void {
@@ -79,11 +89,16 @@ export class StateMirror<T> {
   }
 
   /** Hydrate from connect snapshot */
-  hydrate(value: T): void {
-    this._value = value;
-    this._status = 'provided';
-    this._updateSnapshot();
-    this._notify();
+  hydrate(value: unknown): void {
+    this._applyRaw(value);
+  }
+
+  setSchema(schema: AnySchema | undefined): void {
+    if (this._schema || !schema) return;
+    this._schema = schema;
+    if (this._status === 'provided') {
+      this._applyRaw(this._value);
+    }
   }
 
   /** Called when transport becomes available */
@@ -141,16 +156,46 @@ export class StateMirror<T> {
       epoch: 0, // transport fills epoch
     };
     this._obsId = this._transport.stateObserve(env, (raw) => {
-      if (raw === undefined) {
-        // Provider gone — if we had a value keep it as stale, else unprovided.
-        this._status = this._status === 'provided' ? 'stale' : 'unprovided';
-      } else {
-        this._value = raw as T;
-        this._status = 'provided';
-      }
+      this._applyRaw(raw);
+    });
+  }
+
+  private _applyRaw(raw: unknown): void {
+    if (raw === undefined) {
+      // Provider gone — if we had a value keep it as stale, else unprovided.
+      this._status = this._status === 'provided' ? 'stale' : 'unprovided';
       this._updateSnapshot();
       this._notify();
-    });
+      return;
+    }
+
+    try {
+      const decoded = this._schema ? decode(this._schema, raw) : raw;
+      if (this._schema) {
+        const result = validate(this._schema, decoded);
+        if (!result.ok) {
+          throw new Error(`${result.message} at path "${result.path}"`);
+        }
+      }
+      this._value = decoded as T;
+      this._status = 'provided';
+      this._error = undefined;
+    } catch (error) {
+      const cause = error instanceof Error ? error.message : String(error);
+      this._error = createBridgeError(
+        'INCOMPATIBLE_CONTRACT',
+        `[bridgekit] INCOMPATIBLE_CONTRACT: ${this._contractId}.${this._key} state decode failed: ${cause}`,
+        {
+          contractId: this._contractId,
+          member: this._key,
+          scope: this._scope,
+          details: { cause },
+        },
+      );
+      diagnostics.incrementErrors();
+    }
+    this._updateSnapshot();
+    this._notify();
   }
 
   private _notify(): void {
@@ -384,6 +429,8 @@ export class MirrorRegistry {
     initial: T,
   ): StateMirror<T> {
     const k = this.keyFor(contract.descriptor.id, key, scope);
+    const stateDesc = contract.descriptor.state[key];
+    const schema = stateDesc && 'value' in stateDesc ? stateDesc.value : undefined;
     if (!this._mirrors.has(k)) {
       this._mirrors.set(
         k,
@@ -392,11 +439,13 @@ export class MirrorRegistry {
           key,
           scope,
           initial,
+          schema,
         ) as unknown as StateMirror<unknown>,
       );
     }
     const mirror = this._mirrors.get(k);
     if (mirror === undefined) throw new Error('[bridgekit] internal: mirror not found after set');
+    mirror.setSchema(schema);
     return mirror as unknown as StateMirror<T>;
   }
 

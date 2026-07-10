@@ -332,7 +332,7 @@ export class Registry {
     key: string,
     cb: (value: unknown) => void,
   ): () => void {
-    const scopeKey = serializeScope(scope);
+    const scopeKey = this.resolve(contractId, scope)?.binding.scopeKey ?? serializeScope(scope);
     const sk = this._stateKey(contractId, scopeKey, key);
     if (!this._stateListeners.has(sk)) {
       this._stateListeners.set(sk, new Set());
