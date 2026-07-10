@@ -18,6 +18,11 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 
 import { CliError } from './cliError.js';
+import {
+  decodeLoaderPayload,
+  loaderEncoderWorkerSource,
+  MAX_LOADER_SPAWN_BUFFER_BYTES,
+} from './loaderCodec.js';
 
 // ---- duck-typed contract shape (never import bridgekit classes) -------------
 
@@ -110,6 +115,10 @@ function lineNumberForOffset(source: string, offset: number): number {
 }
 
 // ---- ESM worker script (written to temp file, never compiled by babel) ------
+// The tagged fd-3 protocol is CLI-owned process transport. It intentionally stays
+// separate from the core schema wire codec, which cannot encode a descriptor before
+// the contract has crossed this worker boundary. loaderEncoderWorkerSource() embeds
+// function source; keep its dependencies limited to embedded declarations and Node globals.
 
 const WORKER_SCRIPT = `
 import { createRequire } from 'node:module';
@@ -117,6 +126,8 @@ import { existsSync, writeSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { registerHooks } from 'node:module';
+
+${loaderEncoderWorkerSource()}
 
 // Pre-resolve @malopezr7/bridgekit/contract to its CJS dist using the file being
 // loaded as the resolution base, so that --experimental-strip-types is not
@@ -201,7 +212,12 @@ for (const [, value] of Object.entries(mod)) {
   }
 }
 
-writeSync(3, JSON.stringify(tokens));
+try {
+  writeSync(3, encodeLoaderPayloadForWorker(tokens));
+} catch (err) {
+  process.stderr.write('loader-worker: value encode failed: ' + err.message + '\\n');
+  process.exit(1);
+}
 `;
 
 // ---- load contracts from a file --------------------------------------------
@@ -241,11 +257,17 @@ export async function loadContractsFromFile(filePath: string): Promise<RawContra
       {
         encoding: 'utf8',
         timeout: 30_000,
+        maxBuffer: MAX_LOADER_SPAWN_BUFFER_BYTES,
         stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
       },
     );
 
     if (result.error) {
+      if ((result.error as NodeJS.ErrnoException).code === 'ENOBUFS') {
+        throw new CliError(
+          `Contract loader exceeded its ${MAX_LOADER_SPAWN_BUFFER_BYTES}-byte process output buffer`,
+        );
+      }
       throw new CliError(`Failed to spawn contract loader: ${result.error.message}`);
     }
 
@@ -263,14 +285,18 @@ export async function loadContractsFromFile(filePath: string): Promise<RawContra
 
     let tokens: unknown[];
     try {
-      tokens = JSON.parse(tokenPayload) as unknown[];
-    } catch {
+      tokens = decodeLoaderPayload(tokenPayload);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new CliError(`Invalid contract loader payload for ${filePath}: ${message}`);
+    }
+    const malformedIndex = tokens.findIndex((token) => !isBridgeContractToken(token));
+    if (malformedIndex !== -1) {
       throw new CliError(
-        `Contract loader returned invalid JSON for ${filePath}: ${tokenPayload.substring(0, 200)}`,
+        `Contract loader returned malformed contract token at index ${malformedIndex}`,
       );
     }
-
-    return tokens.filter(isBridgeContractToken) as RawContractToken[];
+    return tokens as RawContractToken[];
   } finally {
     try {
       rmSync(tmpDir, { recursive: true, force: true });

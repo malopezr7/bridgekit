@@ -47,11 +47,39 @@ function emitInt64Contract(): string {
   return emitKotlinContract(token, 'com.bridgekit.fixtures').content;
 }
 
+function emitRecordContract(): string {
+  const token: RawContractToken = {
+    hash: 'contract-hash',
+    descriptor: {
+      $type: 'com.bridgekit.contract',
+      id: 'fixture.record',
+      methods: {
+        getRecord: {
+          kind: 'query',
+          result: t.object({ values: t.record(t.string()) }),
+        },
+      },
+      streams: {},
+      state: {},
+    },
+  };
+
+  return emitKotlinContract(token, 'com.bridgekit.fixtures').content;
+}
+
 function coreOneOfTags(oneOfSchema: ReturnType<typeof t.oneOf>): readonly string[] {
   return (oneOfSchema as unknown as { tags: readonly string[] }).tags;
 }
 
 describe('Kotlin codec snapshots', () => {
+  it('keeps decoded record values non-null inside associate pairs', () => {
+    const kotlin = emitRecordContract();
+
+    expect(kotlin).toContain(
+      'k.toString() to ((v as? String) ?: throw BridgeKitDecodeException("values", "String"))',
+    );
+  });
+
   it('cli_codec_snapshots_emit_int64_string_kotlin_swift emits decimal string int64 boundaries', () => {
     const kotlin = emitInt64Contract();
 
