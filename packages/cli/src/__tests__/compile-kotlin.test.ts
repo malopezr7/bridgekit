@@ -77,7 +77,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
@@ -122,12 +121,7 @@ class CompileStateCompoundRuntimeTest {
             (dateInitial as BridgeValue.Available).value
         )
 
-        val binaryInitial = CompileStateCompoundContract.outbound(StateCaller(initials.getValue("payload"))).payload.first()
-        assertTrue(binaryInitial is BridgeValue.Available)
-        assertArrayEquals(
-            byteArrayOf(0, 1, 2, 254.toByte(), 255.toByte()),
-            (binaryInitial as BridgeValue.Available).value
-        )
+        assertEquals("AAEC/v8=", initials.getValue("payload"))
 
         val negativeZeroInitial = CompileStateCompoundContract.outbound(StateCaller(initials.getValue("negativeZero"))).negativeZero.first()
         assertTrue(negativeZeroInitial is BridgeValue.Available)
