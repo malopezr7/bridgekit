@@ -399,9 +399,7 @@ export class NitroBridgeTransport implements BridgeTransport {
       correlationId: '',
       epoch: this._epoch,
     };
-    this._getState().write(
-      envelopeToMap(env) as unknown as import('react-native-nitro-modules').AnyMap,
-    );
+    this.stateWrite(env);
   }
 
   /**
@@ -418,8 +416,6 @@ export class NitroBridgeTransport implements BridgeTransport {
       correlationId: '',
       epoch: this._epoch,
     };
-    this._getState().write(
-      envelopeToMap(env) as unknown as import('react-native-nitro-modules').AnyMap,
-    );
+    this.stateWrite(env);
   }
 }
