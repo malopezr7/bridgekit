@@ -15,6 +15,7 @@ interface StatePush {
 
 class StateBoundaryTransport implements BridgeTransport {
   pushes: StatePush[] = [];
+  announces: Array<{ op: 'provide' | 'unprovide'; contractId: string }> = [];
   snapshot: ConnectResult['snapshot'] = [];
   private readonly observers = new Map<string, (value: unknown) => void>();
 
@@ -49,8 +50,12 @@ class StateBoundaryTransport implements BridgeTransport {
   pushProviderState(contractId: string, scope: BridgeScope, key: string, value: unknown): void {
     this.pushes.push({ contractId, scope, key, value });
   }
-  announceProvided(): void {}
-  announceUnprovided(): void {}
+  announceProvided(contractId: string): void {
+    this.announces.push({ op: 'provide', contractId });
+  }
+  announceUnprovided(contractId: string): void {
+    this.announces.push({ op: 'unprovide', contractId });
+  }
   emitNative(key: string, value: unknown): void {
     const observer = this.observers.get(key);
     if (!observer) throw new Error(`Missing observer for ${key}`);
@@ -207,6 +212,70 @@ describe('WS11 state schema boundary', () => {
     }
     expect(isBridgeError(thrown, 'VALIDATION_FAILED')).toBe(true);
     expect(transport.pushes).toEqual([]);
+  });
+
+  it('provides atomically when an optional multi-key initial is undefined', () => {
+    // JD2-001: an undefined optional initial must not throw mid-push, leave a
+    // zombie binding, or skip the provide announcement on multi-key contracts.
+    const MixedState = defineContract('ws11.state.mixed', {
+      state: {
+        label: t.state(t.string(), 'seed'),
+        note: t.state(t.optional(t.string()), undefined),
+      },
+    });
+    const { bridgeKit, transport } = setup();
+    const binding = bridgeKit.provide(MixedState as BridgeContract<unknown>, {});
+    expect(bridgeKit.isProvided(MixedState as BridgeContract<unknown>)).toBe(true);
+    expect(transport.announces).toEqual([{ op: 'provide', contractId: 'ws11.state.mixed' }]);
+    // Defined initial pushed; undefined initial is skipped on the wire because
+    // top-level undefined stays reserved for provider removal.
+    expect(transport.pushes).toEqual([
+      { contractId: 'ws11.state.mixed', scope: GLOBAL_SCOPE, key: 'label', value: 'seed' },
+    ]);
+    binding.setState('note', 'hello');
+    expect(transport.pushes).toHaveLength(2);
+    expect(transport.pushes[1]?.value).toBe('hello');
+  });
+
+  it('falls back to the typed initial when schema attaches after raw hydration decode fails', () => {
+    // JD2-002: a schema-less hydrated mirror must not leak the raw wire value
+    // as last-good once the schema attaches and decode fails.
+    const transport = new StateBoundaryTransport();
+    transport.snapshot = [
+      {
+        contractId: Int64State.descriptor.id,
+        key: 'value',
+        scope: GLOBAL_SCOPE,
+        value: 42,
+      },
+    ];
+    const bridgeKit = new BridgeKitJs(transport);
+    bridgeKit.connect();
+    const mirror = bridgeKit.state(Int64State as BridgeContract<unknown>, 'value');
+    const snapshot = mirror.get();
+    expect(snapshot.value).toBe(0n);
+    expect(snapshot.error?.code).toBe('INCOMPATIBLE_CONTRACT');
+    expect(diagnostics.getCounters().errors).toBe(1);
+  });
+
+  it('latches an error and keeps last-good when binary wire is wrong-typed', () => {
+    // JD2-003: wrong-typed binary wire must not silently decode to empty bytes.
+    const binary = observe(BinaryState as BridgeContract<unknown>);
+    binary.transport.emitNative('value', 'AQL/');
+    binary.transport.emitNative('value', 42);
+    expect(Array.from(binary.mirror.get().value as Uint8Array)).toEqual([1, 2, 255]);
+    expect(binary.mirror.get().error?.code).toBe('INCOMPATIBLE_CONTRACT');
+    binary.unsubscribe();
+  });
+
+  it('rejects an empty-string int64 wire value instead of decoding it to 0n', () => {
+    // JD2-003 (related): BigInt('') silently yields 0n.
+    const int64 = observe(Int64State as BridgeContract<unknown>);
+    int64.transport.emitNative('value', '41');
+    int64.transport.emitNative('value', '');
+    expect(int64.mirror.get().value).toBe(41n);
+    expect(int64.mirror.get().error?.code).toBe('INCOMPATIBLE_CONTRACT');
+    int64.unsubscribe();
   });
 
   it('sanitizes nested JSON undefined but retains the original local object', () => {

@@ -45,6 +45,9 @@ export class StateMirror<T> {
   private _obsId: string | null = null;
   private _transport: BridgeTransport | null = null;
   private _error: BridgeError | undefined;
+  // True while _value holds a raw wire value applied without a schema
+  // (snapshot hydration through a descriptor-less stub). See setSchema (JD2-002).
+  private _schemalessValue = false;
   // Cached snapshot — same object reference until value or status changes.
   // Required by React's useSyncExternalStore which compares by Object.is.
   private _snapshot: MirrorValue<T>;
@@ -93,11 +96,19 @@ export class StateMirror<T> {
     this._applyRaw(value);
   }
 
-  setSchema(schema: AnySchema | undefined): void {
+  setSchema(schema: AnySchema | undefined, fallbackInitial?: unknown): void {
     if (this._schema || !schema) return;
     this._schema = schema;
     if (this._status === 'provided') {
-      this._applyRaw(this._value);
+      const raw = this._value;
+      if (this._schemalessValue) {
+        // JD2-002: the current value is an undecoded wire value applied before
+        // the schema attached. If the re-decode below fails, the raw wire repr
+        // must not survive as last-good — fall back to the typed initial.
+        this._value = fallbackInitial as T;
+        this._schemalessValue = false;
+      }
+      this._applyRaw(raw);
     }
   }
 
@@ -178,6 +189,7 @@ export class StateMirror<T> {
         }
       }
       this._value = decoded as T;
+      this._schemalessValue = !this._schema;
       this._status = 'provided';
       this._error = undefined;
     } catch (error) {
@@ -445,7 +457,9 @@ export class MirrorRegistry {
     }
     const mirror = this._mirrors.get(k);
     if (mirror === undefined) throw new Error('[bridgekit] internal: mirror not found after set');
-    mirror.setSchema(schema);
+    // JD2-002: pass the typed descriptor initial so a failed re-decode of a
+    // schema-less hydrated wire value falls back to it instead of leaking raw.
+    mirror.setSchema(schema, initial);
     return mirror as unknown as StateMirror<T>;
   }
 

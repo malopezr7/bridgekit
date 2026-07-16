@@ -45,6 +45,7 @@ jest.mock('react-native-nitro-modules', () => {
 
 // Import AFTER mock
 import type { CallEnvelope, ResultEnvelope } from '../../contract/protocol';
+import { diagnostics } from '../diagnostics';
 import { NitroBridgeTransport } from '../nitroTransport';
 import type { JsDispatcher } from '../transport';
 
@@ -514,5 +515,23 @@ describe('guarded state announcements', () => {
     expect(() => transport.announceProvided('test.contract', { kind: 'global' })).not.toThrow();
     expect(() => transport.announceUnprovided('test.contract', { kind: 'global' })).not.toThrow();
     expect(state.write.mock.calls.map(([write]) => write.op)).toEqual(['provide', 'unprovide']);
+  });
+
+  it('surfaces failed announcements through diagnostics instead of discarding them', () => {
+    // JD2-004: an ok:false announcement envelope must increment error
+    // diagnostics and emit a dev warning — silent readiness divergence is not ok.
+    const { host, state } = getMocks();
+    host.connectDispatcher.mockReturnValue({ epoch: 1, snapshot: [] });
+    state.write.mockImplementation(() => {
+      throw new Error('native announcement failure');
+    });
+    const transport = new NitroBridgeTransport();
+    transport.connect(makeDispatcher());
+
+    diagnostics.reset();
+    transport.announceProvided('test.contract', { kind: 'global' });
+    expect(diagnostics.getCounters().errors).toBe(1);
+    transport.announceUnprovided('test.contract', { kind: 'global' });
+    expect(diagnostics.getCounters().errors).toBe(2);
   });
 });

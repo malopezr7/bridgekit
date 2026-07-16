@@ -335,11 +335,38 @@ export class BridgeKitJs {
     impl: Partial<TShape>,
     opts?: { scope?: BridgeScope },
   ): Binding {
-    this._contracts.set(contract.descriptor.id, contract as BridgeContract<unknown>);
     const scope = opts?.scope ?? _ambientScope;
     const recordKey = `${contract.descriptor.id}|${serializeScope(scope)}`;
     let record = this._providerRecords.get(recordKey);
     const isReplay = this._replayingProviders;
+
+    // JD2-001: pre-encode every initial wire value BEFORE mutating the contract
+    // map, provider records, or registry. A failing encode must reject the
+    // whole provide() atomically instead of leaving a live zombie binding and
+    // partial pushes behind. Top-level undefined (valid for optional initials)
+    // stays reserved for provider removal on the wire, so it is registered
+    // locally but never pushed.
+    const preserveReplayValues = isReplay && record !== undefined;
+    const initialPushes: Array<{ key: string; value: unknown; transportValue: unknown }> = [];
+    for (const [key, stateDesc] of Object.entries(contract.descriptor.state)) {
+      const value =
+        preserveReplayValues && record?.stateValues.has(key)
+          ? record.stateValues.get(key)
+          : 'initial' in stateDesc
+            ? stateDesc.initial
+            : undefined;
+      if (value === undefined) {
+        initialPushes.push({ key, value, transportValue: undefined });
+        continue;
+      }
+      const transportValue =
+        'value' in stateDesc && stateDesc.value
+          ? _encodeStateValue(stateDesc.value, value, contract.descriptor.id, key)
+          : value;
+      initialPushes.push({ key, value, transportValue });
+    }
+
+    this._contracts.set(contract.descriptor.id, contract as BridgeContract<unknown>);
     const resetStateValues = (target: ProviderRecord) => {
       target.stateValues.clear();
       for (const [key, stateDesc] of Object.entries(contract.descriptor.state)) {
@@ -410,18 +437,11 @@ export class BridgeKitJs {
 
       // Push preserved provider-owned state so reconnect replay keeps registry,
       // native transport, and existing local mirrors coherent across epochs.
-      for (const [key, stateDesc] of Object.entries(contract.descriptor.state)) {
-        const value = record.stateValues.has(key)
-          ? record.stateValues.get(key)
-          : 'initial' in stateDesc
-            ? stateDesc.initial
-            : undefined;
+      // Values and wire encodings were precomputed before any mutation (JD2-001).
+      for (const { key, value, transportValue } of initialPushes) {
         record.stateValues.set(key, value);
         originalSetState(key, value);
-        const transportValue =
-          'value' in stateDesc && stateDesc.value
-            ? _encodeStateValue(stateDesc.value, value, contract.descriptor.id, key)
-            : value;
+        if (value === undefined) continue; // reserved for provider removal — never pushed
         transport.pushProviderState(contract.descriptor.id, scope, key, transportValue);
       }
 

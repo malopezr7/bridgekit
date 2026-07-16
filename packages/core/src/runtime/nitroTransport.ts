@@ -18,6 +18,7 @@ import type { CallEnvelope, ResultEnvelope } from '../contract/protocol';
 import type { BridgeHost } from '../specs/BridgeHost.nitro';
 import type { BridgeState } from '../specs/BridgeState.nitro';
 import type { BridgeStreams } from '../specs/BridgeStreams.nitro';
+import { diagnostics } from './diagnostics';
 import type { BridgeTransport, ConnectResult, JsDispatcher, StateSnapshotEntry } from './transport';
 
 // ---- AnyMap helpers ---------------------------------------------------------
@@ -399,7 +400,16 @@ export class NitroBridgeTransport implements BridgeTransport {
       correlationId: '',
       epoch: this._epoch,
     };
-    this.stateWrite(env);
+    const result = this.stateWrite(env);
+    if (!result.ok) {
+      // JD2-004: a failed provide announcement means native readiness diverged
+      // from JS — surface it instead of silently discarding the envelope.
+      diagnostics.incrementErrors();
+      diagnostics.warnOnce(
+        `announce-provide-failed|${contractId}`,
+        `announceProvided(${contractId}) failed: ${result.message ?? result.code ?? 'unknown error'}`,
+      );
+    }
   }
 
   /**
@@ -416,6 +426,15 @@ export class NitroBridgeTransport implements BridgeTransport {
       correlationId: '',
       epoch: this._epoch,
     };
-    this.stateWrite(env);
+    const result = this.stateWrite(env);
+    if (!result.ok) {
+      // JD2-004: symmetric with announceProvided — silent unprovide loss leaves
+      // native believing a dead JS provider is still live.
+      diagnostics.incrementErrors();
+      diagnostics.warnOnce(
+        `announce-unprovide-failed|${contractId}`,
+        `announceUnprovided(${contractId}) failed: ${result.message ?? result.code ?? 'unknown error'}`,
+      );
+    }
   }
 }
