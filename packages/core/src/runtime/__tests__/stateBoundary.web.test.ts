@@ -258,6 +258,50 @@ describe('WS11 state schema boundary', () => {
     expect(diagnostics.getCounters().errors).toBe(1);
   });
 
+  it('falls back to the typed initial when a stale schema-less value fails to decode', () => {
+    const transport = new StateBoundaryTransport();
+    transport.snapshot = [
+      {
+        contractId: Int64State.descriptor.id,
+        key: 'value',
+        scope: GLOBAL_SCOPE,
+        value: 42,
+      },
+    ];
+    const bridgeKit = new BridgeKitJs(transport);
+    bridgeKit.connect();
+    transport.snapshot = [];
+    bridgeKit.connect();
+
+    const mirror = bridgeKit.state(Int64State as BridgeContract<unknown>, 'value');
+
+    expect(mirror.get().value).toBe(0n);
+    expect(mirror.get().status).toBe('stale');
+    expect(mirror.get().error?.code).toBe('INCOMPATIBLE_CONTRACT');
+    expect(diagnostics.getCounters().errors).toBe(1);
+  });
+
+  it('decodes a stale schema-less value when its schema attaches', () => {
+    const transport = new StateBoundaryTransport();
+    transport.snapshot = [
+      {
+        contractId: Int64State.descriptor.id,
+        key: 'value',
+        scope: GLOBAL_SCOPE,
+        value: '42',
+      },
+    ];
+    const bridgeKit = new BridgeKitJs(transport);
+    bridgeKit.connect();
+    transport.snapshot = [];
+    bridgeKit.connect();
+
+    const mirror = bridgeKit.state(Int64State as BridgeContract<unknown>, 'value');
+
+    expect(mirror.get()).toEqual({ value: 42n, status: 'stale' });
+    expect(diagnostics.getCounters().errors).toBe(0);
+  });
+
   it('latches an error and keeps last-good when binary wire is wrong-typed', () => {
     // JD2-003: wrong-typed binary wire must not silently decode to empty bytes.
     const binary = observe(BinaryState as BridgeContract<unknown>);

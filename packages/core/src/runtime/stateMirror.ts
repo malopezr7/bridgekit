@@ -99,16 +99,15 @@ export class StateMirror<T> {
   setSchema(schema: AnySchema | undefined, fallbackInitial?: unknown): void {
     if (this._schema || !schema) return;
     this._schema = schema;
-    if (this._status === 'provided') {
+    if (this._schemalessValue) {
       const raw = this._value;
-      if (this._schemalessValue) {
-        // JD2-002: the current value is an undecoded wire value applied before
-        // the schema attached. If the re-decode below fails, the raw wire repr
-        // must not survive as last-good — fall back to the typed initial.
-        this._value = fallbackInitial as T;
-        this._schemalessValue = false;
-      }
-      this._applyRaw(raw);
+      const status = this._status;
+      // JD2-002: the current value is an undecoded wire value applied before
+      // the schema attached. If the re-decode below fails, the raw wire repr
+      // must not survive as last-good — fall back to the typed initial.
+      this._value = fallbackInitial as T;
+      this._schemalessValue = false;
+      this._applyRaw(raw, status);
     }
   }
 
@@ -171,7 +170,7 @@ export class StateMirror<T> {
     });
   }
 
-  private _applyRaw(raw: unknown): void {
+  private _applyRaw(raw: unknown, successStatus: MirrorStatus = 'provided'): void {
     if (raw === undefined) {
       // Provider gone — if we had a value keep it as stale, else unprovided.
       this._status = this._status === 'provided' ? 'stale' : 'unprovided';
@@ -190,7 +189,7 @@ export class StateMirror<T> {
       }
       this._value = decoded as T;
       this._schemalessValue = !this._schema;
-      this._status = 'provided';
+      this._status = successStatus;
       this._error = undefined;
     } catch (error) {
       const cause = error instanceof Error ? error.message : String(error);
