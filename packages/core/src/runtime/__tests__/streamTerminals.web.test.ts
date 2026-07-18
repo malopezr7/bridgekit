@@ -3,6 +3,7 @@ import { defineContract, t } from '../../contract/contract';
 import type { ResultEnvelope } from '../../contract/protocol';
 import { BridgeKitJs } from '../bridgekit';
 import { diagnostics } from '../diagnostics';
+import { fromAsyncIterable, streamSource } from '../registry';
 import type { BridgeTransport, JsDispatcher } from '../transport';
 
 const StreamContract = defineContract('ws11.stream-terminals', {
@@ -173,5 +174,83 @@ describe('WS-11 stream terminals', () => {
     expect(diagnostics.getCounters().errors).toBe(2);
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
+  });
+
+  test('local stream completion notifies subscriber and closes diagnostics', () => {
+    const transport = new ControlledTransport();
+    const bridgekit = new BridgeKitJs(transport);
+    bridgekit.connect();
+    bridgekit.provide(StreamContract, {
+      values: () =>
+        streamSource<number>((emit, end) => {
+          emit(1);
+          end({ ok: true });
+          return () => {};
+        }),
+    });
+    const onComplete = jest.fn();
+
+    bridgekit
+      .bridge(StreamContract)
+      .values()
+      .subscribe(() => {}, { onComplete });
+
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(diagnostics.getOpenStreams()).toBe(0);
+  });
+
+  test('local stream error notifies subscriber', () => {
+    const transport = new ControlledTransport();
+    const bridgekit = new BridgeKitJs(transport);
+    bridgekit.connect();
+    bridgekit.provide(StreamContract, {
+      values: () =>
+        streamSource<number>((_emit, end) => {
+          end({ ok: false, code: 'PROVIDER_ERROR' });
+          return () => {};
+        }),
+    });
+    const onError = jest.fn();
+
+    bridgekit
+      .bridge(StreamContract)
+      .values()
+      .subscribe(() => {}, { onError });
+
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ code: 'PROVIDER_ERROR' }));
+    expect(diagnostics.getOpenStreams()).toBe(0);
+  });
+
+  test('fromAsyncIterable reports completion and errors', async () => {
+    let resolveComplete!: () => void;
+    let resolveError!: () => void;
+    const completed = new Promise<void>((resolve) => {
+      resolveComplete = resolve;
+    });
+    const errored = new Promise<void>((resolve) => {
+      resolveError = resolve;
+    });
+    const onComplete = jest.fn(resolveComplete);
+    const onError = jest.fn(resolveError);
+    const failingIterable: AsyncIterable<number> = {
+      [Symbol.asyncIterator]() {
+        return {
+          next: () => Promise.reject(new Error('iterable failed')),
+        };
+      },
+    };
+    fromAsyncIterable(
+      (async function* () {
+        yield 1;
+      })(),
+    ).subscribe(() => {}, { onComplete });
+    fromAsyncIterable(failingIterable).subscribe(() => {}, { onError });
+
+    await Promise.all([completed, errored]);
+
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'PROVIDER_ERROR', message: 'iterable failed' }),
+    );
   });
 });

@@ -482,6 +482,31 @@ export class Registry {
 }
 
 import type { BridgeStreamSource } from '../contract/contract';
+import {
+  type BridgeError,
+  type BridgeErrorCode,
+  type BridgeStreamSubscribeOptions,
+  createBridgeError,
+  ERROR_CODES,
+  isBridgeError,
+} from '../contract/protocol';
+
+function reportLocalStreamCallbackError(kind: string, error: unknown): void {
+  diagnostics.incrementErrors();
+  const message = error instanceof Error ? error.message : String(error);
+  diagnostics.warnOnce(
+    `local-stream-callback:${kind}`,
+    `local stream ${kind} callback threw: ${message}`,
+  );
+}
+
+function localStreamError(result: { ok: boolean; code?: string }): BridgeError | null {
+  if (result.ok) return null;
+  const code = (ERROR_CODES as readonly string[]).includes(result.code ?? '')
+    ? (result.code as BridgeErrorCode)
+    : 'PROVIDER_ERROR';
+  return createBridgeError(code, `[bridgekit] local stream ended with ${code}`);
+}
 
 /**
  * Create a BridgeStreamSource from an emitter/teardown factory.
@@ -495,28 +520,64 @@ export function streamSource<T>(
 ): BridgeStreamSource<T> & { _onEnd?: () => void } {
   // Shared state across all subscribers
   const allValueListeners = new Set<(v: T) => void>();
-  const allEndListeners = new Set<() => void>();
+  const allEndListeners = new Set<(error: BridgeError | null) => void>();
   let isEnded = false;
+  let terminalError: BridgeError | null = null;
   let teardown: (() => void) | null = null;
 
   const emitValue = (v: T) => {
     if (isEnded) return;
     for (const cb of allValueListeners) cb(v);
   };
-  const emitEnd = () => {
+  const emitEnd = (result: { ok: boolean; code?: string } = { ok: true }) => {
     if (isEnded) return;
     isEnded = true;
-    for (const cb of allEndListeners) cb();
+    terminalError = localStreamError(result);
+    const endListeners = Array.from(allEndListeners);
+    allValueListeners.clear();
+    allEndListeners.clear();
+    for (const cb of endListeners) {
+      try {
+        cb(terminalError);
+      } catch (error) {
+        reportLocalStreamCallbackError('terminal', error);
+      }
+    }
+  };
+
+  const startFactory = () => {
+    const nextTeardown = factory(emitValue, emitEnd);
+    if (isEnded) nextTeardown();
+    else teardown = nextTeardown;
   };
 
   return {
-    subscribe(cb: (v: T) => void): () => void {
+    subscribe(cb: (v: T) => void, options?: BridgeStreamSubscribeOptions): () => void {
+      if (isEnded) {
+        try {
+          if (terminalError !== null) options?.onError?.(terminalError);
+          else options?.onComplete?.();
+        } catch (error) {
+          reportLocalStreamCallbackError(terminalError !== null ? 'onError' : 'onComplete', error);
+        }
+        return () => {};
+      }
       allValueListeners.add(cb);
+      const endCb = (error: BridgeError | null) => {
+        try {
+          if (error !== null) options?.onError?.(error);
+          else options?.onComplete?.();
+        } catch (callbackError) {
+          reportLocalStreamCallbackError(error !== null ? 'onError' : 'onComplete', callbackError);
+        }
+      };
+      allEndListeners.add(endCb);
       if (teardown === null && allValueListeners.size === 1) {
-        teardown = factory(emitValue, emitEnd);
+        startFactory();
       }
       return () => {
         allValueListeners.delete(cb);
+        allEndListeners.delete(endCb);
         if (allValueListeners.size === 0 && teardown) {
           teardown();
           teardown = null;
@@ -525,32 +586,42 @@ export function streamSource<T>(
     },
     [Symbol.asyncIterator](): AsyncIterator<T> {
       const queue: T[] = [];
-      const waiters: Array<(v: IteratorResult<T>) => void> = [];
+      const waiters: Array<{
+        resolve: (v: IteratorResult<T>) => void;
+        reject: (error: BridgeError) => void;
+      }> = [];
       let done = isEnded;
+      let iteratorError = terminalError;
 
       const valueCb = (v: T) => {
         if (waiters.length > 0) {
           const w = waiters.shift();
-          if (w) w({ value: v, done: false });
+          if (w) w.resolve({ value: v, done: false });
         } else {
           queue.push(v);
         }
       };
-      const endCb = () => {
+      const endCb = (error: BridgeError | null) => {
         done = true;
+        iteratorError = error;
+        if (error !== null) queue.length = 0;
         for (const w of waiters.splice(0)) {
-          w({ value: undefined as unknown as T, done: true });
+          if (error !== null) w.reject(error);
+          else w.resolve({ value: undefined as unknown as T, done: true });
         }
       };
 
-      allValueListeners.add(valueCb);
-      allEndListeners.add(endCb);
-      if (teardown === null && allValueListeners.size === 1) {
-        teardown = factory(emitValue, emitEnd);
+      if (!isEnded) {
+        allValueListeners.add(valueCb);
+        allEndListeners.add(endCb);
+        if (teardown === null && allValueListeners.size === 1) {
+          startFactory();
+        }
       }
 
       return {
         next(): Promise<IteratorResult<T>> {
+          if (iteratorError !== null) return Promise.reject(iteratorError);
           if (queue.length > 0) {
             const val = queue.shift();
             return Promise.resolve({ value: val as T, done: false });
@@ -558,9 +629,7 @@ export function streamSource<T>(
           if (done) {
             return Promise.resolve({ value: undefined as unknown as T, done: true });
           }
-          return new Promise((resolve) => {
-            waiters.push(resolve);
-          });
+          return new Promise((resolve, reject) => waiters.push({ resolve, reject }));
         },
         return(): Promise<IteratorResult<T>> {
           done = true;
@@ -572,7 +641,7 @@ export function streamSource<T>(
           }
           const pending = waiters.splice(0);
           for (const w of pending) {
-            w({ value: undefined as unknown as T, done: true });
+            w.resolve({ value: undefined as unknown as T, done: true });
           }
           return Promise.resolve({ value: undefined as unknown as T, done: true });
         },
@@ -586,14 +655,34 @@ export function streamSource<T>(
  */
 export function fromAsyncIterable<T>(iter: AsyncIterable<T>): BridgeStreamSource<T> {
   return {
-    subscribe(cb: (v: T) => void): () => void {
+    subscribe(cb: (v: T) => void, options?: BridgeStreamSubscribeOptions): () => void {
       let active = true;
       (async () => {
         for await (const v of iter) {
           if (!active) break;
           cb(v);
         }
-      })().catch(() => {});
+        if (active) {
+          try {
+            options?.onComplete?.();
+          } catch (callbackError) {
+            reportLocalStreamCallbackError('onComplete', callbackError);
+          }
+        }
+      })().catch((error: unknown) => {
+        if (!active) return;
+        const bridgeError = isBridgeError(error)
+          ? error
+          : createBridgeError(
+              'PROVIDER_ERROR',
+              error instanceof Error ? error.message : String(error),
+            );
+        try {
+          options?.onError?.(bridgeError);
+        } catch (callbackError) {
+          reportLocalStreamCallbackError('onError', callbackError);
+        }
+      });
       return () => {
         active = false;
       };
