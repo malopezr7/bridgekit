@@ -130,6 +130,9 @@ function _encodeStreamPayload(
 function wrapStreamSourceWithDiagnostics(
   source: BridgeStreamSource<unknown>,
 ): BridgeStreamSource<unknown> {
+  const settledAwareSource = source as BridgeStreamSource<unknown> & {
+    _isSettled?: () => boolean;
+  };
   return {
     subscribe(cb: (v: unknown) => void, options?: BridgeStreamSubscribeOptions): () => void {
       const finish = diagnostics.trackOpenStream();
@@ -149,6 +152,9 @@ function wrapStreamSourceWithDiagnostics(
       };
     },
     [Symbol.asyncIterator](): AsyncIterator<unknown> {
+      if (settledAwareSource._isSettled?.() === true) {
+        return source[Symbol.asyncIterator]();
+      }
       const finish = diagnostics.trackOpenStream();
       const iter = source[Symbol.asyncIterator]();
       return {
@@ -884,7 +890,10 @@ export class BridgeKitJs {
               return true;
             };
 
-            const transportSource: BridgeStreamSource<unknown> = {
+            const transportSource: BridgeStreamSource<unknown> & {
+              _isSettled: () => boolean;
+            } = {
+              _isSettled: () => terminal !== null || preOpenError !== null,
               subscribe(
                 cb: (v: unknown) => void,
                 options?: BridgeStreamSubscribeOptions,
@@ -933,6 +942,7 @@ export class BridgeKitJs {
                   reject: (error: BridgeError) => void;
                 }> = [];
                 let closed = terminal !== null;
+                let returned = false;
                 let terminalError = terminal?.error ?? null;
                 const iterSubscriber: StreamSubscriber = {
                   onValue(v: unknown) {
@@ -955,6 +965,12 @@ export class BridgeKitJs {
                 const iterTerminal: TerminalListener = (error) => {
                   closed = true;
                   terminalError = error;
+                  if (error !== null) {
+                    ringBuf.fill(undefined);
+                    head = 0;
+                    tail = 0;
+                    size = 0;
+                  }
                   subscribers.delete(iterSubscriber);
                   terminalListeners.delete(iterTerminal);
                   for (const waiter of waiters.splice(0)) {
@@ -969,6 +985,7 @@ export class BridgeKitJs {
                 }
                 return {
                   next(): Promise<IteratorResult<unknown>> {
+                    if (returned) return Promise.resolve({ value: undefined, done: true });
                     if (terminalError !== null) return Promise.reject(terminalError);
                     if (size > 0) {
                       const value = ringBuf[head];
@@ -981,7 +998,12 @@ export class BridgeKitJs {
                     return new Promise((resolve, reject) => waiters.push({ resolve, reject }));
                   },
                   return(): Promise<IteratorResult<unknown>> {
+                    returned = true;
                     closed = true;
+                    ringBuf.fill(undefined);
+                    head = 0;
+                    tail = 0;
+                    size = 0;
                     subscribers.delete(iterSubscriber);
                     terminalListeners.delete(iterTerminal);
                     if (subscribers.size === 0) closeIfNeeded();

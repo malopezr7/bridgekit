@@ -127,6 +127,12 @@ export interface GeneratedSchemas {
  * Typed stream handle returned by proxy stream accessors.
  */
 export interface BridgeStreamSource<T> {
+  /**
+   * Terminal callbacks can run synchronously when this handle is already settled.
+   * Error terminals discard buffered values. A settled handle stays latched: later
+   * subscriptions only receive its terminal callback; call the stream accessor again
+   * to obtain a fresh handle/session.
+   */
   subscribe(
     cb: (v: T) => void,
     options?: import('./protocol').BridgeStreamSubscribeOptions,

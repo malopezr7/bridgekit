@@ -517,7 +517,7 @@ export function streamSource<T>(
     emit: (v: T) => void,
     end: (result?: { ok: boolean; code?: string }) => void,
   ) => () => void,
-): BridgeStreamSource<T> & { _onEnd?: () => void } {
+): BridgeStreamSource<T> & { _isSettled: () => boolean; _onEnd?: () => void } {
   // Shared state across all subscribers
   const allValueListeners = new Set<(v: T) => void>();
   const allEndListeners = new Set<(error: BridgeError | null) => void>();
@@ -552,6 +552,7 @@ export function streamSource<T>(
   };
 
   return {
+    _isSettled: () => isEnded,
     subscribe(cb: (v: T) => void, options?: BridgeStreamSubscribeOptions): () => void {
       if (isEnded) {
         try {

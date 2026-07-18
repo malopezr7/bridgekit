@@ -10,6 +10,10 @@ const StreamContract = defineContract('ws11.stream-terminals', {
   streams: { values: t.stream(t.number()) },
 });
 
+const JsonStreamContract = defineContract('ws11.stream-terminal-retention', {
+  streams: { values: t.stream(t.json()) },
+});
+
 class ControlledTransport implements BridgeTransport {
   onNext: ((value: unknown) => void) | null = null;
   onEnd: ((end: ResultEnvelope) => void) | null = null;
@@ -292,5 +296,54 @@ describe('WS-11 stream terminals', () => {
 
     expect(transport.sessions).toHaveLength(2);
     expect(values).toEqual([11]);
+  });
+
+  test('iterator created after settlement does not open diagnostics', () => {
+    const { transport, stream } = createControlledStream();
+    stream.subscribe(() => {});
+    transport.sessions[0]?.onEnd({ ok: true });
+
+    stream[Symbol.asyncIterator]();
+
+    expect(diagnostics.getOpenStreams()).toBe(0);
+  });
+
+  test('next after iterator return cannot drain buffered values', async () => {
+    const { transport, stream } = createControlledStream();
+    const iterator = stream[Symbol.asyncIterator]();
+    transport.sessions[0]?.onNext(5);
+
+    await iterator.return?.();
+
+    await expect(iterator.next()).resolves.toEqual({ value: undefined, done: true });
+  });
+
+  test('error terminal releases buffered values', async () => {
+    if (global.gc === undefined) return;
+    const transport = new ControlledTransport();
+    const bridgekit = new BridgeKitJs(transport);
+    bridgekit.connect();
+    const stream = bridgekit.bridge(JsonStreamContract).values();
+    let weak: WeakRef<object> | undefined;
+    stream.subscribe((value) => {
+      weak = new WeakRef(value as object);
+    });
+    const iterator = stream[Symbol.asyncIterator]();
+    let payload: { large: number[] } | null = { large: new Array(100_000).fill(1) };
+    transport.sessions[0]?.onNext(payload);
+    payload = null;
+
+    transport.sessions[0]?.onEnd({
+      ok: false,
+      code: 'PROVIDER_ERROR',
+      message: 'failed',
+    });
+    await expect(iterator.next()).rejects.toMatchObject({ code: 'PROVIDER_ERROR' });
+    for (let attempt = 0; attempt < 20; attempt++) {
+      global.gc();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(weak?.deref()).toBeUndefined();
   });
 });

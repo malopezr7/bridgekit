@@ -147,6 +147,10 @@ export function State(value: AnySchema, initial: unknown): StateDescriptor {
 
 // Stream handle (subscribable + async iterable)
 export interface BridgeStreamSource<T> {
+  /**
+   * Terminal callbacks may run synchronously. Errors discard buffered values, and a
+   * settled handle stays latched; call the stream accessor again for a fresh session.
+   */
   subscribe(cb: (v: T) => void, options?: BridgeStreamSubscribeOptions): () => void;
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
