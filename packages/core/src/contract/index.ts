@@ -51,6 +51,7 @@ export type {
   BridgeErrorCode,
   BridgeErrorContext,
   BridgeScope,
+  BridgeStreamSubscribeOptions,
   CallEnvelope,
   ResultEnvelope,
   ResultErr,

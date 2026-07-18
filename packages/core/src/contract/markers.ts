@@ -29,6 +29,7 @@ import type {
   StreamTypedDescriptor,
   StreamWithParamsDescriptor,
 } from './contract';
+import type { BridgeStreamSubscribeOptions } from './protocol';
 import type { AnySchema, Infer, ObjectSchema } from './schema';
 
 // ---- isSchema discriminator -----------------------------------------------
@@ -146,7 +147,7 @@ export function State(value: AnySchema, initial: unknown): StateDescriptor {
 
 // Stream handle (subscribable + async iterable)
 export interface BridgeStreamSource<T> {
-  subscribe(cb: (v: T) => void): () => void;
+  subscribe(cb: (v: T) => void, options?: BridgeStreamSubscribeOptions): () => void;
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 
