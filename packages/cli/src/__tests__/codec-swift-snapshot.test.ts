@@ -49,6 +49,45 @@ function emitInt64Contract(): string {
   return emitSwiftContract(token, 'BridgeKitFixtures').content;
 }
 
+function emitSkewSafetyContract(): string {
+  const token: RawContractToken = {
+    hash: 'contract-hash',
+    descriptor: {
+      $type: 'com.bridgekit.contract',
+      id: 'fixture.skew-safety',
+      methods: {
+        getLiteral: {
+          kind: 'query',
+          result: { kind: 'literals', values: ['ready', 'done'] },
+        },
+        getObject: {
+          kind: 'query',
+          result: { kind: 'object', fields: { value: { kind: 'string' } } },
+        },
+        getUnion: {
+          kind: 'query',
+          result: {
+            kind: 'union',
+            discriminant: 'kind',
+            variants: {
+              success: { kind: 'object', fields: { value: { kind: 'string' } } },
+              failure: { kind: 'object', fields: { reason: { kind: 'string' } } },
+            },
+          },
+        },
+        getTuple: {
+          kind: 'query',
+          result: { kind: 'tuple', items: [{ kind: 'string' }, { kind: 'number' }] },
+        },
+      },
+      streams: {},
+      state: {},
+    },
+  };
+
+  return emitSwiftContract(token, 'BridgeKitFixtures').content;
+}
+
 function coreOneOfTags(oneOfSchema: ReturnType<typeof t.oneOf>): readonly string[] {
   return (oneOfSchema as unknown as { tags: readonly string[] }).tags;
 }
@@ -58,6 +97,19 @@ function jsRuntimeTag(oneOfSchema: ReturnType<typeof t.oneOf>, value: unknown): 
 }
 
 describe('Swift codec snapshots', () => {
+  it('emits throwing skew-safe boundary decoders without process-aborting casts', () => {
+    const swift = emitSkewSafetyContract();
+
+    expect(swift).not.toContain('fatalError');
+    expect(swift).not.toContain('as!');
+    expect(swift).toContain(
+      'throw BridgeKitDecodeError(field: "result", expectedType: "GetLiteralResult")',
+    );
+    expect(swift).toContain('bridgeKitThrow(field: "result", expectedType: "GetObjectResult")');
+    expect(swift).toContain('bridgeKitThrow(field: "result", expectedType: "GetUnionResult")');
+    expect(swift).toContain('bridgeKitThrow(field: "result", expectedType: "GetTupleResult")');
+  });
+
   it('cli_codec_snapshots_emit_int64_string_kotlin_swift emits decimal string int64 boundaries', () => {
     const swift = emitInt64Contract();
 

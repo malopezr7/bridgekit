@@ -67,15 +67,19 @@ export class SwiftCodecWalker {
       case 'union':
       case 'oneOf': {
         const typeName = this.registerComposite(node, ctxName);
-        return `try ${this.className}Codecs.decode${typeName}(${expr} as! [String: Any?])`;
+        return `try ${this.className}Codecs.decode${typeName}(try ((${expr} as? [String: Any?]) ?? bridgeKitThrow(field: "result", expectedType: "${typeName}")))`;
       }
       case 'tuple': {
         const typeName = this.registerComposite(node, ctxName);
-        return `try ${this.className}Codecs.decode${typeName}(${expr} as! [Any?])`;
+        return `try ${this.className}Codecs.decode${typeName}(try ((${expr} as? [Any?]) ?? bridgeKitThrow(field: "result", expectedType: "${typeName}")))`;
       }
       case 'literals': {
         const typeName = this.typeName(node, ctxName);
-        return `${typeName}(rawValue: ${expr} as? String ?? "") ?? { fatalError("Unknown ${typeName} value: \\(${expr} as Any)") }()`;
+        return `try { () throws -> ${typeName} in
+            guard let rawValue = ${expr} as? String else { throw BridgeKitDecodeError(field: "result", expectedType: "${typeName}") }
+            guard let value = ${typeName}(rawValue: rawValue) else { throw BridgeKitDecodeError(field: "result", expectedType: "${typeName}") }
+            return value
+        }()`;
       }
       case 'enum': {
         const typeName = this.typeName(node, ctxName);
