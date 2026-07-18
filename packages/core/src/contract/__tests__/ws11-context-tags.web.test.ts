@@ -149,6 +149,15 @@ describe('WS-11 oneOf schema-authored tags', () => {
     expect(leftContract.hash).not.toBe(rightContract.hash);
   });
 
+  test('non-ASCII declared tags use locale-independent code-unit order', () => {
+    const nonAsciiTags = {
+      ...t.oneOf([t.string(), t.number()] as const),
+      tags: ['ä-tag', 'z-tag'],
+    } as const;
+
+    expect(stableSchemaHash(nonAsciiTags)).toBe('7553b24a');
+  });
+
   test.each([
     ['one tag per option', ['only-one']],
     ['non-empty strings', ['valid', '']],

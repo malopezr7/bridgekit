@@ -81,7 +81,7 @@ function projectOneOfOptions(
         schema: projected,
       };
     })
-    .sort((left, right) => left.tag.localeCompare(right.tag));
+    .sort((left, right) => (left.tag < right.tag ? -1 : left.tag > right.tag ? 1 : 0));
 }
 
 const MEMBER_DESCRIPTOR_KINDS = new Set(['fire', 'query', 'querySync', 'stream', 'state']);
