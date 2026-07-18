@@ -14,6 +14,18 @@ const JsonStreamContract = defineContract('ws11.stream-terminal-retention', {
   streams: { values: t.stream(t.json()) },
 });
 
+const ParamStreamContract = defineContract('ws11.stream-terminal-params', {
+  streams: {
+    values: t.stream(t.number(), {
+      params: t.object({ id: t.oneOf([t.string(), t.number()] as const) }),
+    }),
+  },
+});
+
+const OtherStreamContract = defineContract('ws11.stream-terminals-other', {
+  streams: { values: t.stream(t.number()) },
+});
+
 class ControlledTransport implements BridgeTransport {
   onNext: ((value: unknown) => void) | null = null;
   onEnd: ((end: ResultEnvelope) => void) | null = null;
@@ -185,6 +197,51 @@ describe('WS-11 stream terminals', () => {
     warn.mockRestore();
   });
 
+  test('throwing late and pre-open terminal observers stay isolated and report diagnostics', () => {
+    const errorStream = createControlledStream();
+    errorStream.stream.subscribe(() => {});
+    errorStream.transport.onEnd?.({
+      ok: false,
+      code: 'PROVIDER_ERROR',
+      message: 'native stream failed',
+    });
+    const completeStream = createControlledStream();
+    completeStream.stream.subscribe(() => {});
+    completeStream.transport.onEnd?.({ ok: true });
+    const preOpenBridgekit = new BridgeKitJs(new ControlledTransport());
+    preOpenBridgekit.connect();
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    expect(() =>
+      errorStream.stream.subscribe(() => {}, {
+        onError: () => {
+          throw new Error('late error observer failed');
+        },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      completeStream.stream.subscribe(() => {}, {
+        onComplete: () => {
+          throw new Error('late complete observer failed');
+        },
+      }),
+    ).not.toThrow();
+    expect(() =>
+      preOpenBridgekit
+        .bridge(ParamStreamContract)
+        .values({ id: true } as never)
+        .subscribe(() => {}, {
+          onError: () => {
+            throw new Error('pre-open observer failed');
+          },
+        }),
+    ).not.toThrow();
+
+    expect(diagnostics.getCounters().errors).toBe(5);
+    expect(warn).toHaveBeenCalledTimes(4);
+    warn.mockRestore();
+  });
+
   test('local stream completion notifies subscriber and closes diagnostics', () => {
     const transport = new ControlledTransport();
     const bridgekit = new BridgeKitJs(transport);
@@ -316,6 +373,52 @@ describe('WS-11 stream terminals', () => {
     await iterator.return?.();
 
     await expect(iterator.next()).resolves.toEqual({ value: undefined, done: true });
+  });
+
+  test('local iterator next after return cannot drain buffered values', async () => {
+    let emitValue!: (value: number) => void;
+    const iterator = streamSource<number>((emit) => {
+      emitValue = emit;
+      return () => {};
+    })[Symbol.asyncIterator]();
+    emitValue(5);
+
+    await iterator.return?.();
+
+    await expect(iterator.next()).resolves.toEqual({ value: undefined, done: true });
+  });
+
+  test('local terminal warnings are scoped by contract and member', () => {
+    const transport = new ControlledTransport();
+    const bridgekit = new BridgeKitJs(transport);
+    bridgekit.connect();
+    const throwingSource = () =>
+      streamSource<number>((_emit, end) => {
+        end({ ok: true });
+        return () => {};
+      });
+    bridgekit.provide(StreamContract, { values: throwingSource });
+    bridgekit.provide(OtherStreamContract, { values: throwingSource });
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const throwingOnComplete = () => {
+      throw new Error('local observer failed');
+    };
+
+    bridgekit
+      .bridge(StreamContract)
+      .values()
+      .subscribe(() => {}, {
+        onComplete: throwingOnComplete,
+      });
+    bridgekit
+      .bridge(OtherStreamContract)
+      .values()
+      .subscribe(() => {}, {
+        onComplete: throwingOnComplete,
+      });
+
+    expect(warn).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
   });
 
   test('error terminal releases buffered values', async () => {

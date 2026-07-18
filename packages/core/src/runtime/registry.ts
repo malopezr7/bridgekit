@@ -592,6 +592,7 @@ export function streamSource<T>(
         reject: (error: BridgeError) => void;
       }> = [];
       let done = isEnded;
+      let returned = false;
       let iteratorError = terminalError;
 
       const valueCb = (v: T) => {
@@ -622,6 +623,9 @@ export function streamSource<T>(
 
       return {
         next(): Promise<IteratorResult<T>> {
+          if (returned) {
+            return Promise.resolve({ value: undefined as unknown as T, done: true });
+          }
           if (iteratorError !== null) return Promise.reject(iteratorError);
           if (queue.length > 0) {
             const val = queue.shift();
@@ -633,7 +637,12 @@ export function streamSource<T>(
           return new Promise((resolve, reject) => waiters.push({ resolve, reject }));
         },
         return(): Promise<IteratorResult<T>> {
+          if (returned) {
+            return Promise.resolve({ value: undefined as unknown as T, done: true });
+          }
+          returned = true;
           done = true;
+          queue.length = 0;
           allValueListeners.delete(valueCb);
           allEndListeners.delete(endCb);
           if (allValueListeners.size === 0 && teardown) {

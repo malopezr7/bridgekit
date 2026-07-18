@@ -129,6 +129,7 @@ function _encodeStreamPayload(
  */
 function wrapStreamSourceWithDiagnostics(
   source: BridgeStreamSource<unknown>,
+  localTerminalContext?: { contractId: string; member: string },
 ): BridgeStreamSource<unknown> {
   const settledAwareSource = source as BridgeStreamSource<unknown> & {
     _isSettled?: () => boolean;
@@ -139,11 +140,33 @@ function wrapStreamSourceWithDiagnostics(
       const unsub = source.subscribe(cb, {
         onError(error) {
           finish();
-          options?.onError?.(error);
+          try {
+            options?.onError?.(error);
+          } catch (callbackError) {
+            if (localTerminalContext === undefined) throw callbackError;
+            diagnostics.incrementErrors();
+            const message =
+              callbackError instanceof Error ? callbackError.message : String(callbackError);
+            diagnostics.warnOnce(
+              `local-stream-callback:${localTerminalContext.contractId}:${localTerminalContext.member}:onError`,
+              `local stream ${localTerminalContext.contractId}.${localTerminalContext.member} onError callback threw: ${message}`,
+            );
+          }
         },
         onComplete() {
           finish();
-          options?.onComplete?.();
+          try {
+            options?.onComplete?.();
+          } catch (callbackError) {
+            if (localTerminalContext === undefined) throw callbackError;
+            diagnostics.incrementErrors();
+            const message =
+              callbackError instanceof Error ? callbackError.message : String(callbackError);
+            diagnostics.warnOnce(
+              `local-stream-callback:${localTerminalContext.contractId}:${localTerminalContext.member}:onComplete`,
+              `local stream ${localTerminalContext.contractId}.${localTerminalContext.member} onComplete callback threw: ${message}`,
+            );
+          }
         },
       });
       return () => {
@@ -772,7 +795,10 @@ export class BridgeKitJs {
             const localEntry = this.registry.resolve(desc.id, scope);
             if (localEntry) {
               const localSource = openLocalStream(localEntry.binding.impl, prop, desc.id, params);
-              return wrapStreamSourceWithDiagnostics(localSource);
+              return wrapStreamSourceWithDiagnostics(localSource, {
+                contractId: desc.id,
+                member: prop,
+              });
             }
 
             let preOpenError: ReturnType<typeof _encodeBridgeError> | null = null;
@@ -885,8 +911,15 @@ export class BridgeKitJs {
 
             const notifyExistingTerminal = (options?: BridgeStreamSubscribeOptions) => {
               if (terminal === null) return false;
-              if (terminal.error !== null) options?.onError?.(terminal.error);
-              else options?.onComplete?.();
+              try {
+                if (terminal.error !== null) options?.onError?.(terminal.error);
+                else options?.onComplete?.();
+              } catch (callbackError) {
+                reportTerminalCallbackError(
+                  terminal.error !== null ? 'onError' : 'onComplete',
+                  callbackError,
+                );
+              }
               return true;
             };
 
@@ -906,7 +939,11 @@ export class BridgeKitJs {
                       `[bridgekit] stream ${desc.id}.${prop} failed: ${preOpenError.message}`,
                     );
                   }
-                  options?.onError?.(preOpenError);
+                  try {
+                    options?.onError?.(preOpenError);
+                  } catch (callbackError) {
+                    reportTerminalCallbackError('onError', callbackError);
+                  }
                   return () => {};
                 }
                 const subscriber = { onValue: cb, options };
