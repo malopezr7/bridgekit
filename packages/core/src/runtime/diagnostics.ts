@@ -67,6 +67,17 @@ class DiagnosticsImpl {
     if (this._openStreams > 0) this._openStreams--;
   }
 
+  /** Start tracking one stream consumer and return an idempotent finish callback. */
+  trackOpenStream(): () => void {
+    this.incrementOpenStreams();
+    let finished = false;
+    return () => {
+      if (finished) return;
+      finished = true;
+      this.decrementOpenStreams();
+    };
+  }
+
   getOpenStreams(): number {
     return this._openStreams;
   }
