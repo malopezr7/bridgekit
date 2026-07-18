@@ -146,4 +146,32 @@ describe('WS-11 stream terminals', () => {
     expect(onError).not.toHaveBeenCalled();
     expect(diagnostics.getOpenStreams()).toBe(0);
   });
+
+  test('throwing terminal subscriber cannot block peers or iterator settlement', async () => {
+    const { transport, stream } = createControlledStream();
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const throwingOnError = jest.fn(() => {
+      throw new Error('observer failed');
+    });
+    const peerOnError = jest.fn();
+    stream.subscribe(() => {}, { onError: throwingOnError });
+    stream.subscribe(() => {}, { onError: peerOnError });
+    const pending = stream[Symbol.asyncIterator]().next();
+
+    expect(() =>
+      transport.onEnd?.({
+        ok: false,
+        code: 'PROVIDER_ERROR',
+        message: 'native stream failed',
+      }),
+    ).not.toThrow();
+
+    expect(throwingOnError).toHaveBeenCalledTimes(1);
+    expect(peerOnError).toHaveBeenCalledTimes(1);
+    await expect(pending).rejects.toMatchObject({ code: 'PROVIDER_ERROR' });
+    expect(diagnostics.getOpenStreams()).toBe(0);
+    expect(diagnostics.getCounters().errors).toBe(2);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
 });

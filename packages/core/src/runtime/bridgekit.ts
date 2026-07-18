@@ -799,6 +799,16 @@ export class BridgeKitJs {
             let terminal: { error: BridgeError | null } | null = null;
             const capturedTransport = this._transport;
 
+            const reportTerminalCallbackError = (kind: string, callbackError: unknown) => {
+              diagnostics.incrementErrors();
+              const message =
+                callbackError instanceof Error ? callbackError.message : String(callbackError);
+              diagnostics.warnOnce(
+                `stream-terminal-callback:${desc.id}:${prop}:${kind}`,
+                `stream ${desc.id}.${prop} ${kind} callback threw: ${message}`,
+              );
+            };
+
             const closeIfNeeded = () => {
               if (streamId !== null) {
                 const id = streamId;
@@ -844,10 +854,23 @@ export class BridgeKitJs {
               terminalListeners.clear();
 
               for (const subscriber of terminalSubscribers) {
-                if (error !== null) subscriber.options?.onError?.(error);
-                else subscriber.options?.onComplete?.();
+                try {
+                  if (error !== null) subscriber.options?.onError?.(error);
+                  else subscriber.options?.onComplete?.();
+                } catch (callbackError) {
+                  reportTerminalCallbackError(
+                    error !== null ? 'onError' : 'onComplete',
+                    callbackError,
+                  );
+                }
               }
-              for (const listener of listeners) listener(error);
+              for (const listener of listeners) {
+                try {
+                  listener(error);
+                } catch (callbackError) {
+                  reportTerminalCallbackError('iterator terminal', callbackError);
+                }
+              }
             };
 
             const notifyExistingTerminal = (options?: BridgeStreamSubscribeOptions) => {
