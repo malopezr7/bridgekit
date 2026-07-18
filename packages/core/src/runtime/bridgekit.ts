@@ -789,6 +789,7 @@ export class BridgeKitJs {
             }
 
             let streamId: string | null = null;
+            let streamGeneration = 0;
             type StreamSubscriber = {
               onValue: (v: unknown) => void;
               options?: BridgeStreamSubscribeOptions;
@@ -813,6 +814,7 @@ export class BridgeKitJs {
               if (streamId !== null) {
                 const id = streamId;
                 streamId = null;
+                streamGeneration++;
                 capturedTransport.closeStream(id);
               }
             };
@@ -820,18 +822,20 @@ export class BridgeKitJs {
             const openIfNeeded = () => {
               if (preOpenError !== null || env === null) return;
               if (streamId !== null || terminal !== null) return;
+              const generation = ++streamGeneration;
               const openedId = capturedTransport.openStream(
                 env,
                 (value) => {
-                  if (terminal !== null) return;
+                  if (generation !== streamGeneration || terminal !== null) return;
                   const decoded = streamDesc.value ? decode(streamDesc.value, value) : value;
                   for (const subscriber of subscribers) subscriber.onValue(decoded);
                 },
                 (end) => {
+                  if (generation !== streamGeneration) return;
                   settleTerminal(end);
                 },
               );
-              if (terminal === null) streamId = openedId;
+              if (generation === streamGeneration && terminal === null) streamId = openedId;
             };
 
             const settleTerminal = (end: ResultEnvelope) => {

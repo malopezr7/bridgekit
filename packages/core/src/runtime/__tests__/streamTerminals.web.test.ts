@@ -13,6 +13,10 @@ const StreamContract = defineContract('ws11.stream-terminals', {
 class ControlledTransport implements BridgeTransport {
   onNext: ((value: unknown) => void) | null = null;
   onEnd: ((end: ResultEnvelope) => void) | null = null;
+  sessions: Array<{
+    onNext: (value: unknown) => void;
+    onEnd: (end: ResultEnvelope) => void;
+  }> = [];
 
   connect(_dispatcher: JsDispatcher) {
     return { epoch: 1, snapshot: [], nativeProvided: [] };
@@ -30,7 +34,8 @@ class ControlledTransport implements BridgeTransport {
   ) {
     this.onNext = onNext;
     this.onEnd = onEnd;
-    return 'controlled-stream';
+    this.sessions.push({ onNext, onEnd });
+    return `controlled-stream-${this.sessions.length}`;
   }
   closeStream() {}
   emitFromJs() {}
@@ -252,5 +257,40 @@ describe('WS-11 stream terminals', () => {
     expect(onError).toHaveBeenCalledWith(
       expect.objectContaining({ code: 'PROVIDER_ERROR', message: 'iterable failed' }),
     );
+  });
+
+  test('stale terminal from a closed session cannot settle its replacement', () => {
+    const { transport, stream } = createControlledStream();
+    const firstUnsubscribe = stream.subscribe(() => {});
+    const firstSession = transport.sessions[0];
+    firstUnsubscribe();
+    const values: number[] = [];
+    const onComplete = jest.fn();
+    stream.subscribe((value) => values.push(value), { onComplete });
+    const secondSession = transport.sessions[1];
+
+    firstSession?.onEnd({ ok: true });
+    secondSession?.onNext(9);
+
+    expect(values).toEqual([9]);
+    expect(onComplete).not.toHaveBeenCalled();
+    secondSession?.onEnd({ ok: true });
+    expect(onComplete).toHaveBeenCalledTimes(1);
+  });
+
+  test('fresh accessor opens a new transport session after completion', () => {
+    const { bridgekit, transport, stream } = createControlledStream();
+    stream.subscribe(() => {});
+    transport.sessions[0]?.onEnd({ ok: true });
+    const values: number[] = [];
+
+    bridgekit
+      .bridge(StreamContract)
+      .values()
+      .subscribe((value) => values.push(value));
+    transport.sessions[1]?.onNext(11);
+
+    expect(transport.sessions).toHaveLength(2);
+    expect(values).toEqual([11]);
   });
 });
