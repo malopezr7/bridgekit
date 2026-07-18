@@ -7,6 +7,8 @@ import { GLOBAL_SCOPE } from '../../runtime/registry';
 import { createTestBridge } from '../../testing';
 import { decode, encode } from '../codec';
 import { defineContract, t } from '../contract';
+import { stableSchemaHash } from '../hash';
+import type { OneOfSchema } from '../schema';
 
 const ContextContract = defineContract('ws11.context.contract', {
   state: {
@@ -91,5 +93,44 @@ describe('WS-11 oneOf schema-authored tags', () => {
   test('decode selects options using the declared tags', () => {
     expect(decode(schema, { '@t': 'declared-string', '@v': 'value' })).toBe('value');
     expect(decode(schema, { '@t': 'declared-number', '@v': 42 })).toBe(42);
+  });
+
+  test('declared tag divergence changes schema and contract hashes', () => {
+    const leftTags = {
+      ...t.oneOf([t.string(), t.number()] as const),
+      tags: ['left-string', 'left-number'],
+    } as const;
+    const rightTags = {
+      ...t.oneOf([t.string(), t.number()] as const),
+      tags: ['right-string', 'right-number'],
+    } as const;
+
+    const leftContract = defineContract('ws11.tags.hash', {
+      methods: { choose: t.query(leftTags, t.string()) },
+    });
+    const rightContract = defineContract('ws11.tags.hash', {
+      methods: { choose: t.query(rightTags, t.string()) },
+    });
+
+    expect(stableSchemaHash(leftTags)).not.toBe(stableSchemaHash(rightTags));
+    expect(leftContract.hash).not.toBe(rightContract.hash);
+  });
+
+  test.each([
+    ['one tag per option', ['only-one']],
+    ['non-empty strings', ['valid', '']],
+    ['non-empty strings', ['valid', 42]],
+    ['unique', ['same', 'same']],
+  ])('defineContract rejects declared tags that are not %s', (message, tags) => {
+    const invalidSchema = {
+      ...t.oneOf([t.string(), t.number()] as const),
+      tags,
+    } as unknown as OneOfSchema;
+
+    expect(() =>
+      defineContract('ws11.tags.invalid', {
+        methods: { choose: t.query(invalidSchema, t.string()) },
+      }),
+    ).toThrow(message);
   });
 });

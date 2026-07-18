@@ -54,11 +54,32 @@ function tagProjectedSchema(projected: HashableRecord): string {
   return `${projected.kind as string}:${hash8hex(sortedStringify(projected))}`;
 }
 
-function projectOneOfOptions(options: readonly AnySchema[]): readonly ProjectedOneOfOption[] {
+function projectOneOfOptions(
+  options: readonly AnySchema[],
+  declaredTags?: readonly unknown[],
+): readonly ProjectedOneOfOption[] {
+  if (declaredTags !== undefined) {
+    if (declaredTags.length !== options.length) {
+      throw new Error(
+        `[bridgekit] oneOf tags must contain exactly one tag per option ` +
+          `(got ${declaredTags.length} tag(s) for ${options.length} option(s)).`,
+      );
+    }
+    if (declaredTags.some((tag) => typeof tag !== 'string' || tag.length === 0)) {
+      throw new Error('[bridgekit] oneOf tags must be non-empty strings.');
+    }
+    if (new Set(declaredTags).size !== declaredTags.length) {
+      throw new Error('[bridgekit] oneOf tags must be unique.');
+    }
+  }
+
   return options
-    .map((option) => {
+    .map((option, index) => {
       const projected = projectSchema(option);
-      return { tag: tagProjectedSchema(projected), schema: projected };
+      return {
+        tag: (declaredTags?.[index] as string | undefined) ?? tagProjectedSchema(projected),
+        schema: projected,
+      };
     })
     .sort((left, right) => left.tag.localeCompare(right.tag));
 }
@@ -121,6 +142,7 @@ function projectSchema(schema: AnySchema | HashableRecord): HashableRecord {
     case 'oneOf': {
       const projectedOptions = projectOneOfOptions(
         (schema as { options: readonly AnySchema[] }).options,
+        (schema as { tags?: readonly unknown[] }).tags,
       );
       return withDefined([
         ['kind', schema.kind],
