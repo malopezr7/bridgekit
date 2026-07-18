@@ -99,9 +99,13 @@ describe('WS-11 contract hook context and readiness', () => {
     let unrelatedBinding: Binding | null = null;
 
     act(() => {
-      unrelatedBinding = bridgekit.provide(ContextContract, {}, {
-        scope: { kind: 'feature', feature: 'unrelated' },
-      });
+      unrelatedBinding = bridgekit.provide(
+        ContextContract,
+        {},
+        {
+          scope: { kind: 'feature', feature: 'unrelated' },
+        },
+      );
     });
     rerender();
 

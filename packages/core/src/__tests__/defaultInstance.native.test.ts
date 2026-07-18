@@ -42,26 +42,28 @@ describe('QW-6: getDefaultBridgeKit native platform support', () => {
   test('does not throw when Platform.OS is ios', () => {
     mockPlatform.OS = 'ios';
 
-    let getDefaultBridgeKit: () => unknown;
+    let getDefaultBridgeKit = (): unknown => {
+      throw new Error('runtime module was not loaded');
+    };
     jest.isolateModules(() => {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       ({ getDefaultBridgeKit } = require('../runtime/defaultInstance.native'));
     });
 
-    // @ts-ignore — assigned synchronously inside isolateModules
     expect(() => getDefaultBridgeKit()).not.toThrow();
   });
 
   test('does not throw when Platform.OS is android', () => {
     mockPlatform.OS = 'android';
 
-    let getDefaultBridgeKit: () => unknown;
+    let getDefaultBridgeKit = (): unknown => {
+      throw new Error('runtime module was not loaded');
+    };
     jest.isolateModules(() => {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       ({ getDefaultBridgeKit } = require('../runtime/defaultInstance.native'));
     });
 
-    // @ts-ignore — assigned synchronously inside isolateModules
     expect(() => getDefaultBridgeKit()).not.toThrow();
   });
 
