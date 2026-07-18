@@ -48,6 +48,18 @@ describe('WS-11 contract hook context and readiness', () => {
     binding.close('final');
   });
 
+  test('hook.useProvide registers with the BridgeKit instance supplied by BridgeKitProvider', () => {
+    const { bridgekit } = createTestBridge();
+    const { unmount } = renderHook(() => ContextContract.useProvide({}), {
+      wrapper: makeBridgeWrapper(bridgekit),
+    });
+
+    expect(bridgekit.isProvided(ContextContract, { scope: GLOBAL_SCOPE })).toBe(true);
+
+    unmount();
+    expect(bridgekit.isProvided(ContextContract, { scope: GLOBAL_SCOPE })).toBe(false);
+  });
+
   test('hook() retargets its state mirror when a nearer provider becomes ready', () => {
     const { bridgekit } = createTestBridge();
     const globalBinding = bridgekit.provide(ContextContract, {}, { scope: GLOBAL_SCOPE });
