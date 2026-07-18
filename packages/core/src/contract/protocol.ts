@@ -101,6 +101,12 @@ export interface BridgeErrorContext {
   details?: unknown;
 }
 
+/** Optional terminal callbacks for callback-style stream consumption. */
+export interface BridgeStreamSubscribeOptions {
+  onError?: (error: BridgeError) => void;
+  onComplete?: () => void;
+}
+
 /**
  * Duck-typed guard for BridgeError. Works across package copies (no instanceof).
  *

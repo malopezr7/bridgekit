@@ -4,7 +4,12 @@
 import { decode, encode, sanitizeAny, validate } from '../contract/codec';
 import type { BridgeContract, BridgeStreamSource } from '../contract/contract';
 import { isMarkerDescriptor } from '../contract/contract';
-import type { BridgeScope } from '../contract/protocol';
+import type {
+  BridgeError,
+  BridgeScope,
+  BridgeStreamSubscribeOptions,
+  ResultEnvelope,
+} from '../contract/protocol';
 import { createBridgeError } from '../contract/protocol';
 import type { AnySchema } from '../contract/schema';
 import { nextCorrelationId } from './correlationId';
@@ -126,23 +131,41 @@ function wrapStreamSourceWithDiagnostics(
   source: BridgeStreamSource<unknown>,
 ): BridgeStreamSource<unknown> {
   return {
-    subscribe(cb: (v: unknown) => void): () => void {
-      diagnostics.incrementOpenStreams();
-      const unsub = source.subscribe(cb);
+    subscribe(cb: (v: unknown) => void, options?: BridgeStreamSubscribeOptions): () => void {
+      const finish = diagnostics.trackOpenStream();
+      const unsub = source.subscribe(cb, {
+        onError(error) {
+          finish();
+          options?.onError?.(error);
+        },
+        onComplete() {
+          finish();
+          options?.onComplete?.();
+        },
+      });
       return () => {
-        diagnostics.decrementOpenStreams();
+        finish();
         unsub();
       };
     },
     [Symbol.asyncIterator](): AsyncIterator<unknown> {
-      diagnostics.incrementOpenStreams();
+      const finish = diagnostics.trackOpenStream();
       const iter = source[Symbol.asyncIterator]();
       return {
         next(): Promise<IteratorResult<unknown>> {
-          return iter.next();
+          return iter.next().then(
+            (result) => {
+              if (result.done) finish();
+              return result;
+            },
+            (error) => {
+              finish();
+              throw error;
+            },
+          );
         },
         return(value?: unknown): Promise<IteratorResult<unknown>> {
-          diagnostics.decrementOpenStreams();
+          finish();
           return iter.return
             ? iter.return(value)
             : Promise.resolve({ value: undefined, done: true });
@@ -766,10 +789,14 @@ export class BridgeKitJs {
             }
 
             let streamId: string | null = null;
-            const subscribers = new Set<(v: unknown) => void>();
-            // Notified when native closes the stream; async iterators register here
-            // so pending next() calls resolve with { done: true }.
-            const endSubscribers = new Set<() => void>();
+            type StreamSubscriber = {
+              onValue: (v: unknown) => void;
+              options?: BridgeStreamSubscribeOptions;
+            };
+            type TerminalListener = (error: BridgeError | null) => void;
+            const subscribers = new Set<StreamSubscriber>();
+            const terminalListeners = new Set<TerminalListener>();
+            let terminal: { error: BridgeError | null } | null = null;
             const capturedTransport = this._transport;
 
             const closeIfNeeded = () => {
@@ -782,25 +809,60 @@ export class BridgeKitJs {
 
             const openIfNeeded = () => {
               if (preOpenError !== null || env === null) return;
-              if (streamId !== null) return;
-              streamId = capturedTransport.openStream(
+              if (streamId !== null || terminal !== null) return;
+              const openedId = capturedTransport.openStream(
                 env,
                 (value) => {
+                  if (terminal !== null) return;
                   const decoded = streamDesc.value ? decode(streamDesc.value, value) : value;
-                  for (const cb of subscribers) cb(decoded);
+                  for (const subscriber of subscribers) subscriber.onValue(decoded);
                 },
-                (_end) => {
-                  streamId = null;
-                  subscribers.clear();
-                  // Notify async iterators so pending next() calls resolve done.
-                  for (const cb of endSubscribers) cb();
-                  endSubscribers.clear();
+                (end) => {
+                  settleTerminal(end);
                 },
               );
+              if (terminal === null) streamId = openedId;
+            };
+
+            const settleTerminal = (end: ResultEnvelope) => {
+              if (terminal !== null) return;
+              const error = end.ok
+                ? null
+                : createBridgeError(end.code, end.message, {
+                    contractId: end.contractId ?? desc.id,
+                    member: end.member ?? prop,
+                    scope: end.scope ?? scope,
+                    details: end.details,
+                  });
+              terminal = { error };
+              if (error !== null) diagnostics.incrementErrors();
+              streamId = null;
+
+              const terminalSubscribers = Array.from(subscribers);
+              const listeners = Array.from(terminalListeners);
+              subscribers.clear();
+              terminalListeners.clear();
+
+              for (const subscriber of terminalSubscribers) {
+                if (error !== null) subscriber.options?.onError?.(error);
+                else subscriber.options?.onComplete?.();
+              }
+              for (const listener of listeners) listener(error);
+            };
+
+            const notifyExistingTerminal = (options?: BridgeStreamSubscribeOptions) => {
+              if (terminal === null) return false;
+              if (terminal.error !== null) options?.onError?.(terminal.error);
+              else options?.onComplete?.();
+              return true;
             };
 
             const transportSource: BridgeStreamSource<unknown> = {
-              subscribe(cb: (v: unknown) => void): () => void {
+              subscribe(
+                cb: (v: unknown) => void,
+                options?: BridgeStreamSubscribeOptions,
+              ): () => void {
+                if (notifyExistingTerminal(options)) return () => {};
                 if (preOpenError !== null) {
                   diagnostics.incrementErrors();
                   if (isBridgeKitDev()) {
@@ -808,12 +870,14 @@ export class BridgeKitJs {
                       `[bridgekit] stream ${desc.id}.${prop} failed: ${preOpenError.message}`,
                     );
                   }
+                  options?.onError?.(preOpenError);
                   return () => {};
                 }
-                subscribers.add(cb);
+                const subscriber = { onValue: cb, options };
+                subscribers.add(subscriber);
                 openIfNeeded();
                 return () => {
-                  subscribers.delete(cb);
+                  subscribers.delete(subscriber);
                   if (subscribers.size === 0) {
                     closeIfNeeded();
                   }
@@ -837,35 +901,48 @@ export class BridgeKitJs {
                 let head = 0; // index of next read
                 let tail = 0; // index of next write
                 let size = 0; // current item count
-                const waiters: Array<(v: IteratorResult<unknown>) => void> = [];
-                let closed = false;
-                const iterCb = (v: unknown) => {
-                  if (waiters.length > 0) {
-                    const w = waiters.shift();
-                    if (w) w({ value: v, done: false });
-                  } else {
-                    if (size === QUEUE_CAPACITY) {
-                      // DROP_OLDEST: advance head to drop the oldest item
-                      head = (head + 1) % QUEUE_CAPACITY;
-                      diagnostics.incrementStreamDrops();
+                const waiters: Array<{
+                  resolve: (v: IteratorResult<unknown>) => void;
+                  reject: (error: BridgeError) => void;
+                }> = [];
+                let closed = terminal !== null;
+                let terminalError = terminal?.error ?? null;
+                const iterSubscriber: StreamSubscriber = {
+                  onValue(v: unknown) {
+                    if (waiters.length > 0) {
+                      const waiter = waiters.shift();
+                      if (waiter) waiter.resolve({ value: v, done: false });
                     } else {
-                      size++;
+                      if (size === QUEUE_CAPACITY) {
+                        // DROP_OLDEST: advance head to drop the oldest item
+                        head = (head + 1) % QUEUE_CAPACITY;
+                        diagnostics.incrementStreamDrops();
+                      } else {
+                        size++;
+                      }
+                      ringBuf[tail] = v;
+                      tail = (tail + 1) % QUEUE_CAPACITY;
                     }
-                    ringBuf[tail] = v;
-                    tail = (tail + 1) % QUEUE_CAPACITY;
+                  },
+                };
+                const iterTerminal: TerminalListener = (error) => {
+                  closed = true;
+                  terminalError = error;
+                  subscribers.delete(iterSubscriber);
+                  terminalListeners.delete(iterTerminal);
+                  for (const waiter of waiters.splice(0)) {
+                    if (error !== null) waiter.reject(error);
+                    else waiter.resolve({ value: undefined, done: true });
                   }
                 };
-                const iterEndCb = () => {
-                  closed = true;
-                  subscribers.delete(iterCb);
-                  endSubscribers.delete(iterEndCb);
-                  for (const w of waiters.splice(0)) w({ value: undefined, done: true });
-                };
-                subscribers.add(iterCb);
-                endSubscribers.add(iterEndCb);
-                openIfNeeded();
+                if (terminal === null) {
+                  subscribers.add(iterSubscriber);
+                  terminalListeners.add(iterTerminal);
+                  openIfNeeded();
+                }
                 return {
                   next(): Promise<IteratorResult<unknown>> {
+                    if (terminalError !== null) return Promise.reject(terminalError);
                     if (size > 0) {
                       const value = ringBuf[head];
                       ringBuf[head] = undefined; // allow GC
@@ -874,14 +951,16 @@ export class BridgeKitJs {
                       return Promise.resolve({ value, done: false });
                     }
                     if (closed) return Promise.resolve({ value: undefined, done: true });
-                    return new Promise((resolve) => waiters.push(resolve));
+                    return new Promise((resolve, reject) => waiters.push({ resolve, reject }));
                   },
                   return(): Promise<IteratorResult<unknown>> {
                     closed = true;
-                    subscribers.delete(iterCb);
-                    endSubscribers.delete(iterEndCb);
+                    subscribers.delete(iterSubscriber);
+                    terminalListeners.delete(iterTerminal);
                     if (subscribers.size === 0) closeIfNeeded();
-                    for (const w of waiters.splice(0)) w({ value: undefined, done: true });
+                    for (const waiter of waiters.splice(0)) {
+                      waiter.resolve({ value: undefined, done: true });
+                    }
                     return Promise.resolve({ value: undefined, done: true });
                   },
                 };

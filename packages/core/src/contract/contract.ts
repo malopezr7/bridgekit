@@ -127,7 +127,10 @@ export interface GeneratedSchemas {
  * Typed stream handle returned by proxy stream accessors.
  */
 export interface BridgeStreamSource<T> {
-  subscribe(cb: (v: T) => void): () => void;
+  subscribe(
+    cb: (v: T) => void,
+    options?: import('./protocol').BridgeStreamSubscribeOptions,
+  ): () => void;
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 
