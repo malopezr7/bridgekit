@@ -43,7 +43,6 @@ describe('package version invariant', () => {
   });
 
   test.each([
-    'src/index.native.ts',
     'src/runtime/defaultInstance.ts',
     'src/runtime/defaultInstance.native.ts',
   ])('%s matches packages/core/package.json', (relativePath) => {
@@ -56,5 +55,13 @@ describe('package version invariant', () => {
     const packageVersion = source.match(/const PACKAGE_VERSION = '([^']+)'/);
 
     expect(packageVersion?.[1]).toBe(packageJson.version);
+  });
+
+  test('native entrypoint does not duplicate singleton version state', () => {
+    const source = readFileSync(path.join(process.cwd(), 'src/index.native.ts'), 'utf8');
+
+    expect(source).not.toContain('PACKAGE_VERSION');
+    expect(source).not.toContain('_nativeDefault');
+    expect(source).not.toContain('_connected');
   });
 });

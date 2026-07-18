@@ -66,28 +66,33 @@ describe('QW-6: getDefaultBridgeKit native platform support', () => {
   });
 
   test('native entrypoint re-exports the runtime singleton accessor', () => {
-    let entrypointGetDefault: () => unknown;
-    let runtimeGetDefault: () => unknown;
+    let entrypointGetDefault = (): unknown => {
+      throw new Error('native entrypoint was not loaded');
+    };
+    let runtimeGetDefault = (): unknown => {
+      throw new Error('native runtime singleton was not loaded');
+    };
     jest.isolateModules(() => {
       ({ getDefaultBridgeKit: entrypointGetDefault } = require('../index.native'));
       ({ getDefaultBridgeKit: runtimeGetDefault } = require('../runtime/defaultInstance.native'));
     });
 
-    // @ts-ignore — assigned synchronously inside isolateModules
     expect(entrypointGetDefault).toBe(runtimeGetDefault);
   });
 
   test('initBridgeKitNative and runtime consumers share one initialized instance', () => {
-    let initBridgeKitNative: () => unknown;
-    let runtimeGetDefault: () => unknown;
+    let initBridgeKitNative = (): unknown => {
+      throw new Error('native entrypoint was not loaded');
+    };
+    let runtimeGetDefault = (): unknown => {
+      throw new Error('native runtime singleton was not loaded');
+    };
     jest.isolateModules(() => {
       ({ initBridgeKitNative } = require('../index.native'));
       ({ getDefaultBridgeKit: runtimeGetDefault } = require('../runtime/defaultInstance.native'));
     });
 
-    // @ts-ignore — assigned synchronously inside isolateModules
     const initialized = initBridgeKitNative();
-    // @ts-ignore — assigned synchronously inside isolateModules
     expect(runtimeGetDefault()).toBe(initialized);
   });
 });

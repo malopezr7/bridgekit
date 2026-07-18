@@ -59,9 +59,13 @@ describe('WS-11 contract hook context and readiness', () => {
     expect(result.current).toBe('global-value');
 
     act(() => {
-      featureBinding = bridgekit.provide(ContextContract, {}, {
-        scope: { kind: 'feature', feature: 'catalog' },
-      });
+      featureBinding = bridgekit.provide(
+        ContextContract,
+        {},
+        {
+          scope: { kind: 'feature', feature: 'catalog' },
+        },
+      );
       featureBinding.setState('value', 'feature-value');
     });
 
