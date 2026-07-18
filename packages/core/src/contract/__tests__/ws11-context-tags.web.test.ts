@@ -77,6 +77,27 @@ describe('WS-11 contract hook context and readiness', () => {
     featureBinding?.close('final');
     globalBinding.close('final');
   });
+
+  test('unrelated-scope readiness does not churn the hook snapshot on parent rerender', () => {
+    const { bridgekit } = createTestBridge();
+    const { result, rerender, unmount } = renderHook(() => ContextContract(), {
+      wrapper: makeFeatureWrapper(bridgekit),
+    });
+    const initialSnapshot = result.current;
+    let unrelatedBinding: Binding | null = null;
+
+    act(() => {
+      unrelatedBinding = bridgekit.provide(ContextContract, {}, {
+        scope: { kind: 'feature', feature: 'unrelated' },
+      });
+    });
+    rerender();
+
+    expect(result.current).toBe(initialSnapshot);
+
+    unmount();
+    unrelatedBinding?.close('final');
+  });
 });
 
 describe('WS-11 oneOf schema-authored tags', () => {

@@ -234,7 +234,7 @@ export class BridgeKitJs {
   private _connected = false;
   private _closingForEpochSwap = false;
   private _replayingProviders = false;
-  private readonly _readinessVersionByContract = new Map<string, number>();
+  private readonly _readinessVersionByScope = new Map<string, number>();
 
   constructor(private readonly _transport: BridgeTransport) {
     this.registry = new Registry();
@@ -245,18 +245,16 @@ export class BridgeKitJs {
       getEpoch: () => this._epoch,
     });
     this.registry.onReadinessChange((event) => {
-      this._bumpReadinessVersion(event.contractId);
+      this._bumpReadinessVersion(event.contractId, serializeScope(event.scope));
     });
     this.nativeReadiness.subscribe((record) => {
-      this._bumpReadinessVersion(record.contractId);
+      this._bumpReadinessVersion(record.contractId, record.scopeKey);
     });
   }
 
-  private _bumpReadinessVersion(contractId: string): void {
-    this._readinessVersionByContract.set(
-      contractId,
-      (this._readinessVersionByContract.get(contractId) ?? 0) + 1,
-    );
+  private _bumpReadinessVersion(contractId: string, scopeKey: string): void {
+    const key = `${contractId}|${scopeKey}`;
+    this._readinessVersionByScope.set(key, (this._readinessVersionByScope.get(key) ?? 0) + 1);
   }
 
   /**
@@ -1020,7 +1018,10 @@ export class BridgeKitJs {
   }
 
   readinessSnapshot(contract: BridgeContract<unknown>, scope: BridgeScope): string {
-    const readinessVersion = this._readinessVersionByContract.get(contract.descriptor.id) ?? 0;
+    const contractId = contract.descriptor.id;
+    const readinessVersion = candidateScopeKeys(scope)
+      .map((scopeKey) => this._readinessVersionByScope.get(`${contractId}|${scopeKey}`) ?? 0)
+      .join(',');
     return `${readinessVersion}:${this.isProvided(contract, { scope }) ? '1' : '0'}`;
   }
 
