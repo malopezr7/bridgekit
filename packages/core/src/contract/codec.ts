@@ -472,6 +472,12 @@ export function decode(schema: AnySchema, value: unknown): unknown {
           `[bridgekit] int64 decode: expected decimal string, got ${typeof value}`,
         );
       }
+      // JD2-003: BigInt('') and whitespace-only strings silently coerce to 0n.
+      if (!/^-?\d+$/.test(value)) {
+        throw new TypeError(
+          `[bridgekit] int64 decode: expected decimal string, got ${JSON.stringify(value)}`,
+        );
+      }
       return BigInt(value);
     }
 
@@ -486,8 +492,14 @@ export function decode(schema: AnySchema, value: unknown): unknown {
     case 'binary': {
       if (value instanceof Uint8Array) return new Uint8Array(value);
       if (value instanceof ArrayBuffer) return new Uint8Array(value);
+      // JD2-003: a wrong-typed wire value must not silently decode to empty bytes.
+      if (typeof value !== 'string') {
+        throw new TypeError(
+          `[bridgekit] binary decode: expected base64 string, Uint8Array, or ArrayBuffer, got ${typeof value}`,
+        );
+      }
       // D6: wire is base64 string — decode without Buffer (Hermes/JSC/RN safe)
-      return base64ToUint8Array(value as string);
+      return base64ToUint8Array(value);
     }
 
     case 'enum': {
