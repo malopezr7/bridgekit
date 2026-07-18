@@ -9,7 +9,6 @@
 // No imports from react or react-native (purity contract).
 // ---------------------------------------------------------------------------
 
-import { deriveOneOfOptionTags } from './hash';
 import type {
   AnySchema,
   ArraySchema,
@@ -367,13 +366,12 @@ export function encode(schema: AnySchema, value: unknown): unknown {
 
     case 'oneOf': {
       const oneOfSchema = schema as OneOfSchema;
-      const tags = deriveOneOfOptionTags(oneOfSchema.options);
       for (let i = 0; i < oneOfSchema.options.length; i++) {
         const opt = oneOfSchema.options[i];
         if (opt === undefined) continue;
         const result = validateAt(opt, value, '');
         if (result.ok) {
-          return { '@t': tags[i], '@v': encode(opt, value) };
+          return { '@t': oneOfSchema.tags[i], '@v': encode(opt, value) };
         }
       }
       throw oneOfError('encode', `value did not match any option (got ${typeof value})`);
@@ -521,7 +519,6 @@ export function decode(schema: AnySchema, value: unknown): unknown {
         );
       }
       const oneOfSchema = schema as OneOfSchema;
-      const tags = deriveOneOfOptionTags(oneOfSchema.options);
       const envelope = value as Record<string, unknown>;
       const rawT = envelope['@t'];
       if (typeof rawT !== 'string') {
@@ -535,7 +532,7 @@ export function decode(schema: AnySchema, value: unknown): unknown {
           `[bridgekit] oneOf decode: @v is missing from envelope (schema has ${oneOfSchema.options.length} option(s))`,
         );
       }
-      const optionIndex = tags.indexOf(rawT);
+      const optionIndex = oneOfSchema.tags.indexOf(rawT);
       const opt = optionIndex >= 0 ? oneOfSchema.options[optionIndex] : undefined;
       if (opt === undefined) {
         throw new TypeError(

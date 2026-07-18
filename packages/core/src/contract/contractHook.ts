@@ -75,11 +75,14 @@ export function buildContractHook<T extends MarkerContractInput>(
     const { useCallback, useContext, useMemo, useRef, useSyncExternalStore } = React;
     const { ScopeContext } =
       require('../react/ScopeContext') as typeof import('../react/ScopeContext');
+    const { useBridgeKit, useReadinessSignal } =
+      require('../react/hooks') as typeof import('../react/hooks');
 
-    const bk = getDefaultBridgeKit();
+    const bk = useBridgeKit();
 
     const contextScope = useContext(ScopeContext);
     const scope = scopeOverride ?? contextScope;
+    const readinessSignal = useReadinessSignal(bk, contract, scope);
 
     const mirrors = useMemo(() => {
       const desc = contract.descriptor;
@@ -89,7 +92,7 @@ export function buildContractHook<T extends MarkerContractInput>(
         result[key] = bk.state(contract, key, scope);
       }
       return result;
-    }, [bk, contract, scope.kind, scope.feature, scope.instance]);
+    }, [bk, contract, scope.kind, scope.feature, scope.instance, readinessSignal]);
 
     const proxy = useMemo(
       () => bk.bridge(contract, { scope }) as Record<string, unknown>,
