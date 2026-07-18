@@ -48,6 +48,7 @@ export { createTestBridge, mockBridge } from './testing/index';
 
 // ---- Default instance (Nitro-backed) ---------------------------------------
 
+import type { BridgeKitJs } from './runtime/bridgekit';
 import { getDefaultBridgeKit } from './runtime/defaultInstance';
 
 export { getDefaultBridgeKit } from './runtime/defaultInstance';
