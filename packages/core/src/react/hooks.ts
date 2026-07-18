@@ -54,11 +54,13 @@ function useWarnIfNoProvider(
 
 const BridgeKitContext = createContext<BridgeKitJs | null>(null);
 
-function useBridgeKit(): BridgeKitJs {
+/** @internal Shared context resolver for generated contract hooks. */
+export function useBridgeKit(): BridgeKitJs {
   return useContext(BridgeKitContext) ?? getDefaultBridgeKit();
 }
 
-function useReadinessSignal(
+/** @internal Shared readiness subscription for generated contract hooks. */
+export function useReadinessSignal(
   bk: BridgeKitJs,
   contract: BridgeContract<unknown>,
   scope: BridgeScope,

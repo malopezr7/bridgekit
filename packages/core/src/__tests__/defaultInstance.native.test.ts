@@ -42,26 +42,59 @@ describe('QW-6: getDefaultBridgeKit native platform support', () => {
   test('does not throw when Platform.OS is ios', () => {
     mockPlatform.OS = 'ios';
 
-    let getDefaultBridgeKit: () => unknown;
+    let getDefaultBridgeKit = (): unknown => {
+      throw new Error('runtime module was not loaded');
+    };
     jest.isolateModules(() => {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       ({ getDefaultBridgeKit } = require('../runtime/defaultInstance.native'));
     });
 
-    // @ts-ignore — assigned synchronously inside isolateModules
     expect(() => getDefaultBridgeKit()).not.toThrow();
   });
 
   test('does not throw when Platform.OS is android', () => {
     mockPlatform.OS = 'android';
 
-    let getDefaultBridgeKit: () => unknown;
+    let getDefaultBridgeKit = (): unknown => {
+      throw new Error('runtime module was not loaded');
+    };
     jest.isolateModules(() => {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       ({ getDefaultBridgeKit } = require('../runtime/defaultInstance.native'));
     });
 
-    // @ts-ignore — assigned synchronously inside isolateModules
     expect(() => getDefaultBridgeKit()).not.toThrow();
+  });
+
+  test('native entrypoint re-exports the runtime singleton accessor', () => {
+    let entrypointGetDefault = (): unknown => {
+      throw new Error('native entrypoint was not loaded');
+    };
+    let runtimeGetDefault = (): unknown => {
+      throw new Error('native runtime singleton was not loaded');
+    };
+    jest.isolateModules(() => {
+      ({ getDefaultBridgeKit: entrypointGetDefault } = require('../index.native'));
+      ({ getDefaultBridgeKit: runtimeGetDefault } = require('../runtime/defaultInstance.native'));
+    });
+
+    expect(entrypointGetDefault).toBe(runtimeGetDefault);
+  });
+
+  test('initBridgeKitNative and runtime consumers share one initialized instance', () => {
+    let initBridgeKitNative = (): unknown => {
+      throw new Error('native entrypoint was not loaded');
+    };
+    let runtimeGetDefault = (): unknown => {
+      throw new Error('native runtime singleton was not loaded');
+    };
+    jest.isolateModules(() => {
+      ({ initBridgeKitNative } = require('../index.native'));
+      ({ getDefaultBridgeKit: runtimeGetDefault } = require('../runtime/defaultInstance.native'));
+    });
+
+    const initialized = initBridgeKitNative();
+    expect(runtimeGetDefault()).toBe(initialized);
   });
 });
