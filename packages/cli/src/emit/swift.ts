@@ -556,15 +556,14 @@ export function emitSwiftContract(
 
     const valueCtx = `${memberCtx}Value`;
     // caller.stream() returns AsyncThrowingStream<Any?, Error>. Bridge it to AsyncStream<T>
-    // by decoding each element (walker.decodeExpr handles numeric Int/Double coercion —
-    // a raw `as! Double` traps when JS sends an integer) and swallowing the error
-    // (matching Kotlin Flow.catch behaviour).
+    // by decoding each element. AsyncStream cannot propagate failure, so report the
+    // decode/transport error before terminating the non-throwing client stream.
     const decodeStreamItem = walker.decodeExpr('item', desc.value, valueCtx, `${swiftName}.value`);
     outboundImpls.push(
       [
         `func ${swiftName}(${paramSig}) -> ${streamType} {`,
         `    let throwing = caller.stream(member: ${swiftStringLiteral(memberName)}, payload: ${encodeStreamParams})`,
-        `    return AsyncStream { cont in Task { do { for try await item in throwing { cont.yield(${decodeStreamItem}) } } catch {} ; cont.finish() } }`,
+        `    return AsyncStream { cont in Task { do { for try await item in throwing { cont.yield(${decodeStreamItem}) } } catch { bridgeKitReportDecodeError(error, context: ${swiftStringLiteral(`stream.${memberName}`)}); cont.finish() } } }`,
         `}`,
       ].join('\n'),
     );
@@ -644,7 +643,10 @@ export function emitSwiftContract(
         `    return AsyncStream { cont in`,
         `        let pump = Task {`,
         `            for await bv in source {`,
-        `                cont.yield(bv.remap { (value: Any?) -> ${valueResult.typeName}? in try? (${decodeStateValue}) })`,
+        `                cont.yield(bv.remap { (value: Any?) -> ${valueResult.typeName}? in`,
+        `                    do { return ${decodeStateValue} }`,
+        `                    catch { bridgeKitReportDecodeError(error, context: ${swiftStringLiteral(`state.${memberName}`)}); return nil }`,
+        `                })`,
         `            }`,
         `            cont.finish()`,
         `        }`,
@@ -710,16 +712,6 @@ function buildSwiftOutboundReturnLines(
   if (!resultSchema || resultType === 'Void') return [`    return`];
 
   const innerSchema = unwrapWrappers(resultSchema);
-  const isPlainCast = !schemaNeedsCodec(innerSchema);
-
-  if (isPlainCast) {
-    const bareType = resultType.replace(/\?$/, '');
-    if (isNullable) {
-      return [`    return result as? ${bareType}`];
-    }
-    return [`    return result as! ${bareType}`];
-  }
-
   const decodeExpr = walker.boundaryDecode('result', innerSchema, resultCtx);
   if (isNullable) {
     return [`    return result == nil ? nil : (${decodeExpr})`];

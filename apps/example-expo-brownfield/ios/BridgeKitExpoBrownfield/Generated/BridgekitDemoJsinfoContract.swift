@@ -41,10 +41,10 @@ private enum BridgekitDemoJsinfoCodecs {
         return map
     }
 
-    static func decodeGetUserLevelResult(_ raw: [String: Any?]) throws -> GetUserLevelResult {
+    static func decodeGetUserLevelResult(_ raw: [String: Any?], path: String = "") throws -> GetUserLevelResult {
         return GetUserLevelResult(
-            level: try ((raw["level"] as Any? as? Double) ?? Double(try ((raw["level"] as Any? as? Int) ?? bridgeKitThrow(field: "level", expectedType: "Double")))),
-            label: try ((raw["label"] as Any? as? String) ?? bridgeKitThrow(field: "label", expectedType: "String"))
+            level: try ((raw["level"] as Any? as? Double) ?? Double(try ((raw["level"] as Any? as? Int) ?? bridgeKitThrow(path: path.isEmpty ? "level" : path + ".level", expectedType: "Double", actualValue: raw["level"] as Any?)))),
+            label: try ((raw["label"] as Any? as? String) ?? bridgeKitThrow(path: path.isEmpty ? "label" : path + ".label", expectedType: "String", actualValue: raw["label"] as Any?))
         )
     }
 
@@ -116,18 +116,18 @@ private class BridgekitDemoJsinfoOutboundClient: BridgekitDemoJsinfoClient {
     init(caller: OutboundCaller) { self.caller = caller }
     func getReactNativeVersion() async throws -> String {
         let result = try await caller.invoke(member: "getReactNativeVersion", payload: nil)
-        return result as! String
+        return try ((result as? String) ?? bridgeKitThrow(path: "result", expectedType: "String", actualValue: result))
     }
     func getUserLevel() async throws -> GetUserLevelResult {
         let result = try await caller.invoke(member: "getUserLevel", payload: nil)
-        return try BridgekitDemoJsinfoCodecs.decodeGetUserLevelResult(result as! [String: Any?])
+        return try BridgekitDemoJsinfoCodecs.decodeGetUserLevelResult(try ((result as? [String: Any?]) ?? bridgeKitThrow(path: "result", expectedType: "GetUserLevelResult", actualValue: result)), path: "result")
     }
     func getUserSegments() async throws -> [String] {
         let result = try await caller.invoke(member: "getUserSegments", payload: nil)
-        return result as! [String]
+        return try ((result as? [Any?]) ?? bridgeKitThrow(path: "result", expectedType: "Array", actualValue: result)).enumerated().map { index, item in try ((item as? String) ?? bridgeKitThrow(path: ("result") + "[\(index)]", expectedType: "String", actualValue: item)) }
     }
     func clockTicks() -> AsyncStream<Double> {
         let throwing = caller.stream(member: "clockTicks", payload: nil)
-        return AsyncStream { cont in Task { do { for try await item in throwing { cont.yield(try ((item as? Double) ?? Double(try ((item as? Int) ?? bridgeKitThrow(field: "clockTicks.value", expectedType: "Double"))))) } } catch {} ; cont.finish() } }
+        return AsyncStream { cont in Task { do { for try await item in throwing { cont.yield(try ((item as? Double) ?? Double(try ((item as? Int) ?? bridgeKitThrow(path: "clockTicks.value", expectedType: "Double", actualValue: item))))) } } catch { bridgeKitReportDecodeError(error, context: "stream.clockTicks"); cont.finish() } } }
     }
 }

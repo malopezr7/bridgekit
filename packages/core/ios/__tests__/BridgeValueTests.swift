@@ -26,6 +26,20 @@ final class BridgeKitDecodeErrorTests: XCTestCase {
         XCTAssertTrue(err.description.contains("amount"))
         XCTAssertTrue(err.description.contains("Double"))
     }
+
+    func test_decodeError_pathAndActualType_preserveNestedContext() {
+        let err = BridgeKitDecodeError(
+            path: "opt[0].someKey.blob",
+            expectedType: "Data",
+            actualValue: 42
+        )
+        XCTAssertEqual(err.path, "opt[0].someKey.blob")
+        XCTAssertEqual(err.field, "blob")
+        XCTAssertEqual(err.expectedType, "Data")
+        XCTAssertEqual(err.actualType, "Int")
+        XCTAssertTrue(err.description.contains("opt[0].someKey.blob"))
+        XCTAssertTrue(err.description.contains("Int"))
+    }
 }
 
 // MARK: - BridgeValue

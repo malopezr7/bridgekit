@@ -37,9 +37,9 @@ private enum BridgekitLocalhostCodecs {
         return map
     }
 
-    static func decodeGreetParams(_ raw: [String: Any?]) throws -> GreetParams {
+    static func decodeGreetParams(_ raw: [String: Any?], path: String = "") throws -> GreetParams {
         return GreetParams(
-            name: try ((raw["name"] as Any? as? String) ?? bridgeKitThrow(field: "name", expectedType: "String"))
+            name: try ((raw["name"] as Any? as? String) ?? bridgeKitThrow(path: path.isEmpty ? "name" : path + ".name", expectedType: "String", actualValue: raw["name"] as Any?))
         )
     }
 
@@ -110,18 +110,21 @@ private class BridgekitLocalhostOutboundClient: BridgekitLocalhostClient {
     init(caller: OutboundCaller) { self.caller = caller }
     func getMotto() throws -> String {
         let result = try caller.invokeSync(member: "getMotto", payload: nil)
-        return result as! String
+        return try ((result as? String) ?? bridgeKitThrow(path: "result", expectedType: "String", actualValue: result))
     }
     func greet(_ params: GreetParams) async throws -> String {
         let result = try await caller.invoke(member: "greet", payload: BridgekitLocalhostCodecs.encodeGreetParams(params))
-        return result as! String
+        return try ((result as? String) ?? bridgeKitThrow(path: "result", expectedType: "String", actualValue: result))
     }
     var mood: AsyncStream<BridgeValue<String>> {
         let source = caller.state(member: "mood")
         return AsyncStream { cont in
             let pump = Task {
                 for await bv in source {
-                    cont.yield(bv.remap { (value: Any?) -> String? in try? (try ((value as? String) ?? bridgeKitThrow(field: "mood.value", expectedType: "String"))) })
+                    cont.yield(bv.remap { (value: Any?) -> String? in
+                        do { return try ((value as? String) ?? bridgeKitThrow(path: "mood.value", expectedType: "String", actualValue: value)) }
+                        catch { bridgeKitReportDecodeError(error, context: "state.mood"); return nil }
+                    })
                 }
                 cont.finish()
             }

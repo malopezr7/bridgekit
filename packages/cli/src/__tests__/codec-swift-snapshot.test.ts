@@ -88,6 +88,57 @@ function emitSkewSafetyContract(): string {
   return emitSwiftContract(token, 'BridgeKitFixtures').content;
 }
 
+function emitRoundOneSkewContract(): string {
+  const token: RawContractToken = {
+    hash: 'contract-hash',
+    descriptor: {
+      $type: 'com.bridgekit.contract',
+      id: 'fixture.round-one-skew',
+      methods: {
+        getString: { kind: 'query', result: { kind: 'string' } },
+        getOptionalString: {
+          kind: 'query',
+          result: { kind: 'optional', inner: { kind: 'string' } },
+        },
+        getNumbers: {
+          kind: 'query',
+          result: { kind: 'array', item: { kind: 'number' } },
+        },
+        getRecord: {
+          kind: 'query',
+          result: { kind: 'record', value: { kind: 'string' } },
+        },
+        getNested: {
+          kind: 'query',
+          result: {
+            kind: 'object',
+            fields: {
+              opt: {
+                kind: 'array',
+                item: {
+                  kind: 'object',
+                  fields: {
+                    someKey: {
+                      kind: 'object',
+                      fields: { blob: { kind: 'binary' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      streams: { updates: { kind: 'stream', value: { kind: 'string' } } },
+      state: {
+        status: { kind: 'state', value: { kind: 'string' }, initial: 'ready' },
+      },
+    },
+  };
+
+  return emitSwiftContract(token, 'BridgeKitFixtures').content;
+}
+
 function coreOneOfTags(oneOfSchema: ReturnType<typeof t.oneOf>): readonly string[] {
   return (oneOfSchema as unknown as { tags: readonly string[] }).tags;
 }
@@ -97,17 +148,65 @@ function jsRuntimeTag(oneOfSchema: ReturnType<typeof t.oneOf>, value: unknown): 
 }
 
 describe('Swift codec snapshots', () => {
+  it('throws for wrong-typed required and optional plain query results', () => {
+    const swift = emitRoundOneSkewContract();
+
+    expect(swift).toContain(
+      'return try ((result as? String) ?? bridgeKitThrow(path: "result", expectedType: "String", actualValue: result))',
+    );
+    expect(swift).toContain(
+      'return result == nil ? nil : (try ((result as? String) ?? bridgeKitThrow(path: "result", expectedType: "String", actualValue: result)))',
+    );
+    expect(swift).not.toContain('return result as!');
+    expect(swift).not.toContain('return result as?');
+  });
+
+  it('throws for wrong-typed plain collection results and identifies nested paths', () => {
+    const swift = emitRoundOneSkewContract();
+
+    expect(swift).toContain('bridgeKitThrow(path: "result", expectedType: "Array"');
+    expect(swift).toContain('bridgeKitThrow(path: "result", expectedType: "Dictionary"');
+    expect(swift).toContain('+ "[\\(index)]"');
+    expect(swift).toContain('+ "." + entry.key');
+    expect(swift).toContain('actualValue: item');
+    expect(swift).toContain('actualValue: entry.value');
+  });
+
+  it('reports stream decode failures instead of swallowing them', () => {
+    const swift = emitRoundOneSkewContract();
+
+    expect(swift).toContain(
+      'catch { bridgeKitReportDecodeError(error, context: "stream.updates"); cont.finish() }',
+    );
+    expect(swift).not.toContain('catch {}');
+  });
+
+  it('reports state decode failures before applying the typed fallback', () => {
+    const swift = emitRoundOneSkewContract();
+
+    expect(swift).toContain(
+      'catch { bridgeKitReportDecodeError(error, context: "state.status"); return nil }',
+    );
+    expect(swift).not.toContain('in try? (');
+  });
+
   it('emits throwing skew-safe boundary decoders without process-aborting casts', () => {
     const swift = emitSkewSafetyContract();
 
     expect(swift).not.toContain('fatalError');
     expect(swift).not.toContain('as!');
     expect(swift).toContain(
-      'throw BridgeKitDecodeError(field: "result", expectedType: "GetLiteralResult")',
+      'throw BridgeKitDecodeError(path: "result", expectedType: "GetLiteralResult", actualValue: result)',
     );
-    expect(swift).toContain('bridgeKitThrow(field: "result", expectedType: "GetObjectResult")');
-    expect(swift).toContain('bridgeKitThrow(field: "result", expectedType: "GetUnionResult")');
-    expect(swift).toContain('bridgeKitThrow(field: "result", expectedType: "GetTupleResult")');
+    expect(swift).toContain(
+      'bridgeKitThrow(path: "result", expectedType: "GetObjectResult", actualValue: result)',
+    );
+    expect(swift).toContain(
+      'bridgeKitThrow(path: "result", expectedType: "GetUnionResult", actualValue: result)',
+    );
+    expect(swift).toContain(
+      'bridgeKitThrow(path: "result", expectedType: "GetTupleResult", actualValue: result)',
+    );
   });
 
   it('cli_codec_snapshots_emit_int64_string_kotlin_swift emits decimal string int64 boundaries', () => {
@@ -117,11 +216,11 @@ describe('Swift codec snapshots', () => {
       'case "getCounter":\n            return String(try await impl.getCounter())',
     );
     expect(swift).toContain(
-      'return try Int64((result as? String) ?? bridgeKitThrow(field: "result", expectedType: "Int64")) ?? bridgeKitThrow(field: "result", expectedType: "Int64")',
+      'return try Int64((result as? String) ?? bridgeKitThrow(path: "result", expectedType: "Int64", actualValue: result)) ?? bridgeKitThrow(path: "result", expectedType: "Int64", actualValue: result)',
     );
     expect(swift).toContain('map["count"] = String(value.count)');
     expect(swift).toContain(
-      'count: try Int64((raw["count"] as Any? as? String) ?? bridgeKitThrow(field: "count", expectedType: "Int64")) ?? bridgeKitThrow(field: "count", expectedType: "Int64")',
+      'count: try Int64((raw["count"] as Any? as? String) ?? bridgeKitThrow(path: path.isEmpty ? "count" : path + ".count", expectedType: "Int64", actualValue: raw["count"] as Any?)) ?? bridgeKitThrow(path: path.isEmpty ? "count" : path + ".count", expectedType: "Int64", actualValue: raw["count"] as Any?)',
     );
   });
 
@@ -143,12 +242,12 @@ describe('Swift codec snapshots', () => {
     }
 
     expect(swift).toContain(
-      'guard let tag = raw["@t"] as? String else { throw BridgeKitDecodeError(field: "@t", expectedType: "ChooseResult") }',
+      'guard let tag = raw["@t"] as? String else { throw BridgeKitDecodeError(path: path.isEmpty ? "@t" : path + ".@t", expectedType: "ChooseResult", actualValue: raw["@t"] as Any?) }',
     );
     expect(swift).toContain('let v = raw["@v"] as Any?');
     expect(swift).toContain('switch tag {');
     expect(swift).toContain(
-      'default: throw BridgeKitDecodeError(field: "@t=\\(tag)", expectedType: "ChooseResult")',
+      'default: throw BridgeKitDecodeError(path: path.isEmpty ? "@t" : path + ".@t", expectedType: "ChooseResult", actualValue: tag)',
     );
     expect(swift).not.toContain('"@k"');
     expect(swift).not.toContain('switch k {');
