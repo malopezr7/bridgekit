@@ -92,14 +92,19 @@ extension _Concurrency.AsyncThrowingStream {
   @objc deinit
 }
 public struct BridgeKitDecodeError : Swift.Error, Swift.CustomStringConvertible {
+  public let path: Swift.String
   public let field: Swift.String
   public let expectedType: Swift.String
+  public let actualType: Swift.String
   public init(field: Swift.String, expectedType: Swift.String)
+  public init(path: Swift.String, expectedType: Swift.String, actualValue: Any?)
   public var description: Swift.String {
     get
   }
 }
 @inline(__always) public func bridgeKitThrow<T>(field: Swift.String, expectedType: Swift.String) throws -> T
+@inline(__always) public func bridgeKitThrow<T>(path: Swift.String, expectedType: Swift.String, actualValue: Any?) throws -> T
+public func bridgeKitReportDecodeError(_ error: any Swift.Error, context: Swift.String)
 public enum BridgeValue<T> {
   case available(T)
   case initial(T)

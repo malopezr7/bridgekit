@@ -33,9 +33,9 @@ private enum BridgekitDemoFeatureCodecs {
         return map
     }
 
-    static func decodeGetGreetingParams(_ raw: [String: Any?]) throws -> GetGreetingParams {
+    static func decodeGetGreetingParams(_ raw: [String: Any?], path: String = "") throws -> GetGreetingParams {
         return GetGreetingParams(
-            name: try ((raw["name"] as Any? as? String) ?? bridgeKitThrow(field: "name", expectedType: "String"))
+            name: try ((raw["name"] as Any? as? String) ?? bridgeKitThrow(path: path.isEmpty ? "name" : path + ".name", expectedType: "String", actualValue: raw["name"] as Any?))
         )
     }
 
@@ -98,6 +98,6 @@ private class BridgekitDemoFeatureOutboundClient: BridgekitDemoFeatureClient {
     init(caller: OutboundCaller) { self.caller = caller }
     func getGreeting(_ params: GetGreetingParams) async throws -> String {
         let result = try await caller.invoke(member: "getGreeting", payload: BridgekitDemoFeatureCodecs.encodeGetGreetingParams(params))
-        return result as! String
+        return try ((result as? String) ?? bridgeKitThrow(path: "result", expectedType: "String", actualValue: result))
     }
 }

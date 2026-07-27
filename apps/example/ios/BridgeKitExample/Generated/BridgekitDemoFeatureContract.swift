@@ -42,9 +42,9 @@ private enum BridgekitDemoFeatureCodecs {
         return map
     }
 
-    static func decodeGetGreetingParams(_ raw: [String: Any?]) throws -> GetGreetingParams {
+    static func decodeGetGreetingParams(_ raw: [String: Any?], path: String = "") throws -> GetGreetingParams {
         return GetGreetingParams(
-            name: try ((raw["name"] as Any? as? String) ?? bridgeKitThrow(field: "name", expectedType: "String"))
+            name: try ((raw["name"] as Any? as? String) ?? bridgeKitThrow(path: path.isEmpty ? "name" : path + ".name", expectedType: "String", actualValue: raw["name"] as Any?))
         )
     }
 
@@ -55,13 +55,13 @@ private enum BridgekitDemoFeatureCodecs {
         }
     }
 
-    static func decodeChooseValueResult(_ raw: [String: Any?]) throws -> ChooseValueResult {
-        guard let tag = raw["@t"] as? String else { throw BridgeKitDecodeError(field: "@t", expectedType: "ChooseValueResult") }
+    static func decodeChooseValueResult(_ raw: [String: Any?], path: String = "") throws -> ChooseValueResult {
+        guard let tag = raw["@t"] as? String else { throw BridgeKitDecodeError(path: path.isEmpty ? "@t" : path + ".@t", expectedType: "ChooseValueResult", actualValue: raw["@t"] as Any?) }
         let v = raw["@v"] as Any?
         switch tag {
-        case "string:2ce29730": return .opt0(try ((v as? String) ?? bridgeKitThrow(field: "opt0", expectedType: "String")))
-        case "number:18e41cc0": return .opt1(try ((v as? Double) ?? Double(try ((v as? Int) ?? bridgeKitThrow(field: "opt1", expectedType: "Double")))))
-        default: throw BridgeKitDecodeError(field: "@t=\(tag)", expectedType: "ChooseValueResult")
+        case "string:2ce29730": return .opt0(try ((v as? String) ?? bridgeKitThrow(path: path.isEmpty ? "opt0" : path + ".opt0", expectedType: "String", actualValue: v)))
+        case "number:18e41cc0": return .opt1(try ((v as? Double) ?? Double(try ((v as? Int) ?? bridgeKitThrow(path: path.isEmpty ? "opt1" : path + ".opt1", expectedType: "Double", actualValue: v)))))
+        default: throw BridgeKitDecodeError(path: path.isEmpty ? "@t" : path + ".@t", expectedType: "ChooseValueResult", actualValue: tag)
         }
     }
 
@@ -130,14 +130,14 @@ private class BridgekitDemoFeatureOutboundClient: BridgekitDemoFeatureClient {
     init(caller: OutboundCaller) { self.caller = caller }
     func getGreeting(_ params: GetGreetingParams) async throws -> String {
         let result = try await caller.invoke(member: "getGreeting", payload: BridgekitDemoFeatureCodecs.encodeGetGreetingParams(params))
-        return result as! String
+        return try ((result as? String) ?? bridgeKitThrow(path: "result", expectedType: "String", actualValue: result))
     }
     func getLargeCounter() async throws -> Int64 {
         let result = try await caller.invoke(member: "getLargeCounter", payload: nil)
-        return try Int64((result as? String) ?? bridgeKitThrow(field: "result", expectedType: "Int64")) ?? bridgeKitThrow(field: "result", expectedType: "Int64")
+        return try Int64((result as? String) ?? bridgeKitThrow(path: "result", expectedType: "Int64", actualValue: result)) ?? bridgeKitThrow(path: "result", expectedType: "Int64", actualValue: result)
     }
     func chooseValue() async throws -> ChooseValueResult {
         let result = try await caller.invoke(member: "chooseValue", payload: nil)
-        return try BridgekitDemoFeatureCodecs.decodeChooseValueResult(result as! [String: Any?])
+        return try BridgekitDemoFeatureCodecs.decodeChooseValueResult(try ((result as? [String: Any?]) ?? bridgeKitThrow(path: "result", expectedType: "ChooseValueResult", actualValue: result)), path: "result")
     }
 }

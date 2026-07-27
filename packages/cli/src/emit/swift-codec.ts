@@ -67,33 +67,37 @@ export class SwiftCodecWalker {
       case 'union':
       case 'oneOf': {
         const typeName = this.registerComposite(node, ctxName);
-        return `try ${this.className}Codecs.decode${typeName}(${expr} as! [String: Any?])`;
+        return `try ${this.className}Codecs.decode${typeName}(try ((${expr} as? [String: Any?]) ?? bridgeKitThrow(path: "result", expectedType: "${typeName}", actualValue: ${expr})), path: "result")`;
       }
       case 'tuple': {
         const typeName = this.registerComposite(node, ctxName);
-        return `try ${this.className}Codecs.decode${typeName}(${expr} as! [Any?])`;
+        return `try ${this.className}Codecs.decode${typeName}(try ((${expr} as? [Any?]) ?? bridgeKitThrow(path: "result", expectedType: "${typeName}", actualValue: ${expr})), path: "result")`;
       }
       case 'literals': {
         const typeName = this.typeName(node, ctxName);
-        return `${typeName}(rawValue: ${expr} as? String ?? "") ?? { fatalError("Unknown ${typeName} value: \\(${expr} as Any)") }()`;
+        return `try { () throws -> ${typeName} in
+            guard let rawValue = ${expr} as? String else { throw BridgeKitDecodeError(path: "result", expectedType: "${typeName}", actualValue: ${expr}) }
+            guard let value = ${typeName}(rawValue: rawValue) else { throw BridgeKitDecodeError(path: "result", expectedType: "${typeName}", actualValue: rawValue) }
+            return value
+        }()`;
       }
       case 'enum': {
         const typeName = this.typeName(node, ctxName);
         return `try { () throws -> ${typeName} in
-            guard let number = ${expr} as? NSNumber else { throw BridgeKitDecodeError(field: "result", expectedType: "${typeName}") }
-            guard let rawValue = Int(exactly: number) else { throw BridgeKitDecodeError(field: "result", expectedType: "${typeName}") }
-            guard let value = ${typeName}(rawValue: rawValue) else { throw BridgeKitDecodeError(field: "result", expectedType: "${typeName}") }
+            guard let number = ${expr} as? NSNumber else { throw BridgeKitDecodeError(path: "result", expectedType: "${typeName}", actualValue: ${expr}) }
+            guard let rawValue = Int(exactly: number) else { throw BridgeKitDecodeError(path: "result", expectedType: "${typeName}", actualValue: number) }
+            guard let value = ${typeName}(rawValue: rawValue) else { throw BridgeKitDecodeError(path: "result", expectedType: "${typeName}", actualValue: rawValue) }
             return value
         }()`;
       }
       case 'date':
-        return `try Date(timeIntervalSince1970: Double((${expr} as? Int64) ?? Int64(try ((${expr} as? Double) ?? bridgeKitThrow(field: "result", expectedType: "Date")))) / 1000.0)`;
+        return `try Date(timeIntervalSince1970: Double((${expr} as? Int64) ?? Int64(try ((${expr} as? Double) ?? bridgeKitThrow(path: "result", expectedType: "Date", actualValue: ${expr})))) / 1000.0)`;
       case 'int64':
-        return `try Int64((${expr} as? String) ?? bridgeKitThrow(field: "result", expectedType: "Int64")) ?? bridgeKitThrow(field: "result", expectedType: "Int64")`;
+        return `try Int64((${expr} as? String) ?? bridgeKitThrow(path: "result", expectedType: "Int64", actualValue: ${expr})) ?? bridgeKitThrow(path: "result", expectedType: "Int64", actualValue: ${expr})`;
       case 'binary':
-        return `try (Data(base64Encoded: try ((${expr} as? String) ?? bridgeKitThrow(field: "result", expectedType: "Data"))) ?? bridgeKitThrow(field: "result", expectedType: "Data"))`;
+        return `try (Data(base64Encoded: try ((${expr} as? String) ?? bridgeKitThrow(path: "result", expectedType: "Data", actualValue: ${expr}))) ?? bridgeKitThrow(path: "result", expectedType: "Data", actualValue: ${expr}))`;
       default:
-        return this.decodeExpr(expr, node, ctxName, ctxName);
+        return this.decodeExpr(expr, node, ctxName, 'result');
     }
   }
 
@@ -161,14 +165,24 @@ export class SwiftCodecWalker {
   // ---- DECODE ----------------------------------------------------------------
 
   decodeExpr(raw: string, node: SchemaNode, ctxName: string, fieldName = 'value'): string {
-    const fieldLit = swiftStringLiteral(fieldName);
+    return this.decodeExprAtPath(raw, node, ctxName, swiftStringLiteral(fieldName));
+  }
+
+  private decodeExprAtPath(
+    raw: string,
+    node: SchemaNode,
+    ctxName: string,
+    pathExpr: string,
+  ): string {
+    const decodeFailure = (expectedType: string, actualValue = raw): string =>
+      `bridgeKitThrow(path: ${pathExpr}, expectedType: "${expectedType}", actualValue: ${actualValue})`;
     switch (node.kind) {
       case 'string':
-        return `try ((${raw} as? String) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "String"))`;
+        return `try ((${raw} as? String) ?? ${decodeFailure('String')})`;
       case 'number':
-        return `try ((${raw} as? Double) ?? Double(try ((${raw} as? Int) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Double"))))`;
+        return `try ((${raw} as? Double) ?? Double(try ((${raw} as? Int) ?? ${decodeFailure('Double')})))`;
       case 'boolean':
-        return `try ((${raw} as? Bool) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Bool"))`;
+        return `try ((${raw} as? Bool) ?? ${decodeFailure('Bool')})`;
       case 'json':
         return raw;
       case 'void':
@@ -177,53 +191,63 @@ export class SwiftCodecWalker {
       case 'optional':
       case 'nullable': {
         const inner = (node as OptionalNode | NullableNode).inner;
-        return `${raw} == nil ? nil : ${this.decodeExpr(raw, inner, ctxName, fieldName)}`;
+        return `${raw} == nil ? nil : ${this.decodeExprAtPath(raw, inner, ctxName, pathExpr)}`;
       }
 
       case 'literals': {
         const typeName = this.typeName(node, ctxName);
-        return `try (${typeName}(rawValue: (${raw} as? String) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "${typeName}")) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "${typeName}"))`;
+        return `try (${typeName}(rawValue: (${raw} as? String) ?? ${decodeFailure(typeName)}) ?? ${decodeFailure(typeName)})`;
       }
 
       case 'array': {
         const item = (node as ArrayNode).item;
         const itemCtx = `${ctxName}Item`;
-        const itemExpr = this.decodeExpr('$0', item, itemCtx, fieldName);
-        return `try ((${raw} as? [Any?]) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Array")).map { ${itemExpr} }`;
+        const itemExpr = this.decodeExprAtPath(
+          'item',
+          item,
+          itemCtx,
+          `(${pathExpr}) + "[\\(index)]"`,
+        );
+        return `try ((${raw} as? [Any?]) ?? ${decodeFailure('Array')}).enumerated().map { index, item in ${itemExpr} }`;
       }
 
       case 'record': {
         const value = (node as RecordNode).value;
         const valueCtx = `${ctxName}Value`;
-        const valExpr = this.decodeExpr('$0.value', value, valueCtx, fieldName);
-        const mapExpr = `try ((${raw} as? [String: Any?]) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Dictionary")).map { ($0.key, ${valExpr}) }`;
+        const valExpr = this.decodeExprAtPath(
+          'entry.value',
+          value,
+          valueCtx,
+          `(${pathExpr}) + "." + entry.key`,
+        );
+        const mapExpr = `try ((${raw} as? [String: Any?]) ?? ${decodeFailure('Dictionary')}).map { entry in (entry.key, ${valExpr}) }`;
         return `Dictionary(uniqueKeysWithValues: ${mapExpr})`;
       }
 
       case 'int64':
-        return `try Int64((${raw} as? String) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Int64")) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Int64")`;
+        return `try Int64((${raw} as? String) ?? ${decodeFailure('Int64')}) ?? ${decodeFailure('Int64')}`;
 
       case 'date':
-        return `try Date(timeIntervalSince1970: Double((${raw} as? Int64) ?? Int64(try ((${raw} as? Double) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Date")))) / 1000.0)`;
+        return `try Date(timeIntervalSince1970: Double((${raw} as? Int64) ?? Int64(try ((${raw} as? Double) ?? ${decodeFailure('Date')}))) / 1000.0)`;
 
       case 'binary':
-        return `try (Data(base64Encoded: try ((${raw} as? String) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Data"))) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "Data"))`;
+        return `try (Data(base64Encoded: try ((${raw} as? String) ?? ${decodeFailure('Data')})) ?? ${decodeFailure('Data')})`;
 
       case 'enum': {
         const typeName = this.typeName(node, ctxName);
-        return `try (${typeName}(rawValue: Int(try ((${raw} as? NSNumber) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "${typeName}")))) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "${typeName}"))`;
+        return `try (${typeName}(rawValue: Int(try ((${raw} as? NSNumber) ?? ${decodeFailure(typeName)}))) ?? ${decodeFailure(typeName)})`;
       }
 
       case 'object':
       case 'union':
       case 'oneOf': {
         const typeName = this.registerComposite(node, ctxName);
-        return `try ${this.className}Codecs.decode${typeName}(try ((${raw} as? [String: Any?]) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "${typeName}")))`;
+        return `try ${this.className}Codecs.decode${typeName}(try ((${raw} as? [String: Any?]) ?? ${decodeFailure(typeName)}), path: ${pathExpr})`;
       }
 
       case 'tuple': {
         const typeName = this.registerComposite(node, ctxName);
-        return `try ${this.className}Codecs.decode${typeName}(try ((${raw} as? [Any?]) ?? bridgeKitThrow(field: ${fieldLit}, expectedType: "${typeName}")))`;
+        return `try ${this.className}Codecs.decode${typeName}(try ((${raw} as? [Any?]) ?? ${decodeFailure(typeName)}), path: ${pathExpr})`;
       }
 
       default:
@@ -280,7 +304,7 @@ export class SwiftCodecWalker {
     encodeLines.push(`}`);
 
     decodeLines.push(
-      `static func decode${dataClassName}(_ raw: [String: Any?]) throws -> ${dataClassName} {`,
+      `static func decode${dataClassName}(_ raw: [String: Any?], path: String = "") throws -> ${dataClassName} {`,
     );
     decodeLines.push(`    return ${dataClassName}(`);
     const fieldDecodes: string[] = [];
@@ -289,10 +313,11 @@ export class SwiftCodecWalker {
       const inner = isNullable ? (fieldSchema as OptionalNode | NullableNode).inner : fieldSchema;
       const fieldCtx = dataClassName + toPascalCase(fieldName);
       const rawExpr = `raw[${swiftStringLiteral(fieldName)}] as Any?`;
+      const fieldPath = `path.isEmpty ? ${swiftStringLiteral(fieldName)} : path + ${swiftStringLiteral(`.${fieldName}`)}`;
       const escapedParamName = escapeSwiftIdentifier(fieldName);
       const decodeCall = isNullable
-        ? `raw[${swiftStringLiteral(fieldName)}] == nil ? nil : (${this.decodeExpr(rawExpr, inner, fieldCtx, fieldName)})`
-        : this.decodeExpr(rawExpr, inner, fieldCtx, fieldName);
+        ? `raw[${swiftStringLiteral(fieldName)}] == nil ? nil : (${this.decodeExprAtPath(rawExpr, inner, fieldCtx, fieldPath)})`
+        : this.decodeExprAtPath(rawExpr, inner, fieldCtx, fieldPath);
       fieldDecodes.push(`        ${escapedParamName}: ${decodeCall}`);
     }
     decodeLines.push(fieldDecodes.join(',\n'));
@@ -335,7 +360,7 @@ export class SwiftCodecWalker {
     encodeLines.push(`}`);
 
     decodeLines.push(
-      `static func decode${enumName}(_ raw: [String: Any?]) throws -> ${enumName} {`,
+      `static func decode${enumName}(_ raw: [String: Any?], path: String = "") throws -> ${enumName} {`,
     );
     decodeLines.push(
       `    let disc = raw[${swiftStringLiteral(node.discriminant)}] as? String ?? ""`,
@@ -350,9 +375,10 @@ export class SwiftCodecWalker {
           const inner = isNullable ? (fs as OptionalNode | NullableNode).inner : fs;
           const fieldCtx = enumName + toPascalCase(variantName) + toPascalCase(f);
           const rawExpr = `raw[${swiftStringLiteral(f)}] as Any?`;
+          const fieldPath = `path.isEmpty ? ${swiftStringLiteral(f)} : path + ${swiftStringLiteral(`.${f}`)}`;
           const decodeCall = isNullable
-            ? `raw[${swiftStringLiteral(f)}] == nil ? nil : (${this.decodeExpr(rawExpr, inner, fieldCtx, f)})`
-            : this.decodeExpr(rawExpr, inner, fieldCtx, f);
+            ? `raw[${swiftStringLiteral(f)}] == nil ? nil : (${this.decodeExprAtPath(rawExpr, inner, fieldCtx, fieldPath)})`
+            : this.decodeExprAtPath(rawExpr, inner, fieldCtx, fieldPath);
           return `${escapeSwiftIdentifier(f)}: ${decodeCall}`;
         });
         decodeLines.push(
@@ -365,7 +391,7 @@ export class SwiftCodecWalker {
       }
     }
     decodeLines.push(
-      `    default: throw BridgeKitDecodeError(field: ${swiftStringLiteral(node.discriminant)}, expectedType: "${enumName}")`,
+      `    default: throw BridgeKitDecodeError(path: path.isEmpty ? ${swiftStringLiteral(node.discriminant)} : path + ${swiftStringLiteral(`.${node.discriminant}`)}, expectedType: "${enumName}", actualValue: raw[${swiftStringLiteral(node.discriminant)}] as Any?)`,
     );
     decodeLines.push(`    }`);
     decodeLines.push(`}`);
@@ -388,13 +414,16 @@ export class SwiftCodecWalker {
     encodeLines.push(`    ]`);
     encodeLines.push(`}`);
 
-    decodeLines.push(`static func decode${typeName}(_ raw: [Any?]) throws -> ${typeName} {`);
     decodeLines.push(
-      `    guard raw.count >= ${node.items.length} else { throw BridgeKitDecodeError(field: "tuple", expectedType: "${typeName}") }`,
+      `static func decode${typeName}(_ raw: [Any?], path: String = "") throws -> ${typeName} {`,
+    );
+    decodeLines.push(
+      `    guard raw.count >= ${node.items.length} else { throw BridgeKitDecodeError(path: path.isEmpty ? "tuple" : path, expectedType: "${typeName}", actualValue: raw) }`,
     );
     const ctorArgs = node.items.map((item, i) => {
       const itemCtx = `${typeName}V${i}`;
-      return `    let v${i} = ${this.decodeExpr(`raw[${i}]`, item, itemCtx, `v${i}`)}`;
+      const itemPath = `path.isEmpty ? "[${i}]" : path + "[${i}]"`;
+      return `    let v${i} = ${this.decodeExprAtPath(`raw[${i}]`, item, itemCtx, itemPath)}`;
     });
     for (const arg of ctorArgs) decodeLines.push(arg);
     const argList = node.items.map((_, i) => `v${i}: v${i}`).join(', ');
@@ -427,21 +456,22 @@ export class SwiftCodecWalker {
     encodeLines.push(`}`);
 
     decodeLines.push(
-      `static func decode${typeName}(_ raw: [String: Any?]) throws -> ${typeName} {`,
+      `static func decode${typeName}(_ raw: [String: Any?], path: String = "") throws -> ${typeName} {`,
     );
     decodeLines.push(
-      `    guard let tag = raw["@t"] as? String else { throw BridgeKitDecodeError(field: "@t", expectedType: "${typeName}") }`,
+      `    guard let tag = raw["@t"] as? String else { throw BridgeKitDecodeError(path: path.isEmpty ? "@t" : path + ".@t", expectedType: "${typeName}", actualValue: raw["@t"] as Any?) }`,
     );
     decodeLines.push(`    let v = raw["@v"] as Any?`);
     decodeLines.push(`    switch tag {`);
     for (let i = 0; i < node.options.length; i++) {
       const opt = node.options[i];
       const optCtx = `${typeName}Opt${i}`;
-      const decodeV = this.decodeExpr('v', opt, optCtx, `opt${i}`);
+      const optPath = `path.isEmpty ? "opt${i}" : path + ".opt${i}"`;
+      const decodeV = this.decodeExprAtPath('v', opt, optCtx, optPath);
       decodeLines.push(`    case ${swiftStringLiteral(tags[i])}: return .opt${i}(${decodeV})`);
     }
     decodeLines.push(
-      `    default: throw BridgeKitDecodeError(field: "@t=\\(tag)", expectedType: "${typeName}")`,
+      `    default: throw BridgeKitDecodeError(path: path.isEmpty ? "@t" : path + ".@t", expectedType: "${typeName}", actualValue: tag)`,
     );
     decodeLines.push(`    }`);
     decodeLines.push(`}`);

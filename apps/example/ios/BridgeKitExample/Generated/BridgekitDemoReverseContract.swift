@@ -44,9 +44,9 @@ private enum BridgekitDemoReverseCodecs {
         return map
     }
 
-    static func decodeGreetFromJsParams(_ raw: [String: Any?]) throws -> GreetFromJsParams {
+    static func decodeGreetFromJsParams(_ raw: [String: Any?], path: String = "") throws -> GreetFromJsParams {
         return GreetFromJsParams(
-            name: try ((raw["name"] as Any? as? String) ?? bridgeKitThrow(field: "name", expectedType: "String"))
+            name: try ((raw["name"] as Any? as? String) ?? bridgeKitThrow(path: path.isEmpty ? "name" : path + ".name", expectedType: "String", actualValue: raw["name"] as Any?))
         )
     }
 
@@ -57,9 +57,9 @@ private enum BridgekitDemoReverseCodecs {
         return map
     }
 
-    static func decodeOnNativeEventParams(_ raw: [String: Any?]) throws -> OnNativeEventParams {
+    static func decodeOnNativeEventParams(_ raw: [String: Any?], path: String = "") throws -> OnNativeEventParams {
         return OnNativeEventParams(
-            type: try ((raw["type"] as Any? as? String) ?? bridgeKitThrow(field: "type", expectedType: "String")),
+            type: try ((raw["type"] as Any? as? String) ?? bridgeKitThrow(path: path.isEmpty ? "type" : path + ".type", expectedType: "String", actualValue: raw["type"] as Any?)),
             payload: raw["payload"] == nil ? nil : (raw["payload"] as Any?)
         )
     }
@@ -137,21 +137,24 @@ private class BridgekitDemoReverseOutboundClient: BridgekitDemoReverseClient {
     init(caller: OutboundCaller) { self.caller = caller }
     func greetFromJs(_ params: GreetFromJsParams) async throws -> String {
         let result = try await caller.invoke(member: "greetFromJs", payload: BridgekitDemoReverseCodecs.encodeGreetFromJsParams(params))
-        return result as! String
+        return try ((result as? String) ?? bridgeKitThrow(path: "result", expectedType: "String", actualValue: result))
     }
     func onNativeEvent(_ params: OnNativeEventParams) {
         caller.fire(member: "onNativeEvent", payload: BridgekitDemoReverseCodecs.encodeOnNativeEventParams(params))
     }
     func jsCounter() -> AsyncStream<Double> {
         let throwing = caller.stream(member: "jsCounter", payload: nil)
-        return AsyncStream { cont in Task { do { for try await item in throwing { cont.yield(try ((item as? Double) ?? Double(try ((item as? Int) ?? bridgeKitThrow(field: "jsCounter.value", expectedType: "Double"))))) } } catch {} ; cont.finish() } }
+        return AsyncStream { cont in Task { do { for try await item in throwing { cont.yield(try ((item as? Double) ?? Double(try ((item as? Int) ?? bridgeKitThrow(path: "jsCounter.value", expectedType: "Double", actualValue: item))))) } } catch { bridgeKitReportDecodeError(error, context: "stream.jsCounter"); cont.finish() } } }
     }
     var jsStatus: AsyncStream<BridgeValue<String>> {
         let source = caller.state(member: "jsStatus")
         return AsyncStream { cont in
             let pump = Task {
                 for await bv in source {
-                    cont.yield(bv.remap { (value: Any?) -> String? in try? (try ((value as? String) ?? bridgeKitThrow(field: "jsStatus.value", expectedType: "String"))) })
+                    cont.yield(bv.remap { (value: Any?) -> String? in
+                        do { return try ((value as? String) ?? bridgeKitThrow(path: "jsStatus.value", expectedType: "String", actualValue: value)) }
+                        catch { bridgeKitReportDecodeError(error, context: "state.jsStatus"); return nil }
+                    })
                 }
                 cont.finish()
             }

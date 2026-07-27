@@ -709,7 +709,9 @@ internal final class Router {
 
     private func isFinalClosed(contractId: String, scope: Scope) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        candidateScopes(scope).contains { candidate in
+        // Explicit return: the lock/defer statements make this a multi-statement
+        // body, so Swift's single-expression implicit return does not apply.
+        return candidateScopes(scope).contains { candidate in
             finalClosedBindings.contains(bindingKey(contractId: contractId, scope: candidate))
         }
     }
@@ -727,7 +729,9 @@ internal final class Router {
 
     private func readinessDelta(op: String, contractId: String, scope: Scope, epoch: Int64) -> [String: Any?] {
         readinessSeq += 1
-        [
+        // Explicit annotation: the literal is heterogeneous (String, map, Int64),
+        // and Swift will not infer [String: Any?] from the return type alone.
+        let delta: [String: Any?] = [
             "op": op,
             "contractId": contractId,
             "scope": Self.scopeToEnvMap(scope),
@@ -736,6 +740,7 @@ internal final class Router {
             "member": "",
             "correlationId": ""
         ]
+        return delta
     }
 
     private func contractId(fromProvidedKey key: String) -> String {

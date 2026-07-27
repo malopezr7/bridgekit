@@ -53,10 +53,10 @@ private enum BridgekitDemoHostCodecs {
         return map
     }
 
-    static func decodePingResult(_ raw: [String: Any?]) throws -> PingResult {
+    static func decodePingResult(_ raw: [String: Any?], path: String = "") throws -> PingResult {
         return PingResult(
-            reply: try ((raw["reply"] as Any? as? String) ?? bridgeKitThrow(field: "reply", expectedType: "String")),
-            epoch: try ((raw["epoch"] as Any? as? Double) ?? Double(try ((raw["epoch"] as Any? as? Int) ?? bridgeKitThrow(field: "epoch", expectedType: "Double"))))
+            reply: try ((raw["reply"] as Any? as? String) ?? bridgeKitThrow(path: path.isEmpty ? "reply" : path + ".reply", expectedType: "String", actualValue: raw["reply"] as Any?)),
+            epoch: try ((raw["epoch"] as Any? as? Double) ?? Double(try ((raw["epoch"] as Any? as? Int) ?? bridgeKitThrow(path: path.isEmpty ? "epoch" : path + ".epoch", expectedType: "Double", actualValue: raw["epoch"] as Any?))))
         )
     }
 
@@ -66,9 +66,9 @@ private enum BridgekitDemoHostCodecs {
         return map
     }
 
-    static func decodePingParams(_ raw: [String: Any?]) throws -> PingParams {
+    static func decodePingParams(_ raw: [String: Any?], path: String = "") throws -> PingParams {
         return PingParams(
-            message: try ((raw["message"] as Any? as? String) ?? bridgeKitThrow(field: "message", expectedType: "String"))
+            message: try ((raw["message"] as Any? as? String) ?? bridgeKitThrow(path: path.isEmpty ? "message" : path + ".message", expectedType: "String", actualValue: raw["message"] as Any?))
         )
     }
 
@@ -78,9 +78,9 @@ private enum BridgekitDemoHostCodecs {
         return map
     }
 
-    static func decodeSayParams(_ raw: [String: Any?]) throws -> SayParams {
+    static func decodeSayParams(_ raw: [String: Any?], path: String = "") throws -> SayParams {
         return SayParams(
-            text: try ((raw["text"] as Any? as? String) ?? bridgeKitThrow(field: "text", expectedType: "String"))
+            text: try ((raw["text"] as Any? as? String) ?? bridgeKitThrow(path: path.isEmpty ? "text" : path + ".text", expectedType: "String", actualValue: raw["text"] as Any?))
         )
     }
 
@@ -164,29 +164,32 @@ private class BridgekitDemoHostOutboundClient: BridgekitDemoHostClient {
     init(caller: OutboundCaller) { self.caller = caller }
     func ping(_ params: PingParams) async throws -> PingResult {
         let result = try await caller.invoke(member: "ping", payload: BridgekitDemoHostCodecs.encodePingParams(params))
-        return try BridgekitDemoHostCodecs.decodePingResult(result as! [String: Any?])
+        return try BridgekitDemoHostCodecs.decodePingResult(try ((result as? [String: Any?]) ?? bridgeKitThrow(path: "result", expectedType: "PingResult", actualValue: result)), path: "result")
     }
     func increment() async throws -> Double {
         let result = try await caller.invoke(member: "increment", payload: nil)
-        return result as! Double
+        return try ((result as? Double) ?? Double(try ((result as? Int) ?? bridgeKitThrow(path: "result", expectedType: "Double", actualValue: result))))
     }
     func say(_ params: SayParams) {
         caller.fire(member: "say", payload: BridgekitDemoHostCodecs.encodeSayParams(params))
     }
     func ticker() -> AsyncStream<Double> {
         let throwing = caller.stream(member: "ticker", payload: nil)
-        return AsyncStream { cont in Task { do { for try await item in throwing { cont.yield(try ((item as? Double) ?? Double(try ((item as? Int) ?? bridgeKitThrow(field: "ticker.value", expectedType: "Double"))))) } } catch {} ; cont.finish() } }
+        return AsyncStream { cont in Task { do { for try await item in throwing { cont.yield(try ((item as? Double) ?? Double(try ((item as? Int) ?? bridgeKitThrow(path: "ticker.value", expectedType: "Double", actualValue: item))))) } } catch { bridgeKitReportDecodeError(error, context: "stream.ticker"); cont.finish() } } }
     }
     func echoes() -> AsyncStream<String> {
         let throwing = caller.stream(member: "echoes", payload: nil)
-        return AsyncStream { cont in Task { do { for try await item in throwing { cont.yield(try ((item as? String) ?? bridgeKitThrow(field: "echoes.value", expectedType: "String"))) } } catch {} ; cont.finish() } }
+        return AsyncStream { cont in Task { do { for try await item in throwing { cont.yield(try ((item as? String) ?? bridgeKitThrow(path: "echoes.value", expectedType: "String", actualValue: item))) } } catch { bridgeKitReportDecodeError(error, context: "stream.echoes"); cont.finish() } } }
     }
     var counter: AsyncStream<BridgeValue<Double>> {
         let source = caller.state(member: "counter")
         return AsyncStream { cont in
             let pump = Task {
                 for await bv in source {
-                    cont.yield(bv.remap { (value: Any?) -> Double? in try? (try ((value as? Double) ?? Double(try ((value as? Int) ?? bridgeKitThrow(field: "counter.value", expectedType: "Double"))))) })
+                    cont.yield(bv.remap { (value: Any?) -> Double? in
+                        do { return try ((value as? Double) ?? Double(try ((value as? Int) ?? bridgeKitThrow(path: "counter.value", expectedType: "Double", actualValue: value)))) }
+                        catch { bridgeKitReportDecodeError(error, context: "state.counter"); return nil }
+                    })
                 }
                 cont.finish()
             }
