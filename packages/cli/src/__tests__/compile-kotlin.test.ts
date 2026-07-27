@@ -13,6 +13,12 @@ const stateRuntimeFixturesDir = path.join(generatedRoot, 'kotlin-state-runtime')
 const androidRoot = path.join(repoRoot, 'apps/example/android');
 const fixturesDir = path.join(cliRoot, 'src/__tests__/fixtures');
 
+// The negative compiler gate is opt-in because it shells out to Gradle. It must
+// report as SKIPPED rather than passing: an early `return` inside the test body
+// made an unset env var look like a green compiler proof, so any runner that
+// dropped the variable silently downgraded the gate to a no-op.
+const itWithKotlinNegativeGate = process.env.BRIDGEKIT_RUN_KOTLIN_NEGATIVE === '1' ? it : it.skip;
+
 function ensureBuiltCli(): void {
   if (!existsSync(cliEntry)) {
     throw new Error(
@@ -210,29 +216,25 @@ describe('Kotlin real compiler harness', () => {
     expect(existsSync(path.join(futureRedFixturesDir, 'CompileKeywordsContract.kt'))).toBe(true);
   });
 
-  it('proves a deliberately malformed baseline fails Gradle for a compiler reason', () => {
-    if (process.env.BRIDGEKIT_RUN_KOTLIN_NEGATIVE !== '1') {
-      console.warn(
-        'Skipping Kotlin known-bad compiler fixture gate. Set BRIDGEKIT_RUN_KOTLIN_NEGATIVE=1 to run it.',
+  itWithKotlinNegativeGate(
+    'proves a deliberately malformed baseline fails Gradle for a compiler reason',
+    () => {
+      rmSync(knownBadFixturesDir, { recursive: true, force: true });
+      const packageDir = path.join(knownBadFixturesDir, 'com/bridgekit/generated/fixtures');
+      mkdirSync(packageDir, { recursive: true });
+      writeFileSync(
+        path.join(packageDir, 'KnownBad.kt'),
+        'package com.bridgekit.generated.fixtures\n\nfun knownBad(): String = 42\n',
+        'utf8',
       );
-      return;
-    }
 
-    rmSync(knownBadFixturesDir, { recursive: true, force: true });
-    const packageDir = path.join(knownBadFixturesDir, 'com/bridgekit/generated/fixtures');
-    mkdirSync(packageDir, { recursive: true });
-    writeFileSync(
-      path.join(packageDir, 'KnownBad.kt'),
-      'package com.bridgekit.generated.fixtures\n\nfun knownBad(): String = 42\n',
-      'utf8',
-    );
+      const result = runGradleCompile(knownBadFixturesDir);
+      const output = `${result.stdout}\n${result.stderr}`;
 
-    const result = runGradleCompile(knownBadFixturesDir);
-    const output = `${result.stdout}\n${result.stderr}`;
-
-    expect(result.status).not.toBe(0);
-    expect(output).toMatch(/Compilation error|type mismatch|compileDebugKotlin/);
-  });
+      expect(result.status).not.toBe(0);
+      expect(output).toMatch(/Compilation error|type mismatch|compileDebugKotlin/);
+    },
+  );
 
   it('runs CLI-02 Kotlin state provider encode and caller decode round-trip', () => {
     generateKotlin(

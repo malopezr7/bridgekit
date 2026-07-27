@@ -117,22 +117,23 @@ function swiftcExecutable(sourcePath: string, outputPath: string) {
   });
 }
 
+// Inlined verbatim into the harness stubs below. A hand-written copy of this
+// surface silently drifted once: the emitter moved to
+// bridgeKitThrow(path:expectedType:actualValue:) and bridgeKitReportDecodeError
+// while the stub still declared only the field: overload, so the harness
+// typechecked generated code against an API the runtime no longer matched.
+// Reading the shipped source makes that class of drift impossible.
+const decodeErrorSourcePath = path.join(
+  repoRoot,
+  'packages/core/ios/runtime/BridgeKitDecodeError.swift',
+);
+
 function swiftBridgeKitStubs(): string {
+  const decodeErrorSource = readFileSync(decodeErrorSourcePath, 'utf8');
   return `
 import Foundation
 
-public struct BridgeKitDecodeError: Error {
-    public let field: String
-    public let expectedType: String
-    public init(field: String, expectedType: String) {
-        self.field = field
-        self.expectedType = expectedType
-    }
-}
-
-public func bridgeKitThrow<T>(field: String, expectedType: String) throws -> T {
-    throw BridgeKitDecodeError(field: field, expectedType: expectedType)
-}
+${decodeErrorSource}
 
 public enum BridgeValue<T> {
     case available(T)
