@@ -36,8 +36,17 @@ env:
   NODE_VERSION: 22.15.0
 
 jobs:
+  # The full xcframework archive is too slow for pull requests, so this is where
+  # it is mandatory: a release must never ship a facade nobody rebuilt.
+  ios-facade:
+    if: startsWith(github.ref_name, 'core-v') || startsWith(inputs.tag, 'core-v')
+    uses: ./.github/workflows/ios-facade.yml
+
   release:
     name: Publish
+    needs: [ios-facade]
+    # `needs` on a conditional job would otherwise skip the release for cli-v tags.
+    if: always() && needs.ios-facade.result != 'failure' && needs.ios-facade.result != 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

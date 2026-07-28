@@ -171,7 +171,7 @@ jobs:
         run: ./gradlew --continue :app:compileDebugKotlin :malopezr7_bridgekit:testDebugUnitTest --rerun -PbridgekitGeneratedFixturesDir=${{ github.workspace }}/packages/cli/build/generated-fixtures/kotlin-good
 
   swift:
-    name: CLI Swift compiler harness
+    name: Swift checks
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -194,6 +194,30 @@ jobs:
         run: pnpm --filter @malopezr7/bridgekit-cli build
 
       # Only the Darwin-gated Swift harness runs here; the rest of the CLI
-      # suite is covered by the jvm job on Ubuntu.
+      # suite is covered by the jvm job on Ubuntu. This also doubles as the
+      # facade-staleness gate: it typechecks generated Swift against the
+      # committed packages/core/ios-facade, so a facade missing a symbol the
+      # emitter now calls fails here in under a minute. That is exactly how the
+      # S5 skew surfaced.
       - name: Run Swift compiler harness
         run: pnpm --filter @malopezr7/bridgekit-cli exec jest --config ./jest.config.cjs compile-swift.test.ts
+
+      # Two seconds of swiftc, and the only thing in CI that compiles the iOS
+      # runtime. While nothing did, two blocking errors sat on main for 23 days:
+      # Router.isFinalClosed had never compiled in its life.
+      #
+      # The engine is pure Swift — only AnyMapCodec and ios/nitro/* import
+      # NitroModules — so it typechecks standalone against the iOS SDK with no
+      # pods, no Xcode project and no React Native. Those four files are covered
+      # by the full archive in ios-facade.yml.
+      - name: Typecheck iOS engine
+        run: |
+          set -euo pipefail
+          files="$(find packages/core/ios -name '*.swift' \
+            -not -path '*__tests__*' -not -path '*/nitro/*' -not -name 'AnyMapCodec.swift' | sort)"
+          echo "$files" | sed 's/^/  /'
+          # shellcheck disable=SC2086
+          swiftc -typecheck \
+            -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
+            -target arm64-apple-ios15.1-simulator \
+            $files

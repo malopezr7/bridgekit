@@ -19,8 +19,15 @@ node_modules/
 **/.xcode.env.local
 **/*.hmap
 
-# iOS xcframework build project (distributable facade is committed under packages/core/ios-facade/)
-packages/core/ios-xcframework/
+# iOS xcframework build workspace. The hand-authored inputs (Podfile, umbrella
+# header, build host, privacy manifest) ARE committed: ignoring the whole
+# directory made the facade rebuildable only on the maintainer's machine, so
+# ios-facade.yml could never run from a clean clone and facade drift shipped
+# silently. Only generated output is ignored below.
+packages/core/ios-xcframework/build/
+packages/core/ios-xcframework/NitroPrivateHeaders/
+packages/core/ios-xcframework/BridgeKitXCFramework.xcodeproj/
+packages/core/ios-xcframework/BridgeKitXCFramework.xcworkspace/
 
 # local agent config
 .atl/

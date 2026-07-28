@@ -7,14 +7,56 @@ name: iOS Facade
 # workflow rebuilds it on a Mac and fails if the committed copy is stale or leaks
 # C++ — so a source change can never ship with a divergent facade.
 
-# KNOWN DEBT (WS-9): this workflow cannot run from a clean clone — the entire
-# packages/core/ios-xcframework/ directory (including its Podfile) is gitignored,
-# so `pod install` fails on CI. Until the iOS distribution overhaul (WS-9) makes
-# the facade build hermetic, this guard is manual-only: run it locally on a Mac
-# with the ios-xcframework/ workspace present, or via workflow_dispatch on a
-# runner provisioned with the workspace.
+# This is also the ONLY job that compiles packages/core/ios at all. While it was
+# manual-only, two blocking Swift compile errors survived 23 days on main
+# (Router.isFinalClosed had never compiled), because nothing else builds the iOS
+# runtime. That alone justifies the runner time.
+#
+# Previously workflow_dispatch-only: the whole ios-xcframework/ workspace was
+# gitignored, so `pod install` could not run from a clean clone. The hand-authored
+# inputs (Podfile, Podfile.lock, umbrella header, build host, privacy manifest)
+# are committed now, so this runs on PRs that touch anything the facade is built
+# from.
+# DELIBERATELY NOT ON PULL REQUESTS.
+#
+# This job archives React Native twice under library-evolution to produce a
+# framework whose public interface is 126 lines of pure Swift. It takes ~30
+# minutes. Putting that on every iOS pull request would make contributing
+# miserable, which is the opposite of what BridgeKit exists for.
+#
+# The two failure modes it protects against are already covered on PRs, cheaply,
+# by the `swift` job in ci-baseline.yml:
+#   - "does packages/core/ios compile?"  -> swiftc -typecheck of the engine (~2s)
+#   - "is the committed facade stale?"   -> compile-swift.test.ts typechecks
+#     generated Swift against packages/core/ios-facade (~48s), which is precisely
+#     how the S5 facade skew was caught.
+#
+# What only the full archive can prove — that the xcframework links, that the
+# plain-Swift SPM binaryTarget consumer builds, and that the regenerated facade
+# is byte-identical — is checked where it actually matters: on main, on release
+# tags, and on demand.
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/core/ios/**'
+      - 'packages/core/ios-facade/**'
+      - 'packages/core/ios-xcframework/**'
+      - 'packages/core/nitrogen/generated/ios/**'
+      - 'packages/core/nitro.json'
+      - 'packages/core/BridgeKit.podspec'
+      - 'packages/core/scripts/build-ios-xcframework.sh'
+      - 'packages/core/scripts/create-ios-xcframework-project.rb'
+      - 'packages/core/scripts/patch-nitrogen-namespaces.js'
+      - '.github/workflows/ios-facade.yml'
+  # release.yml calls this before publishing, so a release can never ship an
+  # unverified facade even though tags do not trigger it directly.
+  workflow_call:
   workflow_dispatch:
+
+concurrency:
+  group: ios-facade-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   ios-facade:
@@ -37,10 +79,21 @@ jobs:
       - name: Build BridgeKit.xcframework + extract facade
         run: ./packages/core/scripts/build-ios-xcframework.sh
 
+      - name: Report toolchain
+        run: |
+          xcodebuild -version
+          swiftc --version
+
       - name: Verify committed ios-facade is up to date
         run: |
           if ! git diff --quiet -- packages/core/ios-facade; then
-            echo "::error::packages/core/ios-facade is STALE. Re-run packages/core/scripts/build-ios-xcframework.sh and commit packages/core/ios-facade/."
+            echo "::error::packages/core/ios-facade is STALE."
+            echo "Either the iOS Swift source changed without regenerating the facade —"
+            echo "run packages/core/scripts/build-ios-xcframework.sh and commit"
+            echo "packages/core/ios-facade/ — or this runner's Xcode differs from the one"
+            echo "that generated the committed copy. .swiftinterface is compiler-generated,"
+            echo "so a toolchain bump alone can move it. Compare the versions printed above"
+            echo "against the diff before assuming a source drift."
             git --no-pager diff --stat -- packages/core/ios-facade
             exit 1
           fi

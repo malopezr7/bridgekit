@@ -1,0 +1,47 @@
+# Minimal CocoaPods graph used only to archive BridgeKit.xcframework.
+# Resolve RN/Nitro through node so pnpm's hoisted node_modules layout works.
+require Pod::Executable.execute_command('node', ['-p',
+  'require.resolve(
+    "react-native/scripts/react_native_pods.rb",
+    {paths: [process.argv[1]]},
+  )', File.expand_path('..', __dir__)]).strip
+require 'pathname'
+
+platform :ios, min_ios_version_supported
+install! 'cocoapods', :deterministic_uuids => false
+
+prepare_react_native_project!
+use_frameworks! :linkage => :static
+
+podfile_dir = Pathname.new(__dir__)
+react_native_abs = File.dirname(Pod::Executable.execute_command('node', ['-p',
+  'require.resolve("react-native/package.json", {paths: [process.argv[1]]})',
+  File.expand_path('..', __dir__)]).strip)
+react_native_path = Pathname.new(react_native_abs).relative_path_from(podfile_dir).to_s
+
+nitro_modules_abs = File.dirname(Pod::Executable.execute_command('node', ['-p',
+  'require.resolve("react-native-nitro-modules/package.json", {paths: [process.argv[1]]})',
+  File.expand_path('..', __dir__)]).strip)
+nitro_modules_path = Pathname.new(nitro_modules_abs).relative_path_from(podfile_dir).to_s
+
+target 'BridgeKitBuildHost' do
+  use_react_native!(
+    :path => react_native_path,
+    :app_path => File.expand_path('..', __dir__),
+    :hermes_enabled => true
+  )
+
+  pod 'NitroModules', :path => nitro_modules_path
+
+  target 'BridgeKit' do
+    inherit! :complete
+  end
+
+  post_install do |installer|
+    react_native_post_install(
+      installer,
+      react_native_path,
+      :mac_catalyst_enabled => false,
+    )
+  end
+end
