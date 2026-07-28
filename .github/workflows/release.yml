@@ -1,0 +1,157 @@
+name: Release
+
+# Tag-driven publish. The tag is the single source of truth for what ships:
+# `core-vX.Y.Z` publishes packages/core, `cli-vX.Y.Z` publishes packages/cli.
+#
+# This workflow exists because the first betas were published by hand from a
+# working tree whose package.json version was never committed, leaving published
+# artifacts that cannot be traced to any commit. Every gate below is aimed at
+# making that impossible to repeat:
+#   - the tag must match the package.json version exactly;
+#   - the version must not already exist on npm;
+#   - the CHANGELOG must document the version;
+#   - prereleases never move the `latest` dist-tag.
+
+on:
+  push:
+    tags:
+      - 'core-v*'
+      - 'cli-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release (e.g. core-v0.1.0-alpha.1)'
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # npm provenance
+
+env:
+  NODE_VERSION: 22.15.0
+
+jobs:
+  release:
+    name: Publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve package from tag
+        id: resolve
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          case "$tag" in
+            core-v*) pkg_dir=packages/core; pkg_name='@malopezr7/bridgekit'; version="${tag#core-v}" ;;
+            cli-v*)  pkg_dir=packages/cli;  pkg_name='@malopezr7/bridgekit-cli'; version="${tag#cli-v}" ;;
+            *) echo "::error::Unrecognised release tag '$tag'. Expected core-vX.Y.Z or cli-vX.Y.Z."; exit 1 ;;
+          esac
+
+          # Prereleases must never become the default install.
+          case "$version" in
+            *-alpha.*) dist_tag=alpha ;;
+            *-beta.*)  dist_tag=beta ;;
+            *-rc.*)    dist_tag=rc ;;
+            *-*)       dist_tag=next ;;
+            *)         dist_tag=latest ;;
+          esac
+
+          {
+            echo "pkg_dir=$pkg_dir"
+            echo "pkg_name=$pkg_name"
+            echo "version=$version"
+            echo "dist_tag=$dist_tag"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing $pkg_name@$version under dist-tag '$dist_tag'"
+
+      - name: Verify tag matches package.json version
+        run: |
+          set -euo pipefail
+          declared="$(node -p "require('./${{ steps.resolve.outputs.pkg_dir }}/package.json').version")"
+          if [ "$declared" != "${{ steps.resolve.outputs.version }}" ]; then
+            echo "::error::Tag says ${{ steps.resolve.outputs.version }} but ${{ steps.resolve.outputs.pkg_dir }}/package.json says $declared."
+            exit 1
+          fi
+
+      - name: Verify version is not already published
+        run: |
+          set -euo pipefail
+          if npm view "${{ steps.resolve.outputs.pkg_name }}@${{ steps.resolve.outputs.version }}" version >/dev/null 2>&1; then
+            echo "::error::${{ steps.resolve.outputs.pkg_name }}@${{ steps.resolve.outputs.version }} is already on npm."
+            exit 1
+          fi
+
+      - name: Verify CHANGELOG documents this version
+        run: |
+          set -euo pipefail
+          changelog="${{ steps.resolve.outputs.pkg_dir }}/CHANGELOG.md"
+          if ! grep -qF "## [${{ steps.resolve.outputs.version }}]" "$changelog"; then
+            echo "::error::$changelog has no '## [${{ steps.resolve.outputs.version }}]' entry."
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Biome check
+        run: pnpm check
+
+      - name: Build workspaces
+        run: pnpm build
+
+      - name: Typecheck workspaces
+        run: pnpm -r typecheck
+
+      - name: Run core test suites
+        run: |
+          pnpm --filter @malopezr7/bridgekit test:web
+          pnpm --filter @malopezr7/bridgekit test:native
+
+      - name: Verify generated bindings are in sync
+        run: |
+          pnpm --filter bridgekit-example generate --check
+          pnpm --filter bridgekit-example generate:ios --check
+          pnpm --filter bridgekit-example-callstack-brownfield generate --check
+          pnpm --filter bridgekit-example-callstack-brownfield generate:ios --check
+          pnpm --filter bridgekit-example-expo-brownfield generate --check
+          pnpm --filter bridgekit-example-expo-brownfield generate:ios --check
+
+      - name: Publish to npm
+        working-directory: ${{ steps.resolve.outputs.pkg_dir }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          pnpm publish \
+            --access public \
+            --tag "${{ steps.resolve.outputs.dist_tag }}" \
+            --no-git-checks \
+            --provenance
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published"
+            echo
+            echo "- Package: \`${{ steps.resolve.outputs.pkg_name }}\`"
+            echo "- Version: \`${{ steps.resolve.outputs.version }}\`"
+            echo "- dist-tag: \`${{ steps.resolve.outputs.dist_tag }}\`"
+            echo "- Commit: \`${{ github.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -9,12 +9,47 @@ Use patch and minor releases inside the tracked major for compatible BridgeKit
 fixes and features. Move to a new major when the supported React Native minor
 line changes.
 
+### Pre-stable line
+
+Before the first stable release BridgeKit ships on the `0.x` line. The current
+line is `0.1.0-alpha.N`, and it deliberately does not continue the earlier
+`0.0.1-beta.x` numbering:
+
+- The contract hash and wire format changed between the two lines with no
+  migration path, so continuing the beta numbering would imply a compatibility
+  that does not exist.
+- `alpha` after `beta` is intentional. The beta line advertised iOS/Android
+  parity that was never verified — `packages/core/ios` had no CI and did not
+  compile for 23 days. The label now matches what is actually proven.
+
+Both packages share one version. They are released together and version skew
+between them has already caused confusion once.
+
 ## Tag convention
 
 The packages are released independently with package-specific tags:
 
 - Core package: `core-vX.Y.Z`
 - CLI package: `cli-vX.Y.Z`
+
+The tag is the release trigger and the single source of truth for what ships.
+
+## dist-tag policy
+
+`.github/workflows/release.yml` derives the npm dist-tag from the version, so a
+prerelease can never become the default install:
+
+| Version contains | dist-tag |
+| ---------------- | -------- |
+| `-alpha.`        | `alpha`  |
+| `-beta.`         | `beta`   |
+| `-rc.`           | `rc`     |
+| any other `-`    | `next`   |
+| no prerelease    | `latest` |
+
+Publishing by hand bypasses this. It is how `latest` ended up pointing at
+`0.0.1-beta.0` — the oldest build ever published — while newer betas sat under
+the `beta` tag.
 
 ## Release checklist
 
@@ -46,14 +81,38 @@ The packages are released independently with package-specific tags:
 
 6. Update the relevant package `CHANGELOG.md` entries.
 7. Create the relevant package tag: `core-vX.Y.Z` or `cli-vX.Y.Z`.
-8. Publish the package to npm with public access from each package directory:
+8. Push the tag. `.github/workflows/release.yml` takes over from here.
 
-   ```sh
-   cd packages/core && pnpm publish --access public
-   cd ../cli && pnpm publish --access public
-   ```
+## Automated publish
 
-   For the core package, `pnpm pub:release` is equivalent.
+Publishing is tag-driven. Do not run `pnpm publish` by hand — every gate that
+protects release provenance lives in the workflow.
+
+```sh
+# 1. Bump the version in packages/<pkg>/package.json.
+#    For core, also update PACKAGE_VERSION in src/runtime/defaultInstance{,.native}.ts
+#    (packages/core/src/__tests__/package-version.web.test.ts enforces the match).
+# 2. Add the matching '## [X.Y.Z] - YYYY-MM-DD' section to packages/<pkg>/CHANGELOG.md.
+# 3. Commit both, then:
+git tag core-v0.1.0-alpha.1
+git push origin core-v0.1.0-alpha.1
+```
+
+The workflow refuses to publish unless all of the following hold:
+
+- the tag version matches the committed `package.json` version exactly;
+- that version does not already exist on npm;
+- the package `CHANGELOG.md` contains a `## [X.Y.Z]` heading for it;
+- Biome, build, typecheck, core web + native suites, and the six
+  `generate --check` drift gates all pass.
+
+It then publishes with npm provenance under the dist-tag derived above.
+
+`CI Baseline` carries the complementary guard: a pull request that changes
+`packages/<pkg>/src` fails if that package still declares an already-published
+version. That is the check that would have caught `packages/cli/src` drifting
+nine commits — across a wire-breaking hash change — under a frozen
+`0.0.1-beta.0`.
 
 ## Deliberate exclusions
 
