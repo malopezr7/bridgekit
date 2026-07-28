@@ -1,6 +1,6 @@
 {
   "name": "@malopezr7/bridgekit",
-  "version": "0.0.1-beta.2",
+  "version": "0.1.0-alpha.1",
   "description": "Typed bidirectional bridge between React Native and native (Android/iOS)",
   "author": "malopezr7 <malopezr7@gmail.com> (https://github.com/malopezr7)",
   "license": "MIT",

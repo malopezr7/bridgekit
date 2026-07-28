@@ -45,6 +45,30 @@ jobs:
           test -d node_modules/@react-native/gradle-plugin
           test -d node_modules/react-native
 
+      # A package whose sources changed must not still carry an already-published
+      # version: that is how packages/cli/src drifted nine commits — spanning a
+      # wire-breaking hash change — underneath a frozen 0.0.1-beta.0.
+      - name: Verify changed packages carry an unpublished version
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          git fetch --no-tags --depth=1 origin "$base"
+          failed=0
+          for dir in packages/core packages/cli; do
+            if ! git diff --quiet "$base" HEAD -- "$dir/src"; then
+              name="$(node -p "require('./$dir/package.json').name")"
+              version="$(node -p "require('./$dir/package.json').version")"
+              if npm view "$name@$version" version >/dev/null 2>&1; then
+                echo "::error file=$dir/package.json::$dir/src changed but $name@$version is already published. Bump the version."
+                failed=1
+              else
+                echo "ok: $dir/src changed, $name@$version is unpublished"
+              fi
+            fi
+          done
+          exit "$failed"
+
       - name: Run Biome check
         run: pnpm check
 
@@ -78,6 +102,15 @@ jobs:
           if grep -q "android/src/test" "$tmp/core-list.txt"; then
             exit 1
           fi
+
+          # iOS payload. Without these the whole iOS half of the package could
+          # silently vanish from a release and every job here would stay green.
+          grep -Fx "package/BridgeKit.podspec" "$tmp/core-list.txt"
+          grep -Fx "package/react-native.config.js" "$tmp/core-list.txt"
+          grep -Fx "package/nitro.json" "$tmp/core-list.txt"
+          grep -Fx "package/ios/engine/Router.swift" "$tmp/core-list.txt"
+          grep -Fx "package/nitrogen/generated/ios/BridgeKit+autolinking.rb" "$tmp/core-list.txt"
+          grep -q "package/ios-facade/.*\.swiftinterface" "$tmp/core-list.txt"
 
           cli_tarball="$(cd packages/cli && npm pack --json --pack-destination "$tmp" | node -e "const c=require('fs').readFileSync(0,'utf8');const i=c.lastIndexOf('\n[');process.stdout.write(JSON.parse(c.slice(i>=0?i+1:c.indexOf('[')))[0].filename)")"
           tar -tzf "$tmp/$cli_tarball" > "$tmp/cli-list.txt"
