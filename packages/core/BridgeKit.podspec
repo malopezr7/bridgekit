@@ -11,7 +11,9 @@ Pod::Spec.new do |s|
   s.authors      = package["author"]
 
   s.platforms    = { :ios => "15.1" }
-  s.source       = { :git => "https://github.com/malopezr7/bridgekit.git", :tag => "#{s.version}" }
+  # Release tags are package-scoped (see RELEASING.md): the core package ships as
+  # `core-vX.Y.Z`, not a bare version, so a git-sourced pod must ask for that.
+  s.source       = { :git => "https://github.com/malopezr7/bridgekit.git", :tag => "core-v#{s.version}" }
 
   s.source_files = "ios/**/*.{h,m,mm,swift}"
   s.exclude_files = "ios/__tests__/**/*"
