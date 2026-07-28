@@ -56,7 +56,10 @@ on:
 
 concurrency:
   group: ios-facade-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Superseded runs are cancelled, including on main. This job takes ~30 minutes,
+  # so consecutive merges otherwise queue half-hour macOS jobs behind each other
+  # to verify states that are already obsolete. Only the current tip matters.
+  cancel-in-progress: true
 
 jobs:
   ios-facade:
@@ -84,20 +87,52 @@ jobs:
           xcodebuild -version
           swiftc --version
 
-      - name: Verify committed ios-facade is up to date
+      # Compares the DECLARATIONS in the committed facade against the ones just
+      # built, not the bytes.
+      #
+      # A byte diff cannot work here. .swiftinterface, .swiftdoc and Info.plist
+      # are all compiler-generated, so they move whenever the toolchain does: a
+      # runner on Xcode 16.4 / Swift 6.1.2 produced a six-line diff against a
+      # facade generated with Xcode 17 / Swift 6.3.2, entirely in the
+      # `// swift-compiler-version` and `// swift-module-flags` headers. The
+      # public API was identical. Gating on bytes means the guard fails on every
+      # Xcode bump on either side, and a guard that cries wolf gets disabled.
+      #
+      # What actually matters is what consumers compile against: the declarations.
+      - name: Verify committed ios-facade declares the same API
         run: |
+          set -euo pipefail
+
+          # Drop compiler metadata headers; keep declarations.
+          normalise() { grep -vE '^// swift-(compiler-version|module-flags)' "$1" | sed '/^[[:space:]]*$/d'; }
+
+          status=0
+          while IFS= read -r built; do
+            rel="${built#./}"
+            committed="$(mktemp)"
+            if ! git show "HEAD:$rel" > "$committed" 2>/dev/null; then
+              echo "::error::$rel exists in the build but not in the commit — a new slice needs committing."
+              status=1
+              continue
+            fi
+            if ! diff -u <(normalise "$committed") <(normalise "$built") > /tmp/iface.diff; then
+              echo "::error::$rel declares a different API than the committed copy."
+              echo "The iOS Swift source changed without regenerating the facade. Run"
+              echo "packages/core/scripts/build-ios-xcframework.sh and commit packages/core/ios-facade/."
+              cat /tmp/iface.diff
+              status=1
+            fi
+          done < <(find packages/core/ios-facade -name '*.swiftinterface' | sort)
+
+          if [ "$status" -ne 0 ]; then exit 1; fi
+          echo "✅ committed ios-facade declares the same API as the freshly built one"
+
+          # Informational: byte-level movement is expected across toolchains and
+          # is not a failure, but it is worth seeing in the log.
           if ! git diff --quiet -- packages/core/ios-facade; then
-            echo "::error::packages/core/ios-facade is STALE."
-            echo "Either the iOS Swift source changed without regenerating the facade —"
-            echo "run packages/core/scripts/build-ios-xcframework.sh and commit"
-            echo "packages/core/ios-facade/ — or this runner's Xcode differs from the one"
-            echo "that generated the committed copy. .swiftinterface is compiler-generated,"
-            echo "so a toolchain bump alone can move it. Compare the versions printed above"
-            echo "against the diff before assuming a source drift."
+            echo "note: byte-level differences below are compiler metadata (toolchain drift), not API changes."
             git --no-pager diff --stat -- packages/core/ios-facade
-            exit 1
           fi
-          echo "✅ ios-facade matches the current iOS Swift source"
 
       - name: Verify facade interface is C++-clean
         run: |
