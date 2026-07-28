@@ -32,3 +32,7 @@ packages/core/ios-xcframework/BridgeKitXCFramework.xcworkspace/
 # local agent config
 .atl/
 .claude/
+
+# SwiftPM (packages/core/Package.swift is the test-only manifest)
+.build/
+**/.build/
