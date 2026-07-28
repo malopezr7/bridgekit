@@ -202,15 +202,15 @@ jobs:
       - name: Run Swift compiler harness
         run: pnpm --filter @malopezr7/bridgekit-cli exec jest --config ./jest.config.cjs compile-swift.test.ts
 
-      # Two seconds of swiftc, and the only thing in CI that compiles the iOS
-      # runtime. While nothing did, two blocking errors sat on main for 23 days:
+      # Compiles the iOS runtime against the actual iOS SDK. Nothing in CI did
+      # this before, which is how two blocking errors sat on main for 23 days:
       # Router.isFinalClosed had never compiled in its life.
       #
       # The engine is pure Swift — only AnyMapCodec and ios/nitro/* import
-      # NitroModules — so it typechecks standalone against the iOS SDK with no
-      # pods, no Xcode project and no React Native. Those four files are covered
-      # by the full archive in ios-facade.yml.
-      - name: Typecheck iOS engine
+      # NitroModules — so it typechecks standalone with no pods, no Xcode project
+      # and no React Native. Those four files are covered by the full archive in
+      # ios-facade.yml.
+      - name: Typecheck iOS engine against the iOS SDK
         run: |
           set -euo pipefail
           files="$(find packages/core/ios -name '*.swift' \
@@ -221,3 +221,10 @@ jobs:
             -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
             -target arm64-apple-ios15.1-simulator \
             $files
+
+      # The engine is Foundation-only, so its XCTests run natively on the host —
+      # no simulator boot. packages/core/Package.swift is a test-only manifest;
+      # distribution is still the podspec.
+      - name: Run iOS engine tests
+        working-directory: packages/core
+        run: swift test
