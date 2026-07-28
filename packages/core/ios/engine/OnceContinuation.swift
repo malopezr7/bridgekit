@@ -25,21 +25,31 @@ internal final class OnceContinuation<T> {
     }
 
     /// Resume the continuation with a value (at most once). Subsequent calls are no-ops.
-    internal func resume(returning value: T) {
+    ///
+    /// - Returns: `true` if this call is the one that resumed. Racing callers use
+    ///   it to decide who owns the follow-up work (cancelling the loser, emitting
+    ///   diagnostics) without a second, racy `isConsumed` check.
+    @discardableResult
+    internal func resume(returning value: T) -> Bool {
         lock.lock()
-        guard let cont = continuation else { lock.unlock(); return }
+        guard let cont = continuation else { lock.unlock(); return false }
         continuation = nil
         lock.unlock()
         cont.resume(returning: value)
+        return true
     }
 
     /// Resume the continuation with an error (at most once). Subsequent calls are no-ops.
-    internal func resume(throwing error: Error) {
+    ///
+    /// - Returns: `true` if this call is the one that resumed.
+    @discardableResult
+    internal func resume(throwing error: Error) -> Bool {
         lock.lock()
-        guard let cont = continuation else { lock.unlock(); return }
+        guard let cont = continuation else { lock.unlock(); return false }
         continuation = nil
         lock.unlock()
         cont.resume(throwing: error)
+        return true
     }
 
     /// True if this continuation has already been resumed.

@@ -199,20 +199,68 @@ internal final class OutboundCallerImpl: OutboundCaller {
 
 // MARK: - withBridgeTimeout
 
+/// Holds the two racing tasks so each can cancel the other once the race is
+/// settled. Separate from the continuation so neither task has to capture the
+/// other before it exists.
+private final class BridgeTimeoutRace {
+    private let lock = NSLock()
+    private var work: Task<Void, Never>?
+    private var timeout: Task<Void, Never>?
+
+    func setWork(_ task: Task<Void, Never>) { lock.lock(); work = task; lock.unlock() }
+    func setTimeout(_ task: Task<Void, Never>) { lock.lock(); timeout = task; lock.unlock() }
+
+    func cancelWork() { lock.lock(); let t = work; lock.unlock(); t?.cancel() }
+    func cancelTimeout() { lock.lock(); let t = timeout; lock.unlock(); t?.cancel() }
+}
+
 /// Run an async closure with a timeout.
+///
+/// Deliberately unstructured. The previous implementation raced the operation
+/// against a sleeping child inside `withThrowingTaskGroup`, which could never
+/// actually time out: `try await group.next()!` propagates the timeout child's
+/// error, so the following `group.cancelAll()` never ran — and, more
+/// fundamentally, a task group awaits its remaining children as it unwinds. A
+/// bridge call parked on a continuation waiting for a JS reply that never comes
+/// does not observe cancellation, so the group waited on it forever and the
+/// caller hung instead of receiving TIMEOUT.
+///
+/// Racing two detached tasks through a single-resume continuation lets the
+/// timeout resume the caller immediately. The abandoned operation is cancelled
+/// best-effort: cancellation-aware work stops, and work that ignores
+/// cancellation is simply no longer awaited.
 internal func withBridgeTimeout<T>(
     nanoseconds: UInt64,
     operation: @escaping () async throws -> T
 ) async throws -> T {
-    return try await withThrowingTaskGroup(of: T.self) { group in
-        group.addTask { try await operation() }
-        group.addTask {
-            try await Task.sleep(nanoseconds: nanoseconds)
-            throw BridgeKitError(code: "TIMEOUT", message: "Call timed out", contractId: nil)
-        }
-        let result = try await group.next()!
-        group.cancelAll()
-        return result
+    let race = BridgeTimeoutRace()
+
+    return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T, Error>) in
+        let once = OnceContinuation(continuation)
+
+        race.setWork(
+            Task {
+                do {
+                    if once.resume(returning: try await operation()) { race.cancelTimeout() }
+                } catch {
+                    if once.resume(throwing: error) { race.cancelTimeout() }
+                }
+            }
+        )
+
+        race.setTimeout(
+            Task {
+                do {
+                    try await Task.sleep(nanoseconds: nanoseconds)
+                } catch {
+                    return  // the operation won and cancelled this sleep
+                }
+                let timedOut = once.resume(
+                    throwing: BridgeKitError(code: "TIMEOUT", message: "Call timed out", contractId: nil)
+                )
+                if timedOut { race.cancelWork() }
+            }
+        )
     }
 }
 
