@@ -88,20 +88,30 @@ final class HybridBridgeHost: HybridBridgeHostSpec {
                     }
                 }
             },
+            // These three carry no terminal, so there is nothing to substitute —
+            // but a dropped event was previously invisible. Report it instead of
+            // failing silently; iOS still has no diagnostics module, so
+            // SeamEncoding.reportFailure is the single place to redirect once it
+            // does.
             onStreamOpen: { envMap in
-                // try? drops the event on decode failure — no error path in these callbacks.
-                if let nitroEnv = try? AnyMapCodec.toAnyMap(envMap) {
-                    onStreamOpen(nitroEnv)
+                do {
+                    onStreamOpen(try AnyMapCodec.toAnyMap(envMap))
+                } catch {
+                    SeamEncoding.reportFailure(context: "stream open", error: error)
                 }
             },
             onStreamClose: { envMap in
-                if let nitroEnv = try? AnyMapCodec.toAnyMap(envMap) {
-                    onStreamClose(nitroEnv)
+                do {
+                    onStreamClose(try AnyMapCodec.toAnyMap(envMap))
+                } catch {
+                    SeamEncoding.reportFailure(context: "stream close", error: error)
                 }
             },
             onStateWrite: { envMap in
-                if let nitroEnv = try? AnyMapCodec.toAnyMap(envMap) {
-                    onStateWrite(nitroEnv)
+                do {
+                    onStateWrite(try AnyMapCodec.toAnyMap(envMap))
+                } catch {
+                    SeamEncoding.reportFailure(context: "state write", error: error)
                 }
             }
         )
