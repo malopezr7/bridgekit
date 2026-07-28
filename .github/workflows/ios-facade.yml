@@ -17,8 +17,24 @@ name: iOS Facade
 # inputs (Podfile, Podfile.lock, umbrella header, build host, privacy manifest)
 # are committed now, so this runs on PRs that touch anything the facade is built
 # from.
-# Path lists are duplicated deliberately: GitHub Actions does not support YAML
-# anchors, and a workflow that silently fails to parse is a gate that never runs.
+# DELIBERATELY NOT ON PULL REQUESTS.
+#
+# This job archives React Native twice under library-evolution to produce a
+# framework whose public interface is 126 lines of pure Swift. It takes ~30
+# minutes. Putting that on every iOS pull request would make contributing
+# miserable, which is the opposite of what BridgeKit exists for.
+#
+# The two failure modes it protects against are already covered on PRs, cheaply,
+# by the `swift` job in ci-baseline.yml:
+#   - "does packages/core/ios compile?"  -> swiftc -typecheck of the engine (~2s)
+#   - "is the committed facade stale?"   -> compile-swift.test.ts typechecks
+#     generated Swift against packages/core/ios-facade (~48s), which is precisely
+#     how the S5 facade skew was caught.
+#
+# What only the full archive can prove — that the xcframework links, that the
+# plain-Swift SPM binaryTarget consumer builds, and that the regenerated facade
+# is byte-identical — is checked where it actually matters: on main, on release
+# tags, and on demand.
 on:
   push:
     branches: [main]
@@ -33,18 +49,9 @@ on:
       - 'packages/core/scripts/create-ios-xcframework-project.rb'
       - 'packages/core/scripts/patch-nitrogen-namespaces.js'
       - '.github/workflows/ios-facade.yml'
-  pull_request:
-    paths:
-      - 'packages/core/ios/**'
-      - 'packages/core/ios-facade/**'
-      - 'packages/core/ios-xcframework/**'
-      - 'packages/core/nitrogen/generated/ios/**'
-      - 'packages/core/nitro.json'
-      - 'packages/core/BridgeKit.podspec'
-      - 'packages/core/scripts/build-ios-xcframework.sh'
-      - 'packages/core/scripts/create-ios-xcframework-project.rb'
-      - 'packages/core/scripts/patch-nitrogen-namespaces.js'
-      - '.github/workflows/ios-facade.yml'
+  # release.yml calls this before publishing, so a release can never ship an
+  # unverified facade even though tags do not trigger it directly.
+  workflow_call:
   workflow_dispatch:
 
 concurrency:
