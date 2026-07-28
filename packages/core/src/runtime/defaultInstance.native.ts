@@ -10,7 +10,7 @@ import { NitroBridgeTransport } from './nitroTransport';
 
 const REGISTRY_SYMBOL = Symbol.for('com.bridgekit.registry');
 // Must match the version in packages/core/package.json.
-const PACKAGE_VERSION = '0.0.1-beta.2';
+const PACKAGE_VERSION = '0.1.0-alpha.1';
 
 interface GlobalRegistry {
   instance: BridgeKitJs;
