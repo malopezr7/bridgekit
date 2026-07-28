@@ -17,10 +17,12 @@ name: iOS Facade
 # inputs (Podfile, Podfile.lock, umbrella header, build host, privacy manifest)
 # are committed now, so this runs on PRs that touch anything the facade is built
 # from.
+# Path lists are duplicated deliberately: GitHub Actions does not support YAML
+# anchors, and a workflow that silently fails to parse is a gate that never runs.
 on:
   push:
     branches: [main]
-    paths: &ios_paths
+    paths:
       - 'packages/core/ios/**'
       - 'packages/core/ios-facade/**'
       - 'packages/core/ios-xcframework/**'
@@ -32,7 +34,17 @@ on:
       - 'packages/core/scripts/patch-nitrogen-namespaces.js'
       - '.github/workflows/ios-facade.yml'
   pull_request:
-    paths: *ios_paths
+    paths:
+      - 'packages/core/ios/**'
+      - 'packages/core/ios-facade/**'
+      - 'packages/core/ios-xcframework/**'
+      - 'packages/core/nitrogen/generated/ios/**'
+      - 'packages/core/nitro.json'
+      - 'packages/core/BridgeKit.podspec'
+      - 'packages/core/scripts/build-ios-xcframework.sh'
+      - 'packages/core/scripts/create-ios-xcframework-project.rb'
+      - 'packages/core/scripts/patch-nitrogen-namespaces.js'
+      - '.github/workflows/ios-facade.yml'
   workflow_dispatch:
 
 concurrency:
