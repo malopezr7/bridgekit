@@ -32,10 +32,16 @@ final class HybridBridgeState: HybridBridgeStateSpec {
     func observe(env: AnyMap, onChange: @escaping (_ value: AnyMap) -> Void) throws -> String {
         return BridgeKitNative.shared.delegate.stateObserve(
             env: AnyMapCodec.fromAnyMap(env),
+            // A state notification has no terminal to substitute, and dropping it
+            // silently leaves the consumer on a stale value with no signal. There
+            // is no error channel here, so report it: iOS has no diagnostics
+            // module yet, and SeamEncoding.reportFailure is the single place to
+            // redirect once it does.
             onChange: { valueMap in
-                // try? drops the notification on decode failure — Nitro callback closures are non-throwing.
-                if let nitroValue = try? AnyMapCodec.toAnyMap(valueMap) {
-                    onChange(nitroValue)
+                do {
+                    onChange(try AnyMapCodec.toAnyMap(valueMap))
+                } catch {
+                    SeamEncoding.reportFailure(context: "state change", error: error)
                 }
             }
         )

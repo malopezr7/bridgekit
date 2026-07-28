@@ -25,17 +25,41 @@ final class HybridBridgeStreams: HybridBridgeStreamsSpec {
         onNext: @escaping (_ value: AnyMap) -> Void,
         onEnd: @escaping (_ end: AnyMap) -> Void
     ) throws -> String {
+        // Nitro's callback closures are non-throwing, so an encoding failure
+        // cannot propagate. It must not be dropped either: a discarded value
+        // becomes a silent gap in the consumer's data, and a discarded terminal
+        // leaves the consumer waiting on a stream that already ended.
+        let terminal = SeamTerminalGuard()
+
+        /// Emit the substitute terminal, if this path won the race to end the stream.
+        func endWithEncodingFailure(context: String, error: Error) {
+            SeamEncoding.reportFailure(context: context, error: error)
+            guard terminal.claim() else { return }
+            guard let fallback = try? AnyMapCodec.toAnyMap(
+                SeamEncoding.failureTerminal(context: context, error: error)
+            ) else { return }
+            onEnd(fallback)
+        }
+
         return BridgeKitNative.shared.delegate.openStream(
             env: AnyMapCodec.fromAnyMap(env),
             onNext: { valueMap in
-                // try? drops the event on decode failure — non-throwing closure contract.
-                if let nitroValue = try? AnyMapCodec.toAnyMap(valueMap) {
-                    onNext(nitroValue)
+                guard !terminal.isTerminated else { return }
+                do {
+                    onNext(try AnyMapCodec.toAnyMap(valueMap))
+                } catch {
+                    // Terminating beats a silent gap: the consumer learns the
+                    // stream is broken instead of quietly missing a value.
+                    endWithEncodingFailure(context: "stream value", error: error)
                 }
             },
             onEnd: { endMap in
-                if let nitroEnd = try? AnyMapCodec.toAnyMap(endMap) {
+                do {
+                    let nitroEnd = try AnyMapCodec.toAnyMap(endMap)
+                    guard terminal.claim() else { return }
                     onEnd(nitroEnd)
+                } catch {
+                    endWithEncodingFailure(context: "stream end", error: error)
                 }
             }
         )
