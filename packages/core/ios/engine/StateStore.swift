@@ -244,9 +244,11 @@ internal final class StateStore {
         stateKey: String,
         initial: Any?
     ) -> AsyncStream<BridgeValue<Any?>> {
+        let storeKey = StoreKey(contractId: contractId, stateKey: stateKey, scopeKey: scope.serialized())
+
         return AsyncStream<BridgeValue<Any?>> { continuation in
             self.lock.lock()
-            let current = self.states[StoreKey(contractId: contractId, stateKey: stateKey, scopeKey: scope.serialized())] ?? .initial(initial)
+            let current = self.states[storeKey] ?? .initial(initial)
             continuation.yield(current)
 
             self.obsCounter += 1
@@ -258,9 +260,21 @@ internal final class StateStore {
                 onChange: { env in
                     if let v = env["v"] {
                         continuation.yield(.available(v))
-                    } else {
-                        continuation.yield(.unprovided(nil))
+                        return
                     }
+                    // A notification without "v" means the provider went away or is
+                    // being swapped. Read the authoritative entry rather than
+                    // synthesising one: the store already tracks
+                    // `.replacing(lastKnown)` and `.unprovided(lastKnown)`, and
+                    // collapsing both to `.unprovided(nil)` here discarded
+                    // lastKnown on every swap and made `.replacing` unobservable —
+                    // while Android surfaces the live StateFlow holding
+                    // Replacing(lastKnown). The lock is recursive and notifications
+                    // are dispatched outside it, so this is safe on both paths.
+                    self.lock.lock()
+                    let authoritative = self.states[storeKey] ?? .unprovided(nil)
+                    self.lock.unlock()
+                    continuation.yield(authoritative)
                 },
                 epoch: Int64.max  // never pruned by clearObserversForEpoch
             )
