@@ -59,28 +59,46 @@ class DiscoveryTest {
         assertTrue(bridgeKit.isProvided(defn, Scope.Global))
     }
 
-    // ---- main thread guard test -----------------------------------------------
+    // ---- main thread -----------------------------------------------------------
 
+    /**
+     * This test used to assert the opposite, pinning RT-AND-09 in place: `invoke`
+     * threw `IllegalStateException` whenever the caller was on the main thread.
+     *
+     * `invoke` is a suspend function, so running it on `Dispatchers.Main` yields
+     * the thread rather than blocking it and cannot cause an ANR. The guard's only
+     * real effect was to reject `lifecycleScope.launch { client.foo() }`, the
+     * canonical Android call site. See MainThreadChecker for the full reasoning.
+     *
+     * The remaining behavioural coverage lives in MainThreadGuardTest.
+     */
     @Test
-    fun `OutboundCallerImpl throws on main thread invoke`() {
-        val router = Router(StateStore(), ParkBuffer())
+    fun `OutboundCallerImpl does not reject invoke from the main thread`() {
+        val router = Router(StateStore(), ParkBuffer(), readinessTimeoutMs = 50, callTimeoutMs = 50)
         val caller = OutboundCallerImpl(
             contractId = "test.c",
             scope = Scope.Global,
             router = router,
             mainThreadChecker = MainThreadChecker { true }, // fake main thread
+            readinessTimeoutMs = 50,
+            callTimeoutMs = 50,
         )
 
-        var thrown: Exception? = null
+        var thrown: Throwable? = null
         kotlinx.coroutines.runBlocking {
             try {
                 caller.invoke("method", null)
-            } catch (e: IllegalStateException) {
+            } catch (e: Throwable) {
                 thrown = e
             }
         }
-        assertNotNull("Expected IllegalStateException from main thread guard", thrown)
-        assertTrue(thrown!!.message!!.contains("main thread"))
+
+        // No dispatcher is connected, so this still fails — but on readiness,
+        // not on which thread the caller happened to be using.
+        assertTrue(
+            "invoke was rejected for running on the main thread: $thrown",
+            thrown !is IllegalStateException,
+        )
     }
 
     // ---- helpers ---------------------------------------------------------------
