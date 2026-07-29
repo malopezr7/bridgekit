@@ -136,7 +136,7 @@
     "exclude": "{**/tests/**,**/__tests__/**,**/__typechecks__/**,**/*.stories.*}"
   },
   "devDependencies": {
-    "@babel/core": "7.28.3",
+    "@babel/core": "7.29.6",
     "@babel/preset-env": "7.28.3",
     "@babel/runtime": "7.28.3",
     "@biomejs/biome": "2.5.2",
