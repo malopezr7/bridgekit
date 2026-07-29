@@ -253,6 +253,12 @@ internal class Router(
             payload = payload,
             streamEpoch = streamEpoch,
             streamId = streamId,
+            // The JS side already puts these on the open envelope for `latestOnly` /
+            // `sticky` stream descriptors, and StreamHub already turns them into
+            // replay = 1. The Router simply never read them, so the flag was
+            // declarable in a contract and silently inert end to end.
+            latestOnly = env["latestOnly"] as? Boolean ?: false,
+            sticky = env["sticky"] as? Boolean ?: false,
             onNext = onNext,
             onEnd = { endEnv ->
                 streamPumpJobs.remove(streamId)
