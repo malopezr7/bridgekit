@@ -57,10 +57,11 @@ t.stream(T, { params: t.object({ ... }), latestOnly: true, sticky: true })
 | `useBridgeState(C, key)` | `{ value, status }` |
 | `useBridgeReady(C)` | reactive readiness gate |
 | `useProvideBridge(C, impl)` | provide from JS, auto-unregister |
-| `bridge(C)` / `provideBridge(C, impl)` | imperative forms |
+| `getDefaultBridgeKit()` | the singleton instance |
+| `bk.bridge(C, opts?)` / `bk.provide(C, impl, opts?)` | imperative forms, off the singleton |
+| `binding.close(reason?)` / `binding.setState(key, v)` | handle returned by `bk.provide` |
 | `streamSource((emit, end) => teardown)` | JS-provided stream source |
 | `isBridgeError(e, code?)` | duck-typed error check |
-| `getDefaultBridgeKit()` | the singleton instance |
 | `BridgeScopeProvider` | ambient feature/instance scope |
 | Marker hook: `C()`, `C(sel)`, `C.getState()`, `C.scoped(s)`, `C.useProvide(impl)` | Zustand-style |
 
@@ -72,11 +73,10 @@ t.stream(T, { params: t.object({ ... }), latestOnly: true, sticky: true })
 | `provide(Contract, scope?) { impl }` | register a lazy provider |
 | `consume(Contract)` | typed proxy (suspend, readiness-bounded) |
 | `tryConsume(C)` / `isProvided(C)` / `awaitProvided(C, t)` | non-suspending alternatives |
-| `binding.close()` | handle-scoped close |
-| `binding.setState(key, v)` | push JS-owned state (reverse direction) |
-| `BridgeKit.initialize(host)` | ServiceLoader discovery |
-| `BridgeKit.dump()` | live snapshot |
-| `BridgeValue<T>` | `Available` / `Initial` / `Unprovided` |
+| `binding.close(reason?)` | handle-scoped close (defaults to `CloseReason.Final`) |
+| `BridgeKit.default.initialize(host)` | ServiceLoader discovery |
+| `BridgeKit.default.dump()` | live snapshot |
+| `BridgeValue<T>` | `Available` / `Initial` / `Replacing` / `Unprovided` |
 | `OutboundCaller` | the frozen native→JS engine interface |
 
 ## Swift API
@@ -87,15 +87,15 @@ t.stream(T, { params: t.object({ ... }), latestOnly: true, sticky: true })
 | `provide(Contract(), scope:) { impl }` | register a provider; returns a `Binding` |
 | `consume(Contract(), scope:)` | typed consumer proxy (native→JS) |
 | `isProvided(C())` / `awaitProvided(C(), timeoutMs:)` | readiness checks |
-| `binding.close()` | de-register the provider |
-| `binding.setState(key, v)` | push JS-owned state (reverse direction) |
+| `binding.close(reason:)` / `binding.close()` | de-register the provider |
 | `BridgeValue<T>` | `.available` / `.initial` / `.replacing` / `.unprovided` |
 | `AsyncStream<T>` | stream values and native-owned state getters |
 | `BridgeKitRuntime.default.dump()` | live snapshot |
 
-Import surface: `import BridgeKit` (runtime types) + `import BridgeKitContracts` (generated types).
-Default scope is `.global`; also `.feature(name)` and `.instance(feature:tag:)`. See
-[Swift: provide & consume](/usage/swift/).
+Import surface: `import BridgeKit`. The generated Swift files declare the contract objects,
+provider protocols and structs directly in your app target — there is no separate generated
+module to import. Default scope is `.global`; also `.feature(name)` and
+`.instance(feature:tag:)`. See [Swift: provide & consume](/usage/swift/).
 
 ## CLI
 

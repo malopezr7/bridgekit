@@ -73,7 +73,6 @@ code before the React Native bridge initializes — typically in
 
 ```swift
 import BridgeKit
-import BridgeKitContracts
 
 // In AppDelegate, before the bridge starts:
 _ = BridgeKitRuntime.default.provide(ExampleHostContract()) { ExampleHostImpl() }
@@ -81,4 +80,4 @@ _ = BridgeKitRuntime.default.provide(ExampleHostContract()) { ExampleHostImpl() 
 
 Feature-scoped providers are registered when the feature surface appears and closed when it
 disappears. See [Swift: provide & consume](/usage/swift/) for the full API and scope
-options, and [Installation](/start/installation/) for xcframework setup.
+options, and [Installation](/start/installation/) for the iOS target setup.

@@ -16,7 +16,7 @@ toolchain. Both sides fake cleanly.
 test touches.
 
 ```ts
-import { mockBridge } from '@malopezr7/bridgekit/testing';
+import { mockBridge } from '@malopezr7/bridgekit/test';
 
 const mock = mockBridge(AppHost, {
   isLoggedIn: async () => true,
@@ -30,12 +30,12 @@ transport** — JS provides *and* JS consumes, with no native side. Feature logi
 streams and state, runs in plain Jest.
 
 ```ts
-import { createTestBridge } from '@malopezr7/bridgekit/testing';
+import { createTestBridge } from '@malopezr7/bridgekit/test';
 
 const { bridgekit } = createTestBridge();
 
-bridgekit.provide(AppHostContract, { isLoggedIn: async () => true });
-const app = bridgekit.consume(AppHost);
+bridgekit.provide(AppHost, { isLoggedIn: async () => true });
+const app = bridgekit.bridge(AppHost);
 
 expect(await app.isLoggedIn()).toBe(true);
 ```
@@ -60,19 +60,10 @@ val fake = object : AppHost {
 }
 ```
 
-## Kotlin: isolate with a test transport
-
-`BridgeKit(testTransport)` creates an isolated instance. `TestBridgeTransport` drives
-invoke / stream / state **without JSI**, so router and store logic are unit-testable on the
-JVM.
-
-```kotlin
-val bridgekit = BridgeKit(TestBridgeTransport())
-bridgekit.provide(AppHostContract) { fake }
-
-val client = bridgekit.consume(AppHostContract)
-assertTrue(client.isLoggedIn())
-```
+Drive the unit under test directly against that fake. `BridgeKit`'s own constructor is
+`internal`, so there is no public way to build an isolated instance for a test — the shared
+`BridgeKit.default` is the only instance a consumer app can reach. Test your provider logic
+against the interface, not through the runtime.
 
 ## Swift: fake the generated protocol
 

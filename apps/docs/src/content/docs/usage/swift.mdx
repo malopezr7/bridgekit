@@ -14,19 +14,19 @@ The Swift API mirrors the Kotlin one. Every entry point goes through `BridgeKitR
 
 ```swift
 import BridgeKit        // runtime: BridgeKitRuntime, Binding, BridgeValue, Scope, BridgeKitError
-import BridgeKitContracts   // generated types: contract objects, provider protocols, structs
 ```
 
-App code never imports `NitroModules`. The C++ seam is hidden inside the `BridgeKit.xcframework`
-binary; the `BridgeKit` and `BridgeKitContracts` modules expose a pure-Swift interface. See
-[Installation](/start/installation/) for how to add the xcframework to your project.
+That is the whole import surface. The generated contract objects, provider protocols and
+structs are emitted with no access modifier, so they compile directly into your own target —
+there is no second module to import. App code never imports `NitroModules`. See
+[Installation](/start/installation/) for the target settings this requires.
 
 ## Provide a contract
 
 Implement the generated protocol, then register a factory:
 
 ```swift
-import BridgeKitContracts
+import BridgeKit
 
 final class MyExampleHostImpl: ExampleHost {
     func getCountryAndLanguage() throws -> GetCountryAndLanguageResult {
@@ -50,8 +50,9 @@ final class MyExampleHostImpl: ExampleHost {
 let binding = BridgeKitRuntime.default.provide(ExampleHostContract()) { MyExampleHostImpl() }
 ```
 
-- The factory is **lazy** — invoked on first resolution.
-- Pass `scope: .global` (default), `.feature(name:)`, or `.instance(feature:tag:)` to scope
+- The factory is invoked **immediately**, at `provide` time. (Kotlin's `provide` takes an
+  `eager` flag defaulting to lazy; the Swift one has no such parameter.)
+- Pass `scope: .global` (default), `.feature("name")`, or `.instance(feature:tag:)` to scope
   the binding.
 - `binding.close()` de-registers the provider and signals `Unprovided` to any active consumers.
 - There is no `ServiceLoader` on iOS. Providers must be registered explicitly — typically in
@@ -64,7 +65,6 @@ let binding = BridgeKitRuntime.default.provide(ExampleHostContract()) { MyExampl
 
 ```swift
 import BridgeKit
-import BridgeKitContracts
 
 let client: any ExampleHostClient = BridgeKitRuntime.default.consume(ExampleHostContract())
 

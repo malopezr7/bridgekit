@@ -94,14 +94,15 @@ hydrate immediately. Full detail: **[Scopes, bindings & epochs](/directionality/
 
 ## iOS packaging
 
-The iOS runtime ships as a single **`BridgeKit.xcframework`** binary. All Swift modules
-(`BridgeKit`, `BridgeKitContracts`, `BridgeKit`, and others) are statically linked in. Consumers
-import `BridgeKit` and `BridgeKitContracts` via synthetic thin framework aliases whose
-`.swiftinterface` files expose a pure-Swift public API without exposing Nitro/C++ headers.
+The iOS runtime ships as source in the npm package and is compiled by CocoaPods. A single
+podspec (`BridgeKit.podspec`) at the package root is resolved by React Native autolinking, so
+consumers add nothing to their `Podfile`. App code imports one module, `BridgeKit`; the
+generated contract files compile into the app target itself.
 
-This packaging step runs once (`make all` in `platforms/ios/Makefile`); the resulting
-xcframework is what app targets link against. See [Installation](/start/installation/) for
-setup instructions.
+Because the pod builds the Nitro-backed Swift sources directly, the C++ seam is visible at the
+target boundary: the consuming target sets `SWIFT_OBJC_INTEROP_MODE = objcxx`, adds the
+NitroModules private headers to `HEADER_SEARCH_PATHS`, and links with `-ObjC -lc++`. See
+[Installation](/start/installation/) for the exact values.
 
 ## The wire protocol + epoch model are shared
 
