@@ -340,12 +340,21 @@ internal final class Router {
 
         let adapter = binding.adapter
 
+        // The JS side already puts these on the open envelope for `latestOnly` /
+        // `sticky` stream descriptors, and StreamHub already implements the
+        // replay they ask for. The Router simply never read them, so the flag
+        // was declarable in a contract and silently inert end to end.
+        let latestOnly = env["latestOnly"] as? Bool ?? false
+        let sticky = env["sticky"] as? Bool ?? false
+
         let consumerTask = streamHub.attach(
             contractId: contractId,
             member: member,
             scope: scope,
             paramsHash: pHash,
             openStream: { adapter.openStream(member: member, payload: payload) },
+            latestOnly: latestOnly,
+            sticky: sticky,
             onNext: onNext,
             onEnd: { [weak self] endEnv in
                 self?.lock.lock()

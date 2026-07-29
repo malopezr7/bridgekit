@@ -10,14 +10,18 @@ import Foundation
 // MARK: - CloseReason
 
 /// Reason a binding was closed.
+///
+/// NOTE: `replacing` does NOT currently hold in-flight invokes. A
+/// `replacingGraceMs = 1500` constant used to be declared here and was never
+/// read by anything — the documented parking behaviour does not exist on either
+/// platform. Mirrored state DOES get a grace window (`StateStore.replacingGraceMs`,
+/// 250ms), which is implemented and tested; that is a different mechanism.
+/// Tracked in KNOWN_ISSUES.md rather than advertised by a dead constant.
 public enum CloseReason {
-    /// Binding is being replaced; a grace window holds in-flight calls.
+    /// Binding is being replaced. In-flight invokes are not parked today.
     case replacing
     /// Binding is permanently closed; all pending calls fail immediately.
     case final_
-
-    /// Grace window for Replacing close (ms).
-    public static let replacingGraceMs: Int64 = 1500
 }
 
 // MARK: - Binding protocol
