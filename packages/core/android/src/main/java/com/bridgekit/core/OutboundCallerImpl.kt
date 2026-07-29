@@ -59,13 +59,10 @@ internal class OutboundCallerImpl(
     }
 
     override suspend fun invoke(member: String, payload: Map<String, Any?>?): Any? {
-        // Main-thread guard
-        if (mainThreadChecker.isMainThread()) {
-            throw IllegalStateException(
-                "BridgeKit: suspend consume() call on the main thread for contract '$contractId'." +
-                    " This will cause an ANR. Use a coroutine or launch from a background thread.",
-            )
-        }
+        // No main-thread guard here on purpose: see MainThreadChecker. This is a
+        // suspend function, so running it on Dispatchers.Main yields the thread
+        // rather than blocking it. Guarding it rejected the canonical
+        // `lifecycleScope.launch { client.foo() }` call site outright.
 
         // Wait for JS dispatcher to be available
         val callbacks = awaitDispatcher()
@@ -167,12 +164,8 @@ internal class OutboundCallerImpl(
         val immediate = router.getJsCallbacks()
         if (immediate != null) return immediate
 
-        if (mainThreadChecker.isMainThread()) {
-            throw IllegalStateException(
-                "BridgeKit: waiting for JS dispatcher on the main thread for contract '$contractId'." +
-                    " This will cause an ANR.",
-            )
-        }
+        // No main-thread guard here either: the park below is withTimeout + delay,
+        // which suspends rather than blocking. See MainThreadChecker.
 
         // Park until dispatcher or timeout
         return try {
