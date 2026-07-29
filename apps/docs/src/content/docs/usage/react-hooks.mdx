@@ -1,6 +1,6 @@
 ---
 title: React hooks
-description: useBridge, useBridgeState, useBridgeReady, useProvideBridge, the bridge() imperative API, and BridgeScopeProvider.
+description: useBridge, useBridgeState, useBridgeReady, useProvideBridge, the imperative getDefaultBridgeKit() API, and BridgeScopeProvider.
 sidebar:
   order: 1
 ---
@@ -11,12 +11,11 @@ The React surface is small and deliberately effect-free where it matters.
 
 ```ts
 import {
-  bridge,
-  provideBridge,
   useBridge,
   useProvideBridge,
   useBridgeState,
   useBridgeReady,
+  BridgeScopeProvider,
 } from '@malopezr7/bridgekit';
 ```
 
@@ -43,7 +42,7 @@ Subscribes to a state member and returns `{ value, status }`, backed by
 
 ```tsx
 const { value: net, status } = useBridgeState(AppHost, 'connectivity');
-// status: 'initial' | 'available' | 'unprovided'
+// status: 'initial' | 'provided' | 'stale' | 'unprovided'
 return <Banner offline={!net.online} stale={status === 'unprovided'} />;
 ```
 
@@ -68,17 +67,28 @@ useProvideBridge(InboxFeature, {
 });
 ```
 
-## Imperative `bridge()` / `provideBridge()`
+## Imperative use outside React
 
-Outside React (services, entry points, tests), use the imperative forms:
+There is no standalone `bridge()` / `provideBridge()` function. Outside React (services, entry
+points, module-load side effects), reach for the singleton and call the same two methods the
+hooks call internally:
 
 ```ts
-const app = bridge(AppHost);
+import { getDefaultBridgeKit } from '@malopezr7/bridgekit';
+
+const bk = getDefaultBridgeKit();
+
+const app = bk.bridge(AppHost);
 await app.isLoggedIn();
 
-const binding = provideBridge(InboxFeature, impl);
-binding.close();
+const binding = bk.provide(InboxFeature, impl);
+binding.close('final');
 ```
+
+`bk.provide(Contract, impl, opts?)` returns a `Binding` — `close(reason?)` de-registers it
+(`'final'` fails pending calls, `'replacing'` holds them for a grace window) and
+`setState(key, value)` pushes provider-owned state. Both methods take the same
+`{ scope }` option object as the hooks.
 
 ## `BridgeScopeProvider`
 

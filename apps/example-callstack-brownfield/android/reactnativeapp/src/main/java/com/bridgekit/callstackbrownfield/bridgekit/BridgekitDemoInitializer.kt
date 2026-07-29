@@ -23,7 +23,10 @@ import kotlinx.coroutines.launch
 
 private const val TAG = "BridgeKitDemo"
 private const val TAG_REVERSE = "BridgeKitReverse"
-private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+// Dispatchers.Main is fine: BridgeKit's suspend APIs yield the thread rather than
+// blocking it. This used to need Dispatchers.Default to dodge a main-thread guard
+// that rejected the canonical call site (RT-AND-09).
+private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
 /**
  * Initializes BridgeKit for the Callstack brownfield app.
@@ -50,10 +53,14 @@ object BridgekitDemoInitializer {
         }
         Log.i(TAG, "BridgeKit: DemoHost provided at Global scope")
 
-        // After a delay, consume the JS-provided demo-feature contract and call getGreeting.
+        // Consume the JS-provided demo-feature contract and call getGreeting.
         // Validates the JS-provides / native-consumes Async direction (cross-direction scenario).
         appScope.launch {
-            delay(15_000)
+            // Wait for JS to provide rather than guessing how long its bundle takes.
+            if (!bridgeKit.awaitProvided(BridgekitDemoFeatureContract, Scope.Global)) {
+                Log.e(TAG, "demo-feature was never provided by JS")
+                return@launch
+            }
             try {
                 val feature = bridgeKit.consume(BridgekitDemoFeatureContract, Scope.Global)
                 val result = feature.getGreeting(GetGreetingParams(name = "BridgeKit"))

@@ -47,14 +47,14 @@ See [Anatomy of generated Kotlin](/codegen/generated-kotlin/) for a full dissect
 
 Per contract, the generator writes one `<PascalName>Contract.swift` containing:
 
-- Shared object types (`public struct` with memberwise `init`)
-- `public protocol <ClassName>: AnyObject` — the provider protocol
-- `public protocol <ClassName>Client: AnyObject` — the consumer protocol
+- Shared object types (`struct` with the compiler's memberwise `init`)
+- `protocol <ClassName>: AnyObject` — the provider protocol
+- `protocol <ClassName>Client: AnyObject` — the consumer protocol
 - `class <ClassName>Contract: BridgeContractDefinition<any <ClassName>, any <ClassName>Client>` — `id`, `contractHash`, `memberHashes`, `inbound(_:)`, `outbound(_:)`
 
-The committed Swift file is post-processed by `sanitize-ios-public-module.py` to produce the
-clean public facade (explicit public modifiers, synthesized `init`s). See [Anatomy of
-generated Swift](/codegen/generated-swift/).
+Declarations carry no explicit access modifier, so they are `internal` — generated files are
+compiled as part of the target that owns them, not shipped as a separate module. See [Anatomy
+of generated Swift](/codegen/generated-swift/).
 
 </TabItem>
 </Tabs>
@@ -89,7 +89,7 @@ must pre-exist. See [Drift & cross-repo delivery](/codegen/drift/) for the full 
 ## Two loading strategies
 
 The CLI detects the authoring style and loads each accordingly — both produce the same
-serializable descriptor (`$type` tag + `descriptorVersion`, duck-typed, never `instanceof`).
+serializable descriptor (`$type` tag, duck-typed, never `instanceof`).
 
 #### Schema (`t.*`) contracts — imported
 

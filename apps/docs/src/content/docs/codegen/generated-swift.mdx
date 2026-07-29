@@ -171,15 +171,13 @@ both directions — the same file is used whether Swift provides or consumes.
 round-trip is not validated end-to-end — treat it as experimental until confirmed.
 </Aside>
 
-## The sanitize post-processing step
+## What you commit
 
-The raw `bridgekit generate --platform swift` output emits the `protocol`/`func`
-declarations shown above. The committed iOS file in `packages/core/ios/contracts/generated/`
-is post-processed by `sanitize-ios-public-module.py` after the xcframework build, which
-injects clean public modifiers and synthesizes the `.swiftinterface` for the
-`BridgeKitContracts` module.
+The `.swift` file `bridgekit generate --platform swift` writes is the final artifact — there
+is no post-processing step. Commit it and add it to your Xcode target's Compile Sources;
+Xcode does not glob a directory.
 
-This post-processing step runs **once during the xcframework build**, not on every codegen
-run. The generated `.swift` source file is what you commit; the sanitize script is part of
-the packaging pipeline. See [Installation](/start/installation/) for how the xcframework
-packaging works.
+Declarations carry no explicit access modifier, so they are `internal` to whichever target
+compiles them. That is deliberate: the generated code is part of your app, not a module you
+link against, which is why your own Swift only ever imports `BridgeKit`. See
+[Installation](/start/installation/) for the target settings this requires.

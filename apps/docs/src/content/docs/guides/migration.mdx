@@ -135,27 +135,24 @@ capability across owners:
 This coexistence is the point: a feature migrates the actions it owns onto a typed contract
 **without** a big-bang rewrite, leaving genuinely shared host actions where they belong.
 
-## The native end-state — pure SPM, no C++ in the app target
+## The native end-state
 
 On iOS the providers are wired in the host app:
 
 ```swift
+import BridgeKit
+
 // The feature's view controller provides the feature-owned contract
 bridgeKit.provide(FeatureHostContract(), scope: .feature("YourApp.Feature")) { FeatureHostImpl() }
 
-// App.swift provides the shared host contract globally
-@_implementationOnly import BridgeKit
-@_implementationOnly import BridgeKitContracts
-
+// AppDelegate provides the shared host contract globally
 hostBinding = bridgeKit.provide(ExampleHostContract(), scope: .global) { ExampleHostImpl() }
 ```
 
-The integration is **pure SPM** — the app consumes BridgeKit via a local `Package.swift`
-path, with **no CocoaPods** and **no C++ interop in the app target**. BridgeKit and
-BridgeKitContracts are imported as Swift-only facades through `@_implementationOnly import`, so the
-Nitro C++ seam never leaks into the app's module. (This is the target end-state; the
-standalone demo's CocoaPods harness isolation is a packaging detail you do **not** need here —
-see the [demo walkthrough](/guides/demo-walkthrough).)
+BridgeKit arrives through React Native autolinking as a CocoaPods dependency, and the app
+target opts into the Nitro C++ seam with three build settings — see
+[Installation](/start/installation/). The generated contract files compile into the app
+target itself, so `import BridgeKit` is the only import your code needs.
 
 From the device log:
 

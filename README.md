@@ -34,14 +34,27 @@ Kotlin **and** Swift bindings — interfaces, data classes, and codecs.
 
 ## Platform support
 
-| Platform | Status | Transport |
-| -------- | ------ | --------- |
-| Android  | ✅ | Nitro (Kotlin runtime) |
-| iOS      | ✅ | Nitro (Swift runtime) |
-| Web      | ✅ | In-memory loopback (tests) |
+| Platform | Status | Transport | Automated coverage |
+| -------- | ------ | --------- | ------------------ |
+| Android  | ✅ | Nitro (Kotlin runtime) | 158 unit tests, 130 executing |
+| iOS      | ✅ | Nitro (Swift runtime) | 50 engine tests + SDK typecheck |
+| Web      | ✅ | In-memory loopback (tests) | 559 tests |
 
-> **Beta.** The wire protocol is locked and the Android/iOS runtimes are at parity.
-> The public API may still change before `1.0`.
+> **Alpha.** The wire protocol is locked. The public API may still change before `1.0`.
+>
+> On parity: the two native runtimes implement the same contract model, and the
+> known behavioural divergences between them are closed and covered by tests —
+> invoke timeouts, state `replacing`/`lastKnown` delivery, seam encoding failures,
+> lock contention on sync providers, and Android's main-thread policy.
+>
+> They are not yet *identical*. iOS has no diagnostics module, 28 Android tests
+> remain quarantined behind two known StreamHub races, and the iOS engine's
+> locking strategy does not yet compile clean under the Swift 6 language mode.
+> These are tracked in `KNOWN_ISSUES.md`; none of them silently corrupt data.
+>
+> Every number in the table above is produced by CI on each pull request. Before
+> `0.1.0-alpha.1`, nothing in CI compiled the iOS runtime at all — so treat any
+> parity claim in an earlier `0.0.1-beta.x` release as unverified.
 
 ## Packages
 
