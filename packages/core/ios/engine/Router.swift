@@ -180,9 +180,6 @@ internal final class Router {
     // MARK: invokeSync
 
     func invokeSync(env: [String: Any?]) -> [String: Any?] {
-        lock.lock()
-        defer { lock.unlock() }
-
         guard let contractId = env["contractId"] as? String else {
             return Self.errEnv("CONTRACT_NOT_PROVIDED", "Missing contractId")
         }
@@ -192,7 +189,20 @@ internal final class Router {
         let scope = parseScopeEnv(env)
         let payload = extractPayload(env)
 
-        guard let binding = resolveBinding(contractId: contractId, scope: scope) else {
+        // Resolve under the lock, then release it before the provider runs.
+        //
+        // This used to be `lock.lock(); defer { lock.unlock() }` around the whole
+        // function, so the global engine lock was still held while the adapter
+        // executed arbitrary provider code. A slow or blocking sync provider
+        // froze the entire Router — no other invoke, stream open, state
+        // operation or binding change could proceed on any thread. Android takes
+        // no lock here at all, and invokeWithReadiness already follows exactly
+        // this resolve-then-release discipline; invokeSync was the outlier.
+        lock.lock()
+        let resolved = resolveBinding(contractId: contractId, scope: scope)
+        lock.unlock()
+
+        guard let binding = resolved else {
             return Self.errEnv(
                 "CONTRACT_NOT_PROVIDED",
                 "Contract '\(contractId)' not provided in scope \(scope.serialized())",
